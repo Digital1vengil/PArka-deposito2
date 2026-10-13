@@ -1,0 +1,9 @@
+.git
+.github
+node_modules
+tests
+src
+*.db
+.env
+__pycache__
+.pytest_cache

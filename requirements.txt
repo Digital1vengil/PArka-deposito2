@@ -1,0 +1,14 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+sqlalchemy>=2.0
+jinja2>=3.1
+python-multipart>=0.0.9
+itsdangerous>=2.1
+openpyxl>=3.1
+apscheduler>=3.10,<4
+tzdata>=2024.1
+psycopg[binary]>=3.1
+pypdf>=4
+reportlab>=4
+cryptography>=42
+qrcode>=7

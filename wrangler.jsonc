@@ -1,0 +1,34 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "parka-deposito",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": true,
+  "observability": { "enabled": true },
+
+  "containers": [
+    {
+      "class_name": "Deposito",
+      "image": "./Dockerfile",
+      "instance_type": "basic",   // 1/4 vCPU, 1 GiB de memoria
+      "max_instances": 1          // una sola: el scheduler interno no se duplica
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "DEPOSITO", "class_name": "Deposito" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Deposito"] }],
+
+  // Cada minuto de lun a vie entre 10 y 20 UTC (7 a 17 h de Buenos Aires); el código filtra 7:50–17:30
+  "triggers": { "crons": ["* 10-20 * * 1-5"] },
+
+  "vars": {
+    "ADMIN_NOMBRE": "Vengil",
+    "SESION_HORAS": "12",
+    "CIERRE_AUTOMATICO": "0",
+    "GEMINI_MODELO": "gemini-2.5-flash",
+    "PARKAHUB_URL": "https://parkahub.pages.dev"
+  }
+  // Secretos (no van acá): DATABASE_URL, SECRET_KEY, ADMIN_PIN y opcionales GEMINI_API_KEY,
+  // PARKAHUB_CLIENT_ID, PARKAHUB_CLIENT_SECRET, PARKA_URL_CELULAR. Ver LEEME-CLOUDFLARE.md
+}
