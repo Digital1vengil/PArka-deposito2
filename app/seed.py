@@ -110,11 +110,7 @@ def sembrar(db: Session) -> None:
     pick = next((s for s in secs if s.slug == "pick_odoo"), None)
     if pick and "recolector" not in (pick.roles or "").split(","):
         pick.roles = ",".join([r for r in (pick.roles or "").split(",") if r] + ["recolector"])
-    orden = {"despacho": 1, "devoluciones": 2, "conteo": 3, "ecommerce": 4, "cambios": 5, "mapeo": 6,
-             "tareas": 7, "articulos": 8, "pick_odoo": 9, "asistente": 10, "ml": 11}
-    for sec in db.scalars(select(Seccion)).all():  # versiones anteriores: reordenar
-        if sec.slug in orden and sec.orden in range(1, 12) and sec.orden != orden[sec.slug]:
-            sec.orden = orden[sec.slug]
+    # El orden de las secciones lo maneja el admin (Secciones → arrastrar). Ya no se reordena solo al arrancar.
     if not db.scalar(select(Usuario).where(Usuario.rol == "admin")):
         db.add(Usuario(nombre=ADMIN_NOMBRE, rol="admin", pin_hash=hash_pin(ADMIN_PIN)))
     db.commit()

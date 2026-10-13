@@ -35,7 +35,12 @@ def render(request, nombre: str, status_code: int = 200, **ctx):
         db = SessionLocal()
         try:
             ctx["acc"] = accesos_de(db, u)
+            if "orden_menu" not in ctx:
+                from sqlalchemy import select
+                from .models import Seccion
+                ctx["orden_menu"] = list(db.scalars(select(Seccion.slug).order_by(Seccion.orden, Seccion.id)))
         finally:
             db.close()
     ctx.setdefault("acc", set())
+    ctx.setdefault("orden_menu", [])
     return templates.TemplateResponse(request, nombre, ctx, status_code=status_code)
