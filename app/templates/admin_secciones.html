@@ -3,12 +3,29 @@
 {% block contenido %}
 <h1 class="text-2xl font-bold mb-2">🗂 Secciones</h1>
 <p class="text-sm text-zinc-500 mb-6">Los roles marcados reciben la sección <b>por defecto</b>. Para darle o sacarle una sección a una persona puntual, usá <a href="/admin/usuarios" class="underline text-violeta">Usuarios → Accesos</a>. Una sección inactiva aparece como "Próximamente".</p>
-<div class="flex flex-col gap-4">
+<div class="card p-4 mb-5">
+  <p class="font-bold mb-1">Orden en el inicio y en el menú</p>
+  <p class="text-xs text-zinc-500 mb-3">Arrastrá cada sección a donde la quieras (o usá ▲ ▼). Se guarda solo.</p>
+  <div id="orden-lista" class="flex flex-col gap-1.5">
+  {% for s in secciones %}
+    <div class="orden-fila" data-id="{{ s.id }}" draggable="true"
+         style="display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid #e4e4e7;border-radius:10px;background:#fff;cursor:grab;user-select:none">
+      <span style="color:#a1a1aa;font-size:18px;line-height:1">⠿</span>
+      <span class="orden-n" style="width:22px;text-align:right;color:#71717a;font-size:12px;font-weight:700">{{ loop.index }}</span>
+      <span style="font-size:18px">{{ s.icono }}</span>
+      <span style="flex:1;font-weight:600{{ ';color:#a1a1aa' if not s.activa }}">{{ s.nombre }}{{ ' (inactiva)' if not s.activa }}</span>
+      <button type="button" class="orden-btn" data-d="-1" style="border:1px solid #e4e4e7;border-radius:8px;padding:2px 10px;background:#fafafa">▲</button>
+      <button type="button" class="orden-btn" data-d="1" style="border:1px solid #e4e4e7;border-radius:8px;padding:2px 10px;background:#fafafa">▼</button>
+    </div>
+  {% endfor %}
+  </div>
+</div>
+<div id="secciones-forms" class="flex flex-col gap-4">
 {% for s in secciones %}
 <form class="card p-5 grid sm:grid-cols-6 gap-3 items-end" data-id="{{ s.id }}" onsubmit="event.preventDefault(); guardar(this);">
   <div><label class="lbl">Ícono</label><input name="icono" class="input text-2xl text-center" value="{{ s.icono }}"></div>
   <div class="sm:col-span-2"><label class="lbl">Nombre</label><input name="nombre" class="input" value="{{ s.nombre }}"></div>
-  <div><label class="lbl">Orden</label><input name="orden" type="number" class="input" value="{{ s.orden }}"></div>
+  <div><label class="lbl">Orden</label><input name="orden" type="number" class="input" value="{{ s.orden }}" readonly title="Se cambia arrastrando arriba" style="background:#f4f4f5"></div>
   <div class="flex items-center gap-2 pb-2"><input type="checkbox" name="activa" class="w-5 h-5 accent-teal-500" {{ 'checked' if s.activa }}><span class="text-sm">Activa</span></div>
   <div class="text-xs text-zinc-500 pb-2">/{{ s.slug }}</div>
   <div class="sm:col-span-4"><label class="lbl">Descripción</label><input name="descripcion" class="input" value="{{ s.descripcion }}"></div>
@@ -31,5 +48,54 @@ async function guardar(f) {
     toast('Sección guardada');
   } catch (e) { toast(e.message, 'error'); }
 }
+
+// ── Orden libre: arrastrar (PC) o ▲ ▼ (celular) ──
+const lista = document.getElementById('orden-lista');
+let arrastrada = null, cambio = false;
+function renumerar() {
+  const filas = [...lista.querySelectorAll('.orden-fila')];
+  filas.forEach((f, i) => { f.querySelector('.orden-n').textContent = i + 1; });
+  // las tarjetas de abajo siguen el mismo orden
+  const cont = document.getElementById('secciones-forms');
+  filas.forEach((f, i) => {
+    const form = cont.querySelector('form[data-id="' + f.dataset.id + '"]');
+    if (form) { form.orden.value = i + 1; cont.appendChild(form); }
+  });
+  return filas.map(f => +f.dataset.id);
+}
+let tGuardar = null;
+function guardarOrden() {
+  const ids = renumerar();
+  clearTimeout(tGuardar);
+  tGuardar = setTimeout(async () => {
+    try { await api('/admin/api/secciones/orden', { json: { ids } }); toast('Orden guardado'); }
+    catch (e) { toast(e.message, 'error'); }
+  }, 400);
+}
+lista.addEventListener('dragstart', e => {
+  arrastrada = e.target.closest('.orden-fila'); if (!arrastrada) return;
+  arrastrada.style.opacity = '.4'; e.dataTransfer.effectAllowed = 'move'; cambio = false;
+});
+lista.addEventListener('dragover', e => {
+  e.preventDefault();
+  const sobre = e.target.closest('.orden-fila');
+  if (!arrastrada || !sobre || sobre === arrastrada) return;
+  const r = sobre.getBoundingClientRect();
+  lista.insertBefore(arrastrada, e.clientY > r.top + r.height / 2 ? sobre.nextSibling : sobre);
+  cambio = true;
+});
+lista.addEventListener('dragend', () => {
+  if (arrastrada) arrastrada.style.opacity = '';
+  arrastrada = null;
+  if (cambio) guardarOrden();
+});
+lista.addEventListener('click', e => {
+  const b = e.target.closest('.orden-btn'); if (!b) return;
+  const f = b.closest('.orden-fila');
+  if (+b.dataset.d < 0 && f.previousElementSibling) lista.insertBefore(f, f.previousElementSibling);
+  else if (+b.dataset.d > 0 && f.nextElementSibling) lista.insertBefore(f.nextElementSibling, f);
+  else return;
+  guardarOrden();
+});
 </script>
 {% endblock %}
