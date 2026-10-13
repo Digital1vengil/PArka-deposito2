@@ -28,3 +28,12 @@ html, body { background: #f5f5f4 !important; color: #111111; }
 .bg-green-700 { background-color: #15803d !important; }
 .bg-white { background-color: #ffffff !important; }
 input:focus, select:focus, textarea:focus { outline-color: #111111; }
+/* Clases que el styles.css precompilado no trae (los botones quedaban invisibles: texto blanco sin fondo) */
+.bg-amber-600 { background-color: #d97706 !important; }
+.active\:bg-amber-700:active { background-color: #b45309 !important; }
+.bg-sky-100 { background-color: #e0f2fe !important; }
+.text-sky-700 { color: #0369a1 !important; }
+.border-green-600 { border-color: #16a34a !important; }
+.active\:text-slate-700:active { color: #333333 !important; }
+/* "Finalizar de todos modos" (despacho con pendientes) */
+#finalizar-pendientes-ok { background-color: #111111 !important; color: #ffffff !important; }
