@@ -62,20 +62,40 @@
   function diaVencido() { return !!(state && state.vivo && state.fecha && state.fecha !== hoyLocal()); }
 
   // ───────────── 2. Recuadro "Ventas del día" (reemplaza la lista de Drive) ─────────────
+  // Historial de sesiones / despachos: ya no se muestra (pedido del usuario)
+  (function ocultarHistorial() {
+    var st = document.createElement('style');
+    st.textContent = '#history-zone,#despacho-history-zone{display:none!important}';
+    document.head.appendChild(st);
+  })();
+
+  var BOTONES = [
+    { tipo: 'colecta', icono: 'barcode', sub: 'Mercado Libre' },
+    { tipo: 'flex', icono: 'qr-code', sub: 'Mercado Libre' },
+    { tipo: 'tiendanube', icono: 'shopping-bag', sub: 'Por enviar' },
+    { tipo: 'cambios', icono: 'repeat', sub: 'App de cambios' }
+  ];
+
   function montarRecuadro() {
     var zone = document.getElementById('drive-files-zone');
     if (!zone || zone.dataset.vivo) return;
     zone.dataset.vivo = '1';
     var titulo = zone.querySelector('p.font-semibold');
-    if (titulo) titulo.innerHTML = '<i data-lucide="radio" class="icon text-forest-600"></i> Ventas del día · en vivo';
+    if (titulo) titulo.innerHTML = '<i data-lucide="rocket" class="icon text-forest-600"></i> Iniciar despacho';
+    var act = document.getElementById('btn-refresh-drive-files');
+    if (act) act.style.display = 'none';
+    var tabs = document.getElementById('btn-drive-colecta');
+    if (tabs && tabs.parentElement) tabs.parentElement.style.display = 'none';
     var buscar = document.getElementById('drive-search');
     if (buscar && buscar.parentElement) buscar.parentElement.style.display = 'none';
     var pie = zone.querySelector('p.text-slate-400.text-xs.mt-2');
-    if (pie) pie.innerHTML = 'Colecta y Flex: <b>Listas para despachar</b> de Mercado Libre · Tienda Nube: órdenes <b>Por enviar</b> · Cambios: los aceptados en la app de cambios';
+    if (pie) pie.innerHTML = 'Elegí el tipo y se carga solo lo de hoy: Colecta y Flex <b>listas para despachar</b> en Mercado Libre · ' +
+      'Tienda Nube órdenes <b>por enviar</b> · Cambios aceptados en la app de cambios';
     var subir = document.getElementById('btn-upload-pc');
     if (subir) {
-      subir.className = 'w-full mt-3 text-slate-500 text-xs font-semibold py-2 rounded-xl border border-dashed border-slate-300 flex items-center justify-center gap-2 active:bg-slate-50';
-      subir.innerHTML = '<i data-lucide="upload" class="icon" style="width:14px;height:14px;"></i> Sin conexión: cargar archivo desde la PC (respaldo)';
+      subir.className = 'w-full mt-3 text-slate-400 text-xs font-semibold flex items-center justify-center gap-1';
+      subir.style.cssText = 'background:none;border:0;padding:6px 0;';
+      subir.innerHTML = '<i data-lucide="upload" class="icon" style="width:12px;height:12px;"></i> Sin conexión: cargar archivo desde la PC';
       var lista = document.getElementById('drive-files-list');
       if (lista) lista.insertAdjacentElement('afterend', subir);
     }
@@ -117,61 +137,61 @@
     });
   }
 
-  async function cargarVivo(refrescar) {
+  // Pantalla de inicio: 4 botones. Al tocar uno se trae todo lo de hoy de ese tipo y arranca el despacho.
+  function cargarVivo() {
     montarRecuadro();
     var zone = document.getElementById('drive-files-zone');
     var list = document.getElementById('drive-files-list');
     if (!zone || !list) return;
     zone.classList.remove('hidden');
-    var tipo = tipoSel();
-    list.innerHTML = '<p class="text-slate-400 text-xs text-center py-4 animate-pulse">Consultando ' +
-      (FUENTE[tipo] || 'Mercado Libre') + '…</p>';
+    var abierta = state && state.vivo && state.fecha === hoyLocal() && state.packages ? state.dispatchType : '';
+    list.innerHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' + BOTONES.map(function (b) {
+      var enCurso = abierta === b.tipo;
+      return '<button data-pk-iniciar="' + b.tipo + '" style="background:#111;color:#fff;border:0;border-radius:16px;padding:18px 8px;' +
+        'display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;font:800 16px system-ui;box-shadow:0 2px 6px rgba(0,0,0,.15);min-height:96px">' +
+        '<i data-lucide="' + b.icono + '" class="icon" style="width:26px;height:26px;"></i>' + TIPOS[b.tipo] +
+        '<span style="font:600 11px system-ui;color:' + (enCurso ? '#86efac' : '#cbd5e1') + '">' + (enCurso ? 'en curso · sumar nuevas' : b.sub) + '</span></button>';
+    }).join('') + '</div><div id="pk-iniciar-msg"></div>';
+    list.querySelectorAll('[data-pk-iniciar]').forEach(function (btn) {
+      btn.addEventListener('click', function () { iniciar(btn.getAttribute('data-pk-iniciar'), btn); });
+    });
+    if (window.lucide) lucide.createIcons();
+  }
+
+  var iniciando = false;
+  async function iniciar(tipo, btn) {
+    if (iniciando) return;
+    iniciando = true;
+    var msg = document.getElementById('pk-iniciar-msg');
+    if (msg) msg.innerHTML = '';
+    var html0 = btn.innerHTML;
+    btn.innerHTML = '<span class="animate-pulse" style="font:700 14px system-ui">Cargando ' + TIPOS[tipo] + '…</span>';
+    try { driveTipo = tipo; } catch (e) {}
     var d;
     try {
-      d = await getJSON('/despacho/api/vivo?tipo=' + tipo + (refrescar ? '&refrescar=1' : ''));
+      d = await getJSON('/despacho/api/vivo?tipo=' + tipo + '&refrescar=1');
     } catch (e) {
       d = { ok: false, conectado: true, error: 'No se pudo consultar: ' + e.message };
     }
-    if (tipoSel() !== tipo) return; // cambiaron de pestaña mientras cargaba
-    if (!d.ok) {
-      list.innerHTML = '<div class="bg-red-50 border border-red-200 rounded-xl p-3 text-red-700 text-xs">' +
-        '<p class="font-bold mb-1">' + (d.conectado === false ? 'Sin conexión' : 'No se pudo leer') + '</p>' + esc(d.error) +
-        '<button class="mt-2 block w-full bg-white border border-red-300 rounded-lg py-1.5 font-semibold" onclick="loadDriveFiles(true)">Reintentar</button></div>';
+    iniciando = false;
+    btn.innerHTML = html0;
+    if (window.lucide) lucide.createIcons();
+    var falla = function (titulo, texto, rojo) {
+      if (!msg) return;
+      msg.innerHTML = '<div style="margin-top:12px;border-radius:12px;padding:12px;font-size:12px;' +
+        (rojo ? 'background:#fef2f2;border:1px solid #fecaca;color:#b91c1c' : 'background:#f8fafc;border:1px solid #e2e8f0;color:#475569') + '">' +
+        '<p style="font-weight:700;margin:0 0 2px">' + esc(titulo) + '</p>' + esc(texto) + '</div>';
+    };
+    if (!d.ok) { falla(d.conectado === false ? 'Sin conexión con ' + (FUENTE[tipo] || 'Mercado Libre') : 'No se pudo leer ' + TIPOS[tipo], d.error, true); return; }
+    marcarEscaneadosLocales(tipo, d.paquetes);
+    var nuevas = d.paquetes.filter(function (p) { return !p.escaneado; }).length;
+    if (!nuevas) {
+      var nada = tipo === 'tiendanube' ? 'órdenes por enviar' : tipo === 'cambios' ? 'cambios para despachar' : 'envíos listos para despachar';
+      falla(TIPOS[tipo] + ': nada para cargar', d.paquetes.length ? 'Todo lo de hoy ya se despachó.' :
+        'No hay ' + nada + ' hoy' + (d.por_imprimir ? ' (' + d.por_imprimir + ' con etiqueta por imprimir: entran solas cuando se impriman).' : '.'), false);
       return;
     }
-    marcarEscaneadosLocales(tipo, d.paquetes);
-    var n = d.paquetes.length;
-    var hechas = d.paquetes.filter(function (p) { return p.escaneado; }).length;
-    var nuevas = n - hechas;
-    // pendientes arriba, despachadas (en verde) abajo
-    var orden = d.paquetes.filter(function (p) { return !p.escaneado; }).concat(d.paquetes.filter(function (p) { return p.escaneado; }));
-    var esTN = tipo === 'tiendanube', esCam = tipo === 'cambios';
-    var etiqueta = esTN ? 'órdenes por enviar' : esCam ? 'cambios para despachar' : 'listas para despachar';
-    var etiquetaN = esTN ? (nuevas === 1 ? 'orden nueva' : 'órdenes nuevas') : esCam ? (nuevas === 1 ? 'cambio nuevo' : 'cambios nuevos') : (nuevas === 1 ? 'nueva para despachar' : 'nuevas para despachar');
-    var html = '<div class="rounded-xl border border-slate-200 p-3">' +
-      '<div class="flex items-end justify-between gap-2"><div>' +
-        '<p class="text-3xl font-black text-slate-800 leading-none">' + n + '</p>' +
-        '<p class="text-slate-600 text-xs font-semibold mt-1">' + TIPOS[tipo] + ' · ' + etiqueta + '</p></div>' +
-        '<p class="text-slate-400 text-[11px] text-right">Hoy ' + esc(ddmm(d.fecha)) + '<br>actualizado ' + esc(d.hora) + '</p></div>';
-    var info = [];
-    if (d.por_imprimir) info.push(d.por_imprimir + ' con etiqueta por imprimir (entran solas cuando se impriman)');
-    if (d.proximos) info.push(d.proximos + ' para próximos días (no entran hoy)');
-    if (info.length) html += '<p class="text-slate-500 text-[11px] mt-2">' + info.map(esc).join(' · ') + '</p>';
-    if (hechas) html += '<p class="text-[12px] mt-2 font-semibold"><span style="color:#15803d">✓ ' + hechas + ' ya despachada' + (hechas !== 1 ? 's' : '') +
-      '</span> · <span class="text-slate-700">' + nuevas + ' por cargar</span></p>';
-    if (n) html += '<div class="mt-2 max-h-56 overflow-y-auto">' + orden.map(filaPaquete).join('') + '</div>';
-    html += '</div>';
-    if (d.canceladas && d.canceladas.length) html += desplegableCanceladas(d.canceladas, false);
-    html += '<button id="btn-vivo-cargar" class="w-full mt-3 bg-forest-600 active:bg-forest-700 text-white font-bold text-sm py-3 rounded-xl flex items-center justify-center gap-2 ' +
-      (nuevas ? '' : 'opacity-40 cursor-not-allowed') + '"' + (nuevas ? '' : ' disabled') + '>' +
-      '<i data-lucide="' + (nuevas || !n ? 'play' : 'check-check') + '" class="icon" style="width:16px;height:16px;"></i> ' +
-      (nuevas ? 'Cargar ' + nuevas + ' ' + (hechas ? etiquetaN : etiqueta)
-              : (n ? 'Todo despachado · no hay nuevas' : 'No hay ' + etiqueta + ' hoy')) + '</button>' +
-      '<button class="w-full mt-1.5 text-forest-600 text-xs font-semibold py-1.5" onclick="loadDriveFiles(true)">⟳ Consultar de nuevo</button>';
-    list.innerHTML = html;
-    var b = document.getElementById('btn-vivo-cargar');
-    if (b && nuevas) b.addEventListener('click', function () { empezar(tipo, d); });
-    if (window.lucide) lucide.createIcons();
+    empezar(tipo, d);
   }
 
   function empezar(tipo, d) {
@@ -206,7 +226,7 @@
     saveState();
     ultimaLista = Date.now();
     horaRevision = d.hora || '';
-    toast('✅ ' + nuevos.length + ' ' + (tipo === 'tiendanube' ? 'órdenes' : tipo === 'cambios' ? 'cambios' : 'envíos') + ' de hoy — tocá "Iniciar Despacho"', 'ok', 3500);
+    toast('✅ ' + nuevos.length + ' ' + (tipo === 'tiendanube' ? 'órdenes' : tipo === 'cambios' ? 'cambios' : 'envíos') + ' de ' + TIPOS[tipo] + ' cargados', 'ok', 3500);
     pintarBanda();
   }
 

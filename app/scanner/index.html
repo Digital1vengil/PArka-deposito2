@@ -3698,17 +3698,7 @@ document.addEventListener('DOMContentLoaded', () => {
     var lbl = 'display:block;font-size:11px;color:#64748b;margin-bottom:2px;';
     return '' +
     '<div id="sp-zona" style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;box-shadow:0 1px 2px rgba(0,0,0,.04);padding:16px;margin-bottom:12px;">' +
-      '<p style="margin:0 0 12px;font-size:15px;font-weight:800;color:#2f5d3a;letter-spacing:-.01em;">SmartPost</p>' +
-      '<p style="margin:0 0 8px;font-size:11px;font-weight:700;color:#334155;text-transform:uppercase;letter-spacing:.04em;">Envio manual</p>' +
-      '<div style="display:flex;gap:8px;margin-bottom:8px;">' +
-        '<button id="sp-ml">Mercado Libre</button><button id="sp-tn">Tienda Nube</button>' +
-      '</div>' +
-      '<input id="sp-nombre" type="text" placeholder="Nombre de la persona" style="' + inp + '" />' +
-      '<input id="sp-articulo" type="text" placeholder="Articulo a enviar" style="' + inp + '" />' +
-      '<input id="sp-numero" type="text" placeholder="Numero de venta (Mercado Libre)" style="' + inp + '" />' +
-      '<button id="sp-agregar" style="width:100%;padding:12px;border:0;border-radius:12px;background:#2f5d3a;color:#fff;font-weight:700;font-size:15px;">Agregar envio</button>' +
-      '<div id="sp-lista" style="margin-top:6px;"></div>' +
-      '<div style="height:1px;background:#f1f5f9;margin:14px 0;"></div>' +
+      '<p style="margin:0 0 10px;font-size:15px;font-weight:800;color:#2f5d3a;letter-spacing:-.01em;">Cierre del día</p>' +
       '<button id="sp-toggle-cfg" style="width:100%;background:none;border:0;padding:0;text-align:left;font-size:11px;font-weight:700;color:#334155;text-transform:uppercase;letter-spacing:.04em;">Correos del cierre &#9662;</button>' +
       '<div id="sp-cfg" style="display:none;margin-top:10px;">' +
         '<label style="' + lbl + '">Correo principal</label>' +
@@ -3733,9 +3723,6 @@ document.addEventListener('DOMContentLoaded', () => {
       var ancla = document.getElementById('history-zone') || document.getElementById('despacho-history-zone');
       if (!ancla) return;
       ancla.insertAdjacentHTML('beforebegin', bloqueHTML());
-      document.getElementById('sp-ml').addEventListener('click', function () { plat = 'ML'; pintarPlat(); });
-      document.getElementById('sp-tn').addEventListener('click', function () { plat = 'TN'; pintarPlat(); });
-      document.getElementById('sp-agregar').addEventListener('click', agregar);
       document.getElementById('sp-cierre').addEventListener('click', enviarCierre);
       document.getElementById('sp-guardar-mails').addEventListener('click', guardarCorreos);
       document.getElementById('sp-toggle-cfg').addEventListener('click', function () {
