@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block titulo %}Secciones · {{ APP_NOMBRE }}{% endblock %}
+{% block contenido %}
+<h1 class="text-2xl font-bold mb-2">🗂 Secciones</h1>
+<p class="text-sm text-zinc-500 mb-6">Los roles marcados reciben la sección <b>por defecto</b>. Para darle o sacarle una sección a una persona puntual, usá <a href="/admin/usuarios" class="underline text-violeta">Usuarios → Accesos</a>. Una sección inactiva aparece como "Próximamente".</p>
+<div class="flex flex-col gap-4">
+{% for s in secciones %}
+<form class="card p-5 grid sm:grid-cols-6 gap-3 items-end" data-id="{{ s.id }}" onsubmit="event.preventDefault(); guardar(this);">
+  <div><label class="lbl">Ícono</label><input name="icono" class="input text-2xl text-center" value="{{ s.icono }}"></div>
+  <div class="sm:col-span-2"><label class="lbl">Nombre</label><input name="nombre" class="input" value="{{ s.nombre }}"></div>
+  <div><label class="lbl">Orden</label><input name="orden" type="number" class="input" value="{{ s.orden }}"></div>
+  <div class="flex items-center gap-2 pb-2"><input type="checkbox" name="activa" class="w-5 h-5 accent-teal-500" {{ 'checked' if s.activa }}><span class="text-sm">Activa</span></div>
+  <div class="text-xs text-zinc-500 pb-2">/{{ s.slug }}</div>
+  <div class="sm:col-span-4"><label class="lbl">Descripción</label><input name="descripcion" class="input" value="{{ s.descripcion }}"></div>
+  <div class="sm:col-span-2"><label class="lbl">Roles con acceso por defecto</label>
+    <div class="flex gap-3 flex-wrap">{% for k, v in ROLES.items() if k != 'admin' %}
+      <label class="text-sm flex items-center gap-1"><input type="checkbox" name="rol" value="{{ k }}" class="accent-teal-500" {{ 'checked' if s.permite(k) }}> {{ v }}</label>
+    {% endfor %}</div></div>
+  <div class="sm:col-span-6 flex justify-end"><button class="btn btn-primario btn-chico">Guardar</button></div>
+</form>
+{% endfor %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function guardar(f) {
+  try {
+    await api('/admin/api/secciones/' + f.dataset.id, { json: {
+      nombre: f.nombre.value, icono: f.icono.value, descripcion: f.descripcion.value, orden: +f.orden.value,
+      activa: f.activa.checked, roles: [...f.querySelectorAll('[name=rol]:checked')].map(c => c.value) } });
+    toast('Sección guardada');
+  } catch (e) { toast(e.message, 'error'); }
+}
+</script>
+{% endblock %}

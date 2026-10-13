@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block titulo %}Usuarios · {{ APP_NOMBRE }}{% endblock %}
+{% block contenido %}
+<h1 class="text-2xl font-bold mb-2">👥 Usuarios, PINs y accesos</h1>
+<p class="text-sm text-zinc-500 mb-6">Cada operario entra con su nombre y un PIN de 4 a 8 números. El rol da los accesos iniciales;
+  con <b>Accesos</b> elegís exactamente qué secciones y funciones ve cada uno (podés sumarle o sacarle lo que quieras).</p>
+{% if pin_default %}
+<div class="card p-4 mb-6 border-amber-600 text-amber-700 text-sm">⚠️ Estás usando el PIN inicial <b>1234</b>. Cambialo abajo en tu usuario.</div>
+{% endif %}
+
+<form class="card p-5 mb-6 grid sm:grid-cols-4 gap-3 items-end" onsubmit="event.preventDefault(); crear();">
+  <div><label class="lbl">Nombre</label><input id="c-nombre" class="input" required></div>
+  <div><label class="lbl">Rol (accesos iniciales)</label><select id="c-rol" class="input">{% for k, v in ROLES.items() %}<option value="{{ k }}" {{ 'selected' if k == 'despacho' }}>{{ v }}</option>{% endfor %}</select></div>
+  <div><label class="lbl">PIN</label><input id="c-pin" class="input" inputmode="numeric" pattern="\d{4,8}" required></div>
+  <button class="btn btn-primario">+ Agregar operario</button>
+</form>
+
+<div class="card overflow-x-auto">
+<table class="tabla">
+  <thead><tr><th>Nombre</th><th>Rol</th><th>Accesos</th><th>Nuevo PIN</th><th>Activo</th><th>Último ingreso</th><th></th></tr></thead>
+  <tbody>
+  {% for x in usuarios %}
+  <tr data-id="{{ x.id }}">
+    <td><input class="input !py-1.5 f-nombre min-w-[120px]" value="{{ x.nombre }}"></td>
+    <td><select class="input !py-1.5 f-rol min-w-[130px]">{% for k, v in ROLES.items() %}<option value="{{ k }}" {{ 'selected' if k == x.rol }}>{{ v }}</option>{% endfor %}</select></td>
+    <td class="min-w-[220px]">
+      {% if x.es_admin %}
+        <span class="chip chip-hecha">Todo (Admin)</span>
+      {% else %}
+        <div class="flex flex-wrap gap-1 mb-1">
+          {% for a in resumen[x.id] %}<span class="chip chip-en_curso">{{ nombres.get(a, a) }}</span>{% else %}<span class="text-xs text-red-600">Sin accesos</span>{% endfor %}
+        </div>
+        <div class="flex items-center gap-2">
+          <button type="button" class="btn btn-gris btn-chico" onclick="abrirAccesos({{ x.id }})">✎ Accesos</button>
+          <span class="text-xs text-zinc-500">{{ 'Personalizado' if x.accesos is not none else 'Según el rol' }}</span>
+        </div>
+      {% endif %}
+    </td>
+    <td><input class="input !py-1.5 f-pin min-w-[90px]" placeholder="dejar vacío" inputmode="numeric"></td>
+    <td><input type="checkbox" class="f-activo w-5 h-5 accent-teal-500" {{ 'checked' if x.activo }}></td>
+    <td class="text-zinc-500 whitespace-nowrap">{{ x.ultimo_login.strftime('%d/%m %H:%M') if x.ultimo_login else '—' }}
+      {% if x.bloqueado_hasta %}<br><span class="chip chip-vencida">BLOQUEADO</span>{% endif %}</td>
+    <td class="whitespace-nowrap"><button class="btn btn-gris btn-chico" onclick="guardar(this)">Guardar</button>
+      {% if x.bloqueado_hasta %}<button class="btn btn-gris btn-chico" onclick="guardar(this, true)">Desbloquear</button>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<!-- Editor de accesos -->
+<div id="modal" class="hidden fixed inset-0 z-40 bg-black/40 flex items-center justify-center p-4" onclick="if (event.target === this) cerrarAccesos()">
+  <div class="card w-full max-w-lg p-5 max-h-[90vh] overflow-y-auto">
+    <div class="flex items-center justify-between mb-1">
+      <h2 class="text-lg font-bold">Accesos de <span id="m-nombre"></span></h2>
+      <button class="text-zinc-500 text-xl" onclick="cerrarAccesos()">✕</button>
+    </div>
+    <p class="text-xs text-zinc-500 mb-4" id="m-estado"></p>
+    <h3 class="text-xs font-bold text-teal-600 uppercase tracking-wider mb-2">Secciones</h3>
+    <div id="m-secciones" class="grid sm:grid-cols-2 gap-2 mb-4"></div>
+    <h3 class="text-xs font-bold text-teal-600 uppercase tracking-wider mb-2">Funciones extra</h3>
+    <div id="m-funciones" class="flex flex-col gap-2 mb-5"></div>
+    <div class="flex flex-wrap gap-2 justify-between">
+      <button class="btn btn-gris btn-chico" onclick="usarRol()">↺ Volver a los del rol</button>
+      <div class="flex gap-2">
+        <button class="btn btn-gris" onclick="cerrarAccesos()">Cancelar</button>
+        <button class="btn btn-primario" onclick="guardarAccesos()">Guardar accesos</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+let actual = null;
+async function crear() {
+  try {
+    await api('/admin/api/usuarios', { json: { nombre: document.getElementById('c-nombre').value,
+      rol: document.getElementById('c-rol').value, pin: document.getElementById('c-pin').value } });
+    location.reload();
+  } catch (e) { toast(e.message, 'error'); }
+}
+async function guardar(btn, desbloquear = false) {
+  const tr = btn.closest('tr');
+  try {
+    await api('/admin/api/usuarios/' + tr.dataset.id, { json: {
+      nombre: tr.querySelector('.f-nombre').value, rol: tr.querySelector('.f-rol').value,
+      pin: tr.querySelector('.f-pin').value, activo: tr.querySelector('.f-activo').checked, desbloquear } });
+    toast('Guardado'); setTimeout(() => location.reload(), 600);
+  } catch (e) { toast(e.message, 'error'); }
+}
+function fila(c, marcado, rol) {
+  return `<label class="flex items-center gap-2 p-2 rounded-lg border border-zinc-700 cursor-pointer hover:bg-zinc-800">
+    <input type="checkbox" class="w-4 h-4 accent-teal-500 m-chk" value="${c.clave}" ${marcado ? 'checked' : ''}>
+    <span class="flex-1 text-sm">${c.icono ? c.icono + ' ' : ''}${esc(c.nombre)}${c.activa === false ? ' <span class="chip chip-auto">próximamente</span>' : ''}</span>
+    ${rol ? '<span class="text-[10px] text-zinc-500">del rol</span>' : ''}</label>`;
+}
+function pintar(d, lista) {
+  const set = new Set(lista), rol = new Set(d.por_rol);
+  document.getElementById('m-secciones').innerHTML = d.catalogo.secciones.map(c => fila(c, set.has(c.clave), rol.has(c.clave))).join('');
+  document.getElementById('m-funciones').innerHTML = d.catalogo.funciones.map(c => fila(c, set.has(c.clave), rol.has(c.clave))).join('');
+}
+async function abrirAccesos(id) {
+  try {
+    actual = await api(`/admin/api/usuarios/${id}/accesos`);
+    document.getElementById('m-nombre').textContent = actual.nombre;
+    document.getElementById('m-estado').textContent = actual.personalizado
+      ? 'Tiene accesos personalizados.' : 'Usa los accesos de su rol. Si cambiás algo, quedan personalizados.';
+    pintar(actual, actual.accesos);
+    document.getElementById('modal').classList.remove('hidden');
+  } catch (e) { toast(e.message, 'error'); }
+}
+function cerrarAccesos() { document.getElementById('modal').classList.add('hidden'); actual = null; }
+function usarRol() { pintar(actual, actual.por_rol); actual._rol = true; }
+async function guardarAccesos() {
+  const elegidos = [...document.querySelectorAll('.m-chk:checked')].map(c => c.value);
+  const iguales = actual._rol && elegidos.length === actual.por_rol.length && elegidos.every(e => actual.por_rol.includes(e));
+  try {
+    await api(`/admin/api/usuarios/${actual.id}/accesos`, { json: { accesos: iguales ? null : elegidos } });
+    toast('Accesos guardados'); cerrarAccesos(); setTimeout(() => location.reload(), 500);
+  } catch (e) { toast(e.message, 'error'); }
+}
+</script>
+{% endblock %}

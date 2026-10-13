@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block titulo %}Despacho · {{ APP_NOMBRE }}{% endblock %}
+{% block main_class %}max-w-none px-0 py-0{% endblock %}
+{% block contenido %}
+{% if cotejo_ok %}
+<div class="bg-white border-b border-zinc-700 px-4 py-1.5 flex items-center text-sm">
+  <button class="btn btn-primario btn-chico ml-auto" onclick="cotejar(false)">🔎 Cotejar con ML</button>
+</div>
+{% endif %}
+<iframe id="scanner" src="/despacho/scanner/" title="Despacho" class="w-full border-0 block"
+        style="height: calc(100dvh - 56px); background:#f5f5f4"
+        allow="camera; microphone; clipboard-read; clipboard-write; fullscreen"></iframe>
+<script>
+(function () {
+  // El scanner ocupa todo el alto disponible debajo del encabezado de la app (sin barra ni botones extra)
+  function ajustar() {
+    var f = document.getElementById('scanner');
+    if (!f) return;
+    f.style.height = Math.max(320, window.innerHeight - f.getBoundingClientRect().top) + 'px';
+  }
+  window.addEventListener('resize', ajustar);
+  window.addEventListener('orientationchange', function () { setTimeout(ajustar, 200); });
+  ajustar();
+})();
+</script>
+
+<div id="cotejo" class="hidden fixed inset-0 z-40 bg-black/40 flex items-start justify-center p-4 overflow-y-auto" onclick="if(event.target===this)cerrarCotejo()">
+  <div class="card w-full max-w-3xl p-5 mt-10">
+    <div class="flex items-center gap-3 mb-3">
+      <h2 class="text-lg font-bold">🔎 Cotejo con Mercado Libre</h2>
+      <span id="cot-tipo" class="chip chip-auto"></span>
+      <button class="btn btn-gris btn-chico ml-auto" id="cot-ref" onclick="cotejar(true)">Actualizar desde ML</button>
+      <button class="btn btn-gris btn-chico" onclick="cerrarCotejo()">Cerrar</button>
+    </div>
+    <div id="cot-cuerpo" class="text-sm">Cargando…</div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function listaDelScanner() {
+  try {
+    const w = document.getElementById('scanner').contentWindow;
+    const st = w.state || JSON.parse(w.localStorage.getItem('parka_despacho_v2') || 'null');
+    if (!st || !st.packages) return null;
+    return { tipo: st.dispatchType || w.dispatchType || '', paquetes: st.packages.map(p => ({ tracking: p.trackingId, estado: p.estado })) };
+  } catch (e) { return null; }
+}
+function cerrarCotejo() { document.getElementById('cotejo').classList.add('hidden'); }
+function filas(lista, fn) { return lista.length ? '<ul class="mt-1 max-h-60 overflow-y-auto divide-y divide-zinc-700">' + lista.map(fn).join('') + '</ul>' : '<p class="text-zinc-500 mt-1">Nada.</p>'; }
+async function cotejar(refrescar) {
+  const box = document.getElementById('cotejo'), cuerpo = document.getElementById('cot-cuerpo');
+  box.classList.remove('hidden');
+  const l = listaDelScanner();
+  if (!l || !l.paquetes.length) { cuerpo.innerHTML = 'Primero cargá la lista del día en el scanner.'; return; }
+  document.getElementById('cot-tipo').textContent = l.tipo || '—';
+  if (l.tipo !== 'flex' && l.tipo !== 'colecta') { cuerpo.innerHTML = 'El cotejo con ML es para Flex y Colecta (Tienda Nube no pasa por Mercado Libre).'; return; }
+  cuerpo.innerHTML = refrescar ? 'Consultando a Mercado Libre… (hasta 1 minuto)' : 'Cargando…';
+  try {
+    const r = await api('/despacho/api/ml/cotejo', { json: { tipo: l.tipo, paquetes: l.paquetes, refrescar } });
+    const f = r.frescura || {};
+    cuerpo.innerHTML = `
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+        <div class="card p-3"><div class="text-2xl font-bold">${r.coinciden}</div><div class="text-xs text-zinc-500">en tu lista y listos en ML</div></div>
+        <div class="card p-3"><div class="text-2xl font-bold">${r.sin_escanear}</div><div class="text-xs text-zinc-500">de esos, sin escanear</div></div>
+        <div class="card p-3"><div class="text-2xl font-bold ${r.solo_ml.length ? 'text-amber-400' : ''}">${r.solo_ml.length}</div><div class="text-xs text-zinc-500">listos en ML y NO en tu lista</div></div>
+        <div class="card p-3"><div class="text-2xl font-bold ${r.cancelados ? 'text-red-400' : ''}">${r.cancelados}</div><div class="text-xs text-zinc-500">cancelados en tu lista</div></div>
+      </div>
+      <h3 class="font-semibold">Listos en ML que faltan en tu lista</h3>
+      <p class="text-xs text-zinc-500">Etiquetas que no se cargaron (buscá el .txt o reimprimí).</p>
+      ${filas(r.solo_ml, x => `<li class="py-1 flex gap-3"><code>${esc(x.envio)}</code><span class="text-zinc-500">venta ${esc(x.venta || '')}</span><span class="ml-auto text-zinc-500">${esc(x.dia || '')}</span></li>`)}
+      <h3 class="font-semibold mt-4">En tu lista pero ML no los da listos</h3>
+      ${filas(r.solo_lista, x => `<li class="py-1 flex gap-3 ${x.cancelado ? 'text-red-400 font-semibold' : ''}"><code>${esc(x.envio)}</code><span>${esc(x.estado_ml)}</span><span class="ml-auto text-zinc-500">${x.estado_lista === 'despachado' ? 'escaneado' : 'pendiente'}</span></li>`)}
+      <p class="text-xs text-zinc-500 mt-4">Datos de ParkaHub · consultados entre ${esc(f.min || '?')} y ${esc(f.max || '?')} (UTC)${f.covered === false ? ' · ⚠️ algunos envíos sin actualizar: tocá "Actualizar desde ML"' : ''}.</p>`;
+  } catch (e) { cuerpo.innerHTML = '<p class="text-red-400">' + esc(e.message) + '</p>'; }
+}
+</script>
+{% endblock %}

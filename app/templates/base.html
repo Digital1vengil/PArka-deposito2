@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111111">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <title>{% block titulo %}{{ APP_NOMBRE }}{% endblock %}</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/static/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // Diseño igual a la app de cambios PARKA: negro, blanco y grises; estados en color (Inter).
+    // Se redefinen los grises "zinc" para que toda la app tome el tema sin tocar cada pantalla.
+    tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] }, colors: {
+      zinc: { 50:'#ffffff', 100:'#111111', 200:'#111111', 300:'#333333', 400:'#6b6b6b', 500:'#6b6b6b', 600:'#8a8a8a',
+              700:'#e4e4e4', 800:'#f1f1f1', 900:'#fafafa', 950:'#111111' },
+      teal: { 50:'#f0fdf4', 200:'#bbf7d0', 300:'#15803d', 400:'#15803d', 500:'#16a34a', 600:'#15803d', 700:'#166534' },
+      violeta: { DEFAULT:'#111111', 2:'#333333', bg:'#f1f1f1' },
+      red: { 50:'#fef2f2', 200:'#fecaca', 300:'#b91c1c', 400:'#b91c1c', 600:'#b91c1c', 700:'#b91c1c', 800:'#f3c2c2', 950:'#fee2e2' },
+      amber: { 300:'#b45309', 400:'#b45309', 600:'#f59e0b', 700:'#d97706', 800:'#fcd34d', 950:'#fef3c7' },
+      green: { 400:'#15803d', 700:'#15803d', 800:'#bbf7d0', 950:'#dcfce7' },
+      sky: { 800:'#1d4ed8', 950:'#dbeafe' },
+    } } } };
+  </script>
+  <link rel="stylesheet" href="/static/app.css?v={{ static_v("app.css") }}">
+  {% block head %}{% endblock %}
+</head>
+<body class="min-h-screen">
+<script>try { if (localStorage.getItem('pd_lateral') === 'chico') document.documentElement.classList.add('lat-chico'); } catch (e) {}</script>
+{% if u %}
+<header class="hdr sticky top-0 z-30">
+  <div class="max-w-[1440px] mx-auto px-4 h-14 flex items-center gap-3">
+    <a href="/" class="hdr-marca"><span class="hdr-brand">PARKA</span><span class="hdr-sub">Depósito</span></a>
+    <div class="ml-auto flex items-center gap-3">
+      <div class="text-right leading-tight hidden sm:block">
+        <div class="text-sm font-semibold text-white">{{ u.nombre }}</div>
+        <div class="text-xs text-white/70">{{ ROLES[u.rol] }}</div>
+      </div>
+      {% if 'ecommerce' in acc %}<button type="button" id="pd-campana" class="campana" onclick="pdAvisos.toggle(event)" title="Avisos" aria-label="Avisos" aria-expanded="false">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+        <span id="pd-campana-n" class="campana-n hidden"></span></button>{% endif %}
+      <a href="/logout" class="hdr-btn">Salir</a>
+      <button class="lg:hidden text-2xl px-1 text-white" onclick="document.getElementById('nav-mobile').classList.toggle('hidden')" aria-label="Menú">☰</button>
+    </div>
+  </div>
+  <nav id="nav-mobile" class="hidden lg:hidden border-t border-white/20 px-4 py-2 flex flex-col text-sm">
+    <span class="text-white/70 text-xs py-1">{{ u.nombre }} · {{ ROLES[u.rol] }}</span>
+    {% include "_menu.html" %}
+  </nav>
+</header>
+<aside id="nav-lateral" class="hidden lg:flex">
+  <nav class="flex flex-col gap-0.5 text-sm">
+    {% include "_menu.html" %}
+  </nav>
+  <button id="lat-toggle" class="nav-link mt-auto" onclick="pdLateral()" title="Achicar / agrandar menú"><span class="nav-ico"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></span><span class="nav-txt">Achicar menú</span></button>
+</aside>
+{% endif %}
+<div class="{% if u %}con-lateral{% endif %}">
+<main class="{% block main_class %}max-w-6xl mx-auto px-4 py-6{% endblock %}">
+{% block contenido %}{% endblock %}
+</main>
+</div>
+<div id="toasts" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2 items-center w-[92vw] max-w-md"></div>
+{% if u and 'ecommerce' in acc %}<script>window.PD_NOVEDADES = true;</script>
+<section id="pd-avisos" class="avisos-panel hidden" role="dialog" aria-label="Avisos">
+  <header class="avisos-cab">
+    <b class="flex-1">Avisos</b>
+    <button type="button" class="avisos-link" onclick="pdAvisos.leerTodo()">Marcar todo como leído</button>
+    <button type="button" class="avisos-x" onclick="pdAvisos.cerrar()" aria-label="Cerrar">✕</button>
+  </header>
+  <div class="avisos-filtros">
+    <button type="button" data-f="todos" class="activo">Todos</button>
+    <button type="button" data-f="nueva">Ventas</button>
+    <button type="button" data-f="alerta">Cancelaciones y faltantes</button>
+  </div>
+  <div id="pd-avisos-lista" class="avisos-lista"><p class="avisos-vacio">Cargando…</p></div>
+  <footer class="avisos-pie"><button type="button" id="pd-avisos-permiso" class="avisos-link" onclick="pdAvisos.permiso()">Avisarme aunque esté en otra pestaña</button></footer>
+</section>{% endif %}
+{% if u and 'asistente' in acc %}
+<button id="parkia-fab" type="button" class="parkia-p" onclick="parkia.toggle()" title="ParkIA · tu asistente" aria-label="Abrir ParkIA">P</button>
+<section id="parkia" class="hidden" role="dialog" aria-label="ParkIA">
+  <header class="parkia-cab">
+    <span class="parkia-p parkia-p-chico">P</span>
+    <div style="line-height:1.15"><div style="font-weight:700">ParkIA</div><div style="font-size:11px;opacity:.8">Asistente de PARKA</div></div>
+    <a href="/asistente" class="parkia-ic ml-auto" title="Abrir en grande">⤢</a>
+    <button type="button" class="parkia-ic" id="parkia-borrar" onclick="parkia.borrar(this)" title="Borrar charla">🗑</button>
+    <button type="button" class="parkia-ic" onclick="parkia.cerrar()" title="Cerrar" aria-label="Cerrar">✕</button>
+  </header>
+  <div id="parkia-chat"></div>
+  <div id="parkia-sugs" class="hidden">
+    <button type="button" class="parkia-sug">¿Cómo viene el día? Resumen de despacho, devoluciones y tareas</button>
+    <button type="button" class="parkia-sug">¿Qué preguntas de compradores hay sin responder?</button>
+    <button type="button" class="parkia-sug">¿Cómo está la reputación en Mercado Libre?</button>
+  </div>
+  <form onsubmit="event.preventDefault(); parkia.enviar();">
+    <textarea id="parkia-txt" rows="2" class="input" placeholder="Preguntale a ParkIA…"
+      onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();parkia.enviar();}"></textarea>
+    <button id="parkia-env" class="btn btn-primario btn-chico" style="height:2.6rem">Enviar</button>
+  </form>
+</section>
+{% endif %}
+<script src="/static/app.js?v={{ static_v("app.js") }}"></script>
+{% if u and 'asistente' in acc %}<script src="/static/parkia.js?v={{ static_v("parkia.js") }}"></script>{% endif %}
+{% block scripts %}{% endblock %}
+</body>
+</html>

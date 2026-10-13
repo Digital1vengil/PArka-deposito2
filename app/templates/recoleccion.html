@@ -1,0 +1,296 @@
+{% extends "base.html" %}
+{% block titulo %}Recolección · {{ APP_NOMBRE }}{% endblock %}
+{% block contenido %}
+<a href="/" class="text-sm text-zinc-500 hover:text-violeta">← Inicio</a>
+<h1 class="text-2xl font-bold mb-1">🧺 Recolección</h1>
+<p class="text-sm text-zinc-500 mb-5">Tomá las ventas del día, la app junta los artículos y te los ordena por la ruta del depósito. Escaneá cada prenda al levantarla.</p>
+
+<!-- NUEVA -->
+<div id="v-inicio" class="flex flex-col gap-5">
+  <section class="card p-4">
+    <h2 class="font-bold mb-3">Nueva recolección</h2>
+    <div class="tabs">
+      <button class="tab activo" data-o="drive" onclick="origen('drive')">☁ Archivos de Drive</button>
+      <button class="tab" data-o="despacho" onclick="origen('despacho')">🚚 Lista cargada en Despacho</button>
+      <button class="tab" data-o="archivo" onclick="origen('archivo')">⬆ Subir archivo</button>
+    </div>
+    <div class="flex flex-wrap gap-2 mb-3" id="tipos">
+      <button class="btn btn-chico" data-t="flex" onclick="tipoSel('flex')">Flex</button>
+      <button class="btn btn-chico" data-t="colecta" onclick="tipoSel('colecta')">Colecta</button>
+      <button class="btn btn-chico" data-t="tiendanube" onclick="tipoSel('tiendanube')">Tienda Nube</button>
+    </div>
+
+    <div id="o-drive">
+      {% if drive_ok %}
+      <div id="drive-lista" class="flex flex-col gap-2 text-sm max-h-80 overflow-y-auto"></div>
+      {% else %}<p class="text-sm text-zinc-500">Google Drive no está configurado.</p>{% endif %}
+    </div>
+    <div id="o-despacho" class="hidden text-sm">
+      <p class="text-zinc-500 mb-2">Usa los paquetes <b>pendientes</b> de la lista que está cargada en Despacho <b>en este mismo equipo</b>.</p>
+      <div id="desp-info" class="rounded-xl p-3 bg-zinc-900"></div>
+    </div>
+    <div id="o-archivo" class="hidden">
+      <input type="file" id="archivos" multiple accept=".txt,.zpl,.csv,.xlsx,.xls" class="text-sm">
+      <p class="text-xs text-zinc-500 mt-1">Etiquetas ZPL de ML, o la planilla de ventas de ML / Tienda Nube.</p>
+    </div>
+
+    <div class="flex flex-wrap items-end gap-3 mt-4">
+      <div class="flex-1 min-w-[200px]"><label class="lbl">Nombre (opcional)</label><input id="nombre" class="input" placeholder="Ej: Flex mañana"></div>
+      <button id="btn-armar" class="btn btn-primario !py-3" onclick="armar()">🧺 Armar recolección</button>
+    </div>
+  </section>
+
+  <section class="card p-4">
+    <h2 class="font-bold mb-3">Recolecciones</h2>
+    <div id="lista" class="flex flex-col gap-2 text-sm"></div>
+  </section>
+</div>
+
+<!-- EN CURSO -->
+<div id="v-rc" class="hidden flex flex-col gap-4">
+  <section class="card p-4 sticky top-14 z-20">
+    <div class="flex flex-wrap items-center gap-2">
+      <button class="btn btn-gris btn-chico" onclick="volver()">← Volver</button>
+      <h2 class="font-bold text-lg flex-1" id="rc-titulo"></h2>
+      <span id="rc-estado"></span>
+    </div>
+    <div class="flex items-center gap-3 mt-3">
+      <div class="barra flex-1"><div id="rc-barra" class="h-full" style="background:var(--turq-2);width:0"></div></div>
+      <b id="rc-prog" class="text-sm whitespace-nowrap"></b>
+    </div>
+    <input id="esc" class="input !text-lg !py-3 mt-3" placeholder="Escaneá la prenda (o la etiqueta de ubicación)" autocomplete="off">
+    <div id="rc-avisos" class="text-xs mt-2 flex flex-wrap gap-2"></div>
+  </section>
+  <div id="rc-items" class="flex flex-col gap-3"></div>
+  <section class="card p-4 flex flex-wrap gap-2">
+    <button class="btn btn-gris" onclick="actualizar()" title="Si cargaste ubicaciones en Mapeo después de armar la lista">↻ Actualizar ubicaciones</button>
+    <a id="rc-excel" class="btn btn-gris">⬇ Excel</a>
+    <span class="flex-1"></span>
+    <button id="rc-borrar" class="btn btn-gris" onclick="borrarRc()">Borrar</button>
+    <button id="rc-cerrar" class="btn btn-primario" onclick="cerrar()">✔ Terminar recolección</button>
+    <button id="rc-reabrir" class="btn btn-gris hidden" onclick="reabrir()">Reabrir</button>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+let org = 'drive', tipos = new Set(['flex']), driveSel = new Set(), rc = null, linkIt = null;
+try { const t = localStorage.getItem('parka_dispatch_type'); if (['flex', 'colecta', 'tiendanube'].includes(t)) tipos = new Set([t]); } catch {}
+const NOM = { flex: 'Flex', colecta: 'Colecta', tiendanube: 'Tienda Nube' };
+const PREFIJO = '/recoleccion', ORG_DRIVE = () => org === 'drive';
+
+function origen(o) {
+  org = o;
+  document.querySelectorAll('[data-o]').forEach(b => b.classList.toggle('activo', b.dataset.o === o));
+  ['drive', 'despacho', 'archivo'].forEach(x => document.getElementById('o-' + x).classList.toggle('hidden', x !== o));
+  document.getElementById('tipos').classList.toggle('hidden', o === 'despacho');
+  if (o === 'despacho') infoDespacho();
+}
+function tipoSel(t) {
+  if (t === '__init__') t = null;
+  // Se pueden elegir varios (ej. Flex + Colecta juntos); siempre queda al menos uno.
+  if (t) { if (tipos.has(t)) { if (tipos.size > 1) tipos.delete(t); } else tipos.add(t); }
+  driveSel = new Set();
+  document.querySelectorAll('[data-t]').forEach(b => { const on = tipos.has(b.dataset.t); b.classList.toggle('btn-primario', on); b.classList.toggle('btn-gris', !on); });
+  if (document.getElementById('drive-lista') && ORG_DRIVE()) driveArchivos();
+}
+const tipo_ = () => [...tipos].join(',');
+async function driveArchivos() {
+  const el = document.getElementById('drive-lista'); if (!el) return;
+  const lista = [...tipos];
+  el.innerHTML = '<p class="text-zinc-500">Buscando en Google Drive…</p>';
+  const res = await Promise.all(lista.map(t => api(PREFIJO + '/api/drive/archivos?tipo=' + t).then(d => ({ t, d })).catch(e => ({ t, e }))));
+  if (lista.join() !== [...tipos].join()) return;   // cambiaron la selección mientras buscaba
+  el.innerHTML = res.map(({ t, d, e }) => {
+    const tit = `<div class="font-bold text-violeta mt-1">${esc(NOM[t] || t)}</div>`;
+    if (e) return tit + `<p class="text-red-600">${esc(e.message)}</p>`;
+    if (!d.grupos.length) return tit + `<p class="text-zinc-500">No hay archivos de ${NOM[t]} en Drive.</p>`;
+    return tit + d.grupos.map(g => {
+      if (g.date === d.hoy) g.files.forEach(f => driveSel.add(f.id));   // los de hoy vienen marcados
+      return `<div class="rounded-xl p-3" style="background:var(--soft)"><b class="${g.date === d.hoy ? 'text-teal-600' : ''}">${g.date === d.hoy ? 'Hoy · ' : ''}${esc(g.date)}</b>
+        ${g.files.map(f => `<label class="flex items-center gap-2 py-1 cursor-pointer"><input type="checkbox" class="w-4 h-4" value="${esc(f.id)}" ${driveSel.has(f.id) ? 'checked' : ''}
+          onchange="this.checked ? driveSel.add(this.value) : driveSel.delete(this.value)"><span class="flex-1 truncate">${esc(f.name)}</span></label>`).join('')}</div>`;
+    }).join('');
+  }).join('');
+}
+function listaDespacho() {
+  try {
+    const st = JSON.parse(localStorage.getItem('parka_despacho_v2') || 'null');
+    if (!st || !st.packages) return null;
+    const pend = st.packages.filter(p => p.estado !== 'despachado');
+    return { tipo: st.dispatchType || localStorage.getItem('parka_dispatch_type') || '', archivo: st.fileName || '', total: st.packages.length,
+             paquetes: pend.map(p => ({ tracking: String(p.trackingId || ''), venta_id: String(p.ventaId || ''), producto: p.producto || '', sku: p.sku || '', cantidad: +p.cantidad || 1 })) };
+  } catch { return null; }
+}
+function infoDespacho() {
+  const l = listaDespacho(), el = document.getElementById('desp-info');
+  el.innerHTML = !l ? 'No hay una lista cargada en Despacho en este equipo. Abrí <a class="underline" href="/despacho">Despacho</a> y cargá los archivos, o usá Drive.'
+    : `<b>${esc(NOM[l.tipo] || l.tipo || 'Despacho')}</b>${l.archivo ? ' · ' + esc(l.archivo) : ''} · <b>${l.paquetes.length}</b> pendientes de ${l.total} paquetes`;
+}
+async function armar() {
+  const b = document.getElementById('btn-armar'), nombre = document.getElementById('nombre').value;
+  b.disabled = true; b.textContent = 'Armando…';
+  try {
+    let r;
+    if (org === 'drive') {
+      if (!driveSel.size) throw new Error('Marcá al menos un archivo');
+      r = await api('/recoleccion/api/crear/drive', { json: { ids: [...driveSel], tipo: tipo_(), nombre } });
+    } else if (org === 'despacho') {
+      const l = listaDespacho();
+      if (!l || !l.paquetes.length) throw new Error('No hay paquetes pendientes en Despacho');
+      r = await api('/recoleccion/api/crear/paquetes', { json: { paquetes: l.paquetes, tipo: l.tipo, nombre } });
+    } else {
+      const fs = document.getElementById('archivos').files;
+      if (!fs.length) throw new Error('Elegí el archivo');
+      const fd = new FormData(); fd.append('tipo', tipo_()); fd.append('nombre', nombre);
+      [...fs].forEach(f => fd.append('archivos', f));
+      r = await api('/recoleccion/api/crear/archivo', { method: 'POST', body: fd });
+    }
+    if (r.errores && r.errores.length) toast(r.errores.join(' · '), 'warn', 7000);
+    document.getElementById('nombre').value = '';
+    abrirRc(r.recoleccion.id);
+  } catch (e) { toast(e.message, 'error', 6000); }
+  b.disabled = false; b.textContent = '🧺 Armar recolección';
+}
+async function lista() {
+  const d = await api('/recoleccion/api/lista'), el = document.getElementById('lista');
+  el.innerHTML = d.recolecciones.length ? d.recolecciones.map(r => `<div class="flex flex-wrap items-center gap-3 py-2 border-b border-zinc-700 last:border-0">
+    <b>RC-${r.id}</b><span class="chip ${r.estado === 'abierta' ? 'chip-en_curso' : 'chip-hecha'}">${r.estado.toUpperCase()}</span>
+    <span class="flex-1 min-w-[180px] truncate">${esc(r.nombre)} · <span class="text-zinc-500">${r.hora} · ${esc(r.usuario)}</span></span>
+    <span>${r.recogidas}/${r.unidades} u.</span>${r.faltan && r.estado === 'cerrada' ? `<span class="chip chip-vencida">faltaron ${r.faltan}</span>` : ''}
+    <button class="btn ${r.estado === 'abierta' ? 'btn-primario' : 'btn-gris'} btn-chico" onclick="abrirRc(${r.id})">${r.estado === 'abierta' ? 'Seguir' : 'Ver'}</button>
+    <a class="btn btn-gris btn-chico" href="/recoleccion/${r.id}/recoleccion.xlsx">⬇</a></div>`).join('')
+    : '<p class="text-zinc-500">Todavía no hay recolecciones.</p>';
+}
+
+// ── Recolección en curso ──
+async function abrirRc(id) {
+  rc = (await api('/recoleccion/api/' + id)).recoleccion;
+  location.hash = 'rc' + id;
+  document.getElementById('v-inicio').classList.add('hidden');
+  document.getElementById('v-rc').classList.remove('hidden');
+  pintar(); document.getElementById('esc').focus();
+}
+function volver() { location.hash = ''; rc = null; document.getElementById('v-rc').classList.add('hidden'); document.getElementById('v-inicio').classList.remove('hidden'); lista(); }
+function pintar(flashId) {
+  const abierta = rc.estado === 'abierta';
+  document.getElementById('rc-titulo').textContent = `RC-${rc.id} · ${rc.nombre}`;
+  document.getElementById('rc-estado').innerHTML = `<span class="chip ${abierta ? 'chip-en_curso' : 'chip-hecha'}">${abierta ? 'EN CURSO' : 'TERMINADA ' + rc.cerrada}</span>`;
+  document.getElementById('rc-prog').textContent = `${rc.recogidas} / ${rc.unidades} u.`;
+  document.getElementById('rc-barra').style.width = (rc.unidades ? 100 * rc.recogidas / rc.unidades : 0) + '%';
+  document.getElementById('rc-excel').href = `/recoleccion/${rc.id}/recoleccion.xlsx`;
+  document.getElementById('rc-cerrar').classList.toggle('hidden', !abierta);
+  document.getElementById('rc-reabrir').classList.toggle('hidden', abierta);
+  document.getElementById('esc').classList.toggle('hidden', !abierta);
+  const av = [];
+  av.push(`<span class="chip chip-auto">${rc.paquetes} paquetes · ${rc.lineas} artículos distintos</span>`);
+  if (rc.sin_vincular) av.push(`<span class="chip chip-vencida">${rc.sin_vincular} sin vincular al catálogo</span>`);
+  if (rc.sin_ubicacion) av.push(`<span class="chip chip-pendiente">${rc.sin_ubicacion} sin ubicación (cargalas en <a class="underline" href="/mapeo">Mapeo</a>)</span>`);
+  document.getElementById('rc-avisos').innerHTML = av.join('');
+
+  const grupos = [], idx = {};
+  rc.items.forEach(i => {
+    const k = !i.articulo_id ? '~sinvinc' : (i.ubicacion || '~sinub');
+    if (!(k in idx)) { idx[k] = grupos.length; grupos.push({ k, items: [] }); }
+    grupos[idx[k]].items.push(i);
+  });
+  const peso = g => g.k === '~sinvinc' ? 3 : g.k === '~sinub' ? 2 : (g.items.every(i => i.completo) ? 1 : 0);
+  grupos.sort((a, b) => peso(a) - peso(b));
+  document.getElementById('rc-items').innerHTML = grupos.map(g => {
+    const tit = g.k === '~sinvinc' ? '<span class="text-red-600 font-bold">Sin vincular al catálogo</span>'
+      : g.k === '~sinub' ? '<span class="font-bold text-amber-400">Sin ubicación</span>' : `<span class="ub-grande">📍 ${esc(g.k)}</span>`;
+    return `<section class="card p-3"><div class="mb-2">${tit}</div><div class="flex flex-col gap-2">${g.items.map(i => fila(i, abierta)).join('')}</div></section>`;
+  }).join('') || '<p class="text-zinc-500">No hay artículos.</p>';
+  if (flashId) { const f = document.getElementById('it-' + flashId); if (f) { f.classList.add('flash'); f.scrollIntoView({ block: 'center', behavior: 'smooth' }); } }
+}
+function fila(i, abierta) {
+  const cls = i.completo ? 'completa' : i.recogido ? 'parcial' : '';
+  const nombre = i.articulo_id ? `<b>${esc(i.articulo)}</b> <span class="text-zinc-500">· ${esc(i.color)} · <b class="text-violeta">${esc(i.talle)}</b></span>`
+    : `<b>${esc(i.producto || '(sin título)')}</b>`;
+  const linkBox = linkIt === i.id ? `<div class="mt-2"><input class="input" id="lk-q" placeholder="Buscá el artículo del catálogo o escanealo" autocomplete="off"><div id="lk-res" class="mt-2 flex flex-col gap-1 max-h-72 overflow-y-auto"></div></div>` : '';
+  return `<div class="fila-rc ${cls}" id="it-${i.id}">
+    <div class="flex items-center gap-3">
+      <div class="flex-1 min-w-0"><div class="leading-snug break-words">${nombre}</div>
+        <div class="text-xs text-zinc-500 truncate">${i.sku ? 'SKU ' + esc(i.sku) : 'sin SKU'}${i.ventas ? ' · ' + esc(i.ventas) : ''}</div></div>
+      <div class="text-xl font-extrabold whitespace-nowrap ${i.completo ? 'text-teal-600' : ''}">${i.recogido}<span class="text-zinc-500 text-base">/${i.cantidad}</span></div>
+      ${abierta ? (i.articulo_id ? `<div class="flex gap-1">
+        <button class="btn btn-gris !w-9 !h-9 !p-0 !text-xl" onclick="marcar(${i.id}, -1)">−</button>
+        <button class="btn btn-gris !w-9 !h-9 !p-0 !text-xl" onclick="marcar(${i.id}, 1)">+</button>
+        ${i.completo ? '' : `<button class="btn btn-turq btn-chico" onclick="marcar(${i.id}, 0, true)">✓</button>`}</div>`
+        : `<button class="btn btn-primario btn-chico" onclick="abrirLink(${i.id})">Vincular</button>`) : ''}
+    </div>${linkBox}</div>`;
+}
+async function marcar(iid, delta, todo) {
+  try { const r = await api(`/recoleccion/api/item/${iid}/marcar`, { json: { delta, todo: !!todo } }); aplicar(r); }
+  catch (e) { toast(e.message, 'error'); }
+}
+function aplicar(r) {
+  const k = rc.items.findIndex(x => x.id === r.item.id);
+  if (k >= 0) rc.items[k] = r.item;
+  Object.assign(rc, r.resumen);
+  pintar(r.item.id);
+  if (rc.unidades && rc.recogidas === rc.unidades) { toast('¡Recolección completa! Tocá "Terminar".', 'ok', 5000); }
+}
+const esc_ = document.getElementById('esc');
+esc_.addEventListener('keydown', async e => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const v = esc_.value.trim(); esc_.value = '';
+  if (!v || !rc) return;
+  try {
+    const r = await api(`/recoleccion/api/${rc.id}/escanear`, { json: { codigo: v } });
+    if (r.tipo === 'ubicacion') {
+      beepOk();
+      toast(`📍 ${r.ubicacion}: ${r.items.length ? r.items.map(i => `${i.articulo} ${i.color} ${i.talle} ×${i.cantidad - i.recogido}`).join(' · ') : 'nada pendiente acá'}`, 'info', 6000);
+      if (r.items[0]) pintar(r.items[0].id);
+      return;
+    }
+    beepOk(); toast(`+1 ${r.item.articulo} ${r.item.color} ${r.item.talle} (${r.item.recogido}/${r.item.cantidad})`);
+    aplicar(r);
+  } catch (err) { r_err(err); }
+});
+function r_err(err) { (/completo/.test(err.message) ? beepWarn : beepError)(); toast(err.message, 'error', 4000); }
+
+function abrirLink(iid) {
+  linkIt = linkIt === iid ? null : iid; pintar();
+  const inp = document.getElementById('lk-q'); if (!inp) return;
+  inp.focus(); let t = null;
+  inp.oninput = () => { clearTimeout(t); t = setTimeout(() => buscarLink(inp.value), 250); };
+  const it = rc.items.find(x => x.id === iid);
+  const pista = (it.producto || '').split(/\s+/).filter(w => /\d{3,}/.test(w))[0];
+  if (pista) { inp.value = pista; buscarLink(pista); }
+}
+async function buscarLink(v) {
+  const el = document.getElementById('lk-res');
+  if (v.trim().length < 2) { el.innerHTML = ''; return; }
+  const d = await api('/recoleccion/api/buscar?q=' + encodeURIComponent(v));
+  const ORD = ['XXXS','XXS','XS','S','M','L','XL','XXL','XXXL','XXXXL'];
+  const ot = t => { const i = ORD.indexOf(String(t).toUpperCase()); return i >= 0 ? i : (parseInt(t) || 100); };
+  el.innerHTML = d.modelos.map(m => `<div class="rounded-xl border border-zinc-700 p-2"><b class="text-sm">${esc(m.articulo)}</b>
+    <div class="flex flex-wrap gap-1 mt-1">${m.variantes.sort((a, b) => a.color.localeCompare(b.color) || ot(a.talle) - ot(b.talle)).map(x =>
+      `<button class="btn ${m.preseleccion === x.id ? 'btn-primario' : 'btn-gris'} btn-chico" onclick="vincular(${x.id})">${esc(x.color)} · ${esc(x.talle)}${x.marca ? ' · ' + esc(x.marca) : ''}</button>`).join('')}</div></div>`).join('')
+    || '<p class="text-sm text-zinc-500">Sin resultados.</p>';
+}
+async function vincular(aid) {
+  try {
+    const r = await api(`/recoleccion/api/item/${linkIt}/vincular`, { json: { articulo_id: aid, recordar: true } });
+    linkIt = null; rc = r.recoleccion; pintar(); toast('Vinculado (queda recordado para la próxima)');
+  } catch (e) { toast(e.message, 'error'); }
+}
+async function actualizar() { rc = (await api(`/recoleccion/api/${rc.id}/actualizar`, { method: 'POST' })).recoleccion; pintar(); toast('Ubicaciones actualizadas'); }
+async function cerrar() {
+  const faltan = rc.unidades - rc.recogidas;
+  if (!confirm(faltan ? `Faltan ${faltan} unidades. ¿Terminar igual?` : '¿Terminar la recolección?')) return;
+  rc = (await api(`/recoleccion/api/${rc.id}/cerrar`, { method: 'POST' })).recoleccion; pintar();
+  toast(faltan ? `Terminada · faltaron ${faltan} u. (están en el Excel)` : 'Recolección terminada', faltan ? 'warn' : 'ok', 5000);
+}
+async function reabrir() { rc = (await api(`/recoleccion/api/${rc.id}/reabrir`, { method: 'POST' })).recoleccion; pintar(); }
+async function borrarRc() {
+  if (!confirm(`¿Borrar RC-${rc.id}?`)) return;
+  try { await api('/recoleccion/api/' + rc.id, { method: 'DELETE' }); volver(); } catch (e) { toast(e.message, 'error'); }
+}
+
+tipoSel('__init__'); lista();
+const m = location.hash.match(/^#rc(\d+)$/); if (m) abrirRc(+m[1]);
+</script>
+{% endblock %}

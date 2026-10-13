@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block titulo %}ParkIA · {{ APP_NOMBRE }}{% endblock %}
+{% block contenido %}
+<div class="flex flex-wrap items-center gap-3 mb-4">
+  <h1 class="text-2xl font-bold flex items-center gap-2"><span class="parkia-p parkia-p-chico">P</span> ParkIA</h1>
+  <span class="chip {{ 'chip-hecha' if gemini_ok else 'chip-vencida' }}">Gemini {{ 'activo' if gemini_ok else 'sin clave' }}</span>
+  <span class="chip {{ 'chip-hecha' if parkahub_ok else 'chip-pendiente' }}">Mercado Libre {{ 'conectado' if parkahub_ok else 'sin conectar' }}</span>
+  <button class="btn btn-gris btn-chico ml-auto" id="btn-borrar" onclick="borrar(this)">Borrar charla</button>
+</div>
+{% if not gemini_ok or not parkahub_ok %}
+<div class="card p-4 mb-4 text-sm">
+  {% if not gemini_ok %}<p>⚠️ Falta la clave de Gemini.{% if u.es_admin %} Cargala en <a class="underline text-violeta" href="/admin/conexiones">Conexiones</a>.{% else %} Pedile al admin que la cargue.{% endif %}</p>{% endif %}
+  {% if not parkahub_ok %}<p>ℹ️ Sin ParkaHub ParkIA solo ve los datos de esta app (tareas, devoluciones, conteos, artículos). Para ventas, publicaciones y preguntas de ML hace falta la clave de la API de Costos o el token de ParkaHub{% if u.es_admin %} (<a class="underline text-violeta" href="/admin/conexiones">Conexiones</a>){% endif %}.</p>{% endif %}
+</div>
+{% endif %}
+<div class="card flex flex-col" style="height: calc(100vh - 220px); min-height: 420px">
+  <div id="chat" class="flex-1 overflow-y-auto p-4 flex flex-col gap-3"></div>
+  <div id="sugs" class="px-4 pb-2 flex flex-wrap gap-2">
+    {% for s in sugerencias %}<button class="btn btn-gris btn-chico text-left" onclick="usar(this)">{{ s }}</button>{% endfor %}
+  </div>
+  <form class="border-t border-zinc-700 p-3 flex gap-2" onsubmit="event.preventDefault(); enviar();">
+    <textarea id="txt" rows="2" class="input flex-1 resize-none" placeholder="Preguntá: una venta, un MLA, preguntas sin responder, cómo viene el día…"
+      onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviar();}"></textarea>
+    <button id="btn-env" class="btn btn-primario">Enviar</button>
+  </form>
+</div>
+<p class="text-xs text-zinc-500 mt-2">ParkIA consulta datos pero no cambia nada en Mercado Libre ni en la app. Revisá siempre antes de copiar una respuesta.</p>
+{% endblock %}
+{% block scripts %}
+<script>
+const chat = document.getElementById('chat');
+function md(t) {  // markdown mínimo y seguro
+  let h = esc(t);
+  h = h.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/`([^`]+)`/g, '<code>$1</code>');
+  h = h.replace(/^(\s*)[-*] (.+)$/gm, '$1• $2');
+  return h.replace(/\n/g, '<br>');
+}
+function burbuja(m) {
+  const yo = m.rol === 'user';
+  const d = document.createElement('div');
+  d.className = 'max-w-[85%] rounded-xl px-4 py-2 text-sm ' + (yo ? 'self-end bg-violeta text-white' : 'self-start bg-zinc-900 border border-zinc-700');
+  d.innerHTML = md(m.texto);
+  if (!yo) {
+    const pie = document.createElement('div');
+    pie.className = 'mt-2 flex gap-2 items-center text-xs text-zinc-500';
+    pie.innerHTML = (m.consultas ? `<span>🔎 ${esc(m.consultas)}</span>` : '') + '<button class="underline ml-auto">Copiar</button>';
+    pie.querySelector('button').onclick = () => { navigator.clipboard.writeText(m.texto); toast('Copiado'); };
+    d.appendChild(pie);
+  }
+  chat.appendChild(d);
+  chat.scrollTop = chat.scrollHeight;
+  return d;
+}
+async function cargar() {
+  const d = await api('/asistente/api/historial');
+  chat.innerHTML = '';
+  d.mensajes.forEach(burbuja);
+  document.getElementById('sugs').classList.toggle('hidden', d.mensajes.length > 0);
+}
+function usar(b) { document.getElementById('txt').value = b.textContent.trim(); document.getElementById('txt').focus(); }
+async function enviar() {
+  const t = document.getElementById('txt'), b = document.getElementById('btn-env');
+  const texto = t.value.trim();
+  if (!texto || b.disabled) return;
+  t.value = ''; b.disabled = true;
+  document.getElementById('sugs').classList.add('hidden');
+  burbuja({ rol: 'user', texto });
+  const pensando = burbuja({ rol: 'model', texto: 'Pensando…' });
+  try {
+    const r = await api('/asistente/api/mensaje', { json: { texto } });
+    pensando.remove();
+    burbuja({ rol: 'model', texto: r.texto, consultas: r.consultas });
+  } catch (e) {
+    pensando.remove();
+    toast(e.message, 'error', 7000);
+    t.value = texto;
+  }
+  b.disabled = false; t.focus();
+}
+let confirmarBorrar = 0;
+async function borrar(b) {  // doble toque, sin confirm()
+  if (Date.now() - confirmarBorrar > 4000) { confirmarBorrar = Date.now(); b.textContent = 'Tocá de nuevo para borrar'; setTimeout(() => b.textContent = 'Borrar charla', 4000); return; }
+  await api('/asistente/api/borrar', { method: 'POST' });
+  b.textContent = 'Borrar charla'; cargar();
+}
+cargar();
+</script>
+{% endblock %}

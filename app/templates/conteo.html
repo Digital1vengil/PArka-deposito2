@@ -1,0 +1,247 @@
+{% extends "base.html" %}
+{% block titulo %}Conteo · {{ APP_NOMBRE }}{% endblock %}
+{% block contenido %}
+<a href="/" class="text-sm text-zinc-500 hover:text-violeta">← Inicio</a>
+<h1 class="text-2xl font-bold mb-1">🔢 Conteo</h1>
+<p class="text-sm text-zinc-500 mb-5">Elegí el artículo: queda fijo y cargás la cantidad de cada color y talle. Si escaneás un código, suma 1 a esa variante.
+  Entran artículos <b>Parka</b>, <b>Puffers</b> y <b>No Brand</b>.</p>
+
+<div class="grid lg:grid-cols-5 gap-6">
+  <div class="lg:col-span-3 flex flex-col gap-4">
+    <section class="card p-4">
+      <label class="lbl" id="lbl-q">1 · Buscar artículo</label>
+      <input id="q" class="input !text-lg !py-3" placeholder="Ej: THOR, 00114, o escaneá el código" autocomplete="off" autofocus>
+      <div id="resultados" class="mt-3 flex flex-col gap-2 max-h-72 overflow-y-auto"></div>
+    </section>
+
+    <section id="fijo" class="card p-4 hidden">
+      <div class="flex items-center gap-3 mb-1">
+        <h2 class="font-bold text-xl flex-1" id="f-articulo"></h2>
+        <span id="f-total" class="chip chip-en_curso"></span>
+        <button class="btn btn-gris btn-chico" onclick="soltar()">Cambiar artículo</button>
+      </div>
+      <p class="text-xs text-zinc-500 mb-4">2 · Cargá las cantidades con − / + o escribiendo el número.</p>
+      <div id="f-grilla" class="flex flex-col gap-4"></div>
+      <button class="btn btn-primario w-full !py-3 !text-base mt-5" onclick="listoArticulo()">✔ Listo — agregar otro artículo</button>
+    </section>
+  </div>
+
+  <section class="card p-4 lg:col-span-2 self-start">
+    <div class="flex items-center justify-between mb-2">
+      <h2 class="font-bold">Conteo</h2>
+      <span id="total" class="chip chip-en_curso">0 unidades</span>
+    </div>
+    <div id="lista" class="flex flex-col mb-4 max-h-96 overflow-y-auto"></div>
+    <label class="lbl">Nota (opcional: ubicación, estante…)</label>
+    <input id="nota" class="input mb-3" maxlength="200" placeholder="Ej: Estante A3">
+    <div class="flex gap-2">
+      <button id="btn-confirmar" class="btn btn-primario flex-1 !py-3 !text-base" onclick="confirmar()" disabled>✔ Confirmar y guardar</button>
+      <button id="btn-vaciar" class="btn btn-gris" onclick="vaciar()" disabled title="Borrar todo lo cargado">Vaciar</button>
+    </div>
+    <div id="resultado" class="mt-4"></div>
+  </section>
+</div>
+
+<section class="card p-4 mt-6">
+  <h2 class="font-bold mb-3">Últimos conteos</h2>
+  <div id="historial" class="flex flex-col gap-2 text-sm"></div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+let modelos = [], modelo = null, tBus = null;
+const cant = {};        // id variante -> cantidad
+const info = {};        // id variante -> {articulo, color, talle, marca, sku}
+const q = document.getElementById('q');
+q.addEventListener('input', () => { clearTimeout(tBus); tBus = setTimeout(buscar, 250); });
+q.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); clearTimeout(tBus); buscar(); } });
+window.addEventListener('beforeunload', e => { if (totalUnidades()) { e.preventDefault(); e.returnValue = ''; } });
+
+const ORDEN_TALLE = ['XXXS','XXS','XS','S','M','L','XL','XXL','XXXL','XXXXL','U','UNICO','ÚNICO'];
+const ordTalle = t => { const i = ORDEN_TALLE.indexOf(String(t).toUpperCase()); return i >= 0 ? i : (parseInt(t) || 100); };
+const ORDEN_MARCA = { 'Parka': 0, 'Puffers': 1, 'No Brand': 2 };
+const totalUnidades = () => Object.values(cant).reduce((a, n) => a + n, 0);
+
+async function buscar() {
+  const v = q.value.trim(), el = document.getElementById('resultados');
+  if (v.length < 2) { el.innerHTML = ''; return; }
+  const d = await api('/conteo/api/buscar?q=' + encodeURIComponent(v));
+  modelos = d.modelos;
+  if (modelos.length === 1 && modelos[0].preseleccion) {   // escaneó un código: fija el artículo y suma 1
+    fijar(0);
+    sumar(modelos[0].preseleccion, 1);
+    beepOk(); q.value = ''; el.innerHTML = '';
+    const v0 = info[modelos[0].preseleccion];
+    toast(`+1 ${v0.articulo} ${v0.color} ${v0.talle}`);
+    return;
+  }
+  if (!modelos.length) { el.innerHTML = '<p class="text-sm text-zinc-500">Sin resultados Parka, Puffers o No Brand con código de barras.</p>'; return; }
+  el.innerHTML = modelos.map((m, i) => {
+    const colores = [...new Set(m.variantes.map(x => x.color))];
+    const marcas = [...new Set(m.variantes.map(x => x.marca))];
+    return `<button class="text-left p-3 rounded-xl border border-zinc-700 hover:bg-zinc-800 flex items-center gap-3" onclick="fijar(${i})">
+      <span class="font-semibold flex-1">${esc(m.articulo)}</span>
+      ${marcas.map(mm => `<span class="chip chip-auto">${esc(mm)}</span>`).join(' ')}
+      <span class="text-xs text-zinc-500">${colores.length} color${colores.length > 1 ? 'es' : ''} · ${m.variantes.length} variantes</span></button>`;
+  }).join('');
+}
+
+function fijar(i) {
+  modelo = modelos[i];
+  modelo.variantes.forEach(x => { info[x.id] = { articulo: modelo.articulo, color: x.color, talle: x.talle, marca: x.marca, sku: x.sku }; });
+  document.getElementById('resultados').innerHTML = '';
+  q.value = '';
+  document.getElementById('lbl-q').textContent = 'Escaneá un código o buscá otro artículo';
+  document.getElementById('f-articulo').textContent = modelo.articulo;
+  pintarGrilla();
+  document.getElementById('fijo').classList.remove('hidden');
+}
+// Terminó de cargar este artículo: lo deja en el conteo y limpia todo para buscar el siguiente.
+function listoArticulo() {
+  const t = modelo ? modelo.variantes.reduce((a, x) => a + (cant[x.id] || 0), 0) : 0;
+  if (modelo) toast(t ? `Agregado: ${modelo.articulo} · ${t} u.` : `${modelo.articulo}: sin cantidades`, t ? 'ok' : 'warn');
+  soltar();
+}
+function soltar() {
+  clearTimeout(tBus);
+  modelo = null; modelos = [];
+  document.getElementById('resultados').innerHTML = '';
+  document.getElementById('f-grilla').innerHTML = '';
+  document.getElementById('fijo').classList.add('hidden');
+  document.getElementById('lbl-q').textContent = '1 · Buscar artículo';
+  q.value = ''; q.focus();
+}
+
+function pintarGrilla() {
+  if (!modelo) return;
+  const variasMarcas = new Set(modelo.variantes.map(x => x.marca)).size > 1;
+  const grupos = {};
+  modelo.variantes.forEach(x => {
+    const k = variasMarcas ? `${x.color}|${x.marca}` : x.color;
+    (grupos[k] = grupos[k] || { color: x.color, marca: variasMarcas ? x.marca : '', vs: [] }).vs.push(x);
+  });
+  const lista = Object.values(grupos).sort((a, b) => a.color.localeCompare(b.color) || (ORDEN_MARCA[a.marca] ?? 9) - (ORDEN_MARCA[b.marca] ?? 9));
+  document.getElementById('f-grilla').innerHTML = lista.map(g => {
+    g.vs.sort((a, b) => ordTalle(a.talle) - ordTalle(b.talle));
+    const sub = g.vs.reduce((a, x) => a + (cant[x.id] || 0), 0);
+    return `<div>
+      <div class="flex items-center gap-2 mb-2"><b>${esc(g.color)}</b>${g.marca ? `<span class="chip chip-auto">${esc(g.marca)}</span>` : ''}
+        <span class="text-xs text-zinc-500 ml-auto" id="sub-${cssId(g)}">${sub ? sub + ' u.' : ''}</span></div>
+      <div class="flex flex-wrap gap-2">${g.vs.map(x => `
+        <div class="celda rounded-xl border ${cant[x.id] ? 'border-teal-500' : 'border-zinc-700'} p-2 flex flex-col items-center gap-1" id="c-${x.id}" style="${cant[x.id] ? 'background:#dcfce7' : ''}">
+          <span class="font-bold text-sm">${esc(x.talle)}</span>
+          <div class="flex items-center gap-1">
+            <button class="btn btn-gris !w-9 !h-9 !p-0 !text-xl" onclick="sumar(${x.id},-1)">−</button>
+            <input class="input !w-12 !h-9 !px-1 text-center font-bold" type="number" inputmode="numeric" min="0" max="99999"
+                   id="n-${x.id}" value="${cant[x.id] || ''}" placeholder="0" onchange="fijarCant(${x.id}, this.value)" onfocus="this.select()">
+            <button class="btn btn-gris !w-9 !h-9 !p-0 !text-xl" onclick="sumar(${x.id},1)">+</button>
+          </div>
+        </div>`).join('')}</div></div>`;
+  }).join('');
+  const t = modelo.variantes.reduce((a, x) => a + (cant[x.id] || 0), 0);
+  document.getElementById('f-total').textContent = `${t} u. de este artículo`;
+}
+const cssId = g => (g.color + '_' + g.marca).replace(/[^a-z0-9]/gi, '_');
+
+function sumar(id, n) { fijarCant(id, (cant[id] || 0) + n); }
+function fijarCant(id, v) {
+  const n = Math.max(0, Math.min(99999, parseInt(v) || 0));
+  if (n) cant[id] = n; else delete cant[id];
+  pintarGrilla(); pintarLista();
+}
+
+function pintarLista() {
+  const el = document.getElementById('lista'), total = totalUnidades();
+  document.getElementById('total').textContent = `${total} unidad${total === 1 ? '' : 'es'}`;
+  document.getElementById('btn-confirmar').disabled = !total;
+  document.getElementById('btn-vaciar').disabled = !total;
+  const ids = Object.keys(cant).map(Number);
+  if (!ids.length) { el.innerHTML = '<p class="text-sm text-zinc-500 text-center py-6">Todavía no cargaste cantidades</p>'; return; }
+  const porArt = {};
+  ids.forEach(id => (porArt[info[id].articulo] = porArt[info[id].articulo] || []).push(id));
+  el.innerHTML = Object.keys(porArt).sort().map(art => {
+    const vs = porArt[art].sort((a, b) => info[a].color.localeCompare(info[b].color) || ordTalle(info[a].talle) - ordTalle(info[b].talle));
+    const sub = vs.reduce((a, id) => a + cant[id], 0);
+    return `<div class="py-2 border-b border-zinc-700 last:border-0">
+      <div class="flex items-center mb-1"><b class="text-sm flex-1 truncate">${esc(art)}</b><span class="text-xs text-zinc-500">${sub} u.</span></div>
+      ${vs.map(id => `<div class="flex items-center gap-2 text-xs py-0.5">
+        <span class="flex-1 text-zinc-500">${esc(info[id].color)} · ${esc(info[id].talle)} · ${esc(info[id].marca)}</span>
+        <b class="w-10 text-right">${cant[id]}</b>
+        <button class="text-red-600" title="Quitar" onclick="fijarCant(${id},0)">✕</button></div>`).join('')}
+    </div>`;
+  }).join('');
+}
+function vaciar() {
+  if (!confirmarAccion('¿Borrar todas las cantidades cargadas?')) return;
+  Object.keys(cant).forEach(k => delete cant[k]); pintarGrilla(); pintarLista();
+}
+function confirmarAccion(t) { return window.confirm(t); }
+
+function tarjetaResultado(c) {
+  return `<div class="rounded-xl p-4 border border-teal-200" style="background:#dcfce7">
+    <div class="font-bold mb-1">Conteo CT-${c.id} · ${c.total} unidades</div>
+    <div class="text-teal-600 font-semibold text-sm">Guardado en la app</div>
+    <div class="flex flex-wrap gap-2 mt-3">
+      <a class="btn btn-primario" href="/conteo/${c.id}/conteo.xlsx">⬇ Descargar Excel</a>
+    </div>
+    <details class="mt-3" open><summary class="text-sm cursor-pointer">🖨 Imprimir etiquetas</summary>
+      <div class="flex flex-wrap items-end gap-2 mt-2">
+        <div><label class="lbl">Formato</label>${selectorFormatoEtiquetas()}</div>
+        <div data-solo-a4><label class="lbl">Empezar en la etiqueta Nº</label><input id="desde-${c.id}" type="number" min="1" max="40" value="1" class="input !w-24"></div>
+        <button class="btn btn-gris" onclick="abrirEtiquetas(${c.id}, false, this)">Imprimir etiquetas</button>
+        <button class="btn btn-gris btn-chico" onclick="abrirEtiquetas(${c.id}, true, this)">Prueba (1 fila)</button>
+      </div>
+      <p class="text-xs text-zinc-500 mt-2" data-solo-a4>Una etiqueta por unidad. A4 al 100 % ("Tamaño real"), sin "Ajustar a página".</p>
+      <p class="text-xs text-zinc-500 mt-2" data-solo-rollo>Una etiqueta por unidad. Rollo Honeywell 40×25, de a 2 por fila.</p>
+    </details></div>`;
+}
+function abrirEtiquetas(id, prueba, btn) {
+  const desde = +(document.getElementById('desde-' + id)?.value) || 1;
+  imprimirEtiquetas('conteo', id, { desde, prueba, btn });
+}
+async function confirmar() {
+  const b = document.getElementById('btn-confirmar'); b.disabled = true; b.textContent = 'Guardando…';
+  try {
+    const r = await api('/conteo/api/confirmar', { json: { nota: document.getElementById('nota').value,
+      items: Object.entries(cant).map(([id, n]) => ({ articulo_id: +id, cantidad: n })) } });
+    document.getElementById('resultado').innerHTML = tarjetaResultado(r.conteo);
+    syncFormatoEtiquetas();
+    toast('Conteo guardado', 'ok', 4000);
+    Object.keys(cant).forEach(k => delete cant[k]);
+    document.getElementById('nota').value = '';
+    soltar(); pintarLista(); historial();
+  } catch (e) { toast(e.message, 'error', 6000); }
+  b.textContent = '✔ Confirmar y guardar'; b.disabled = !totalUnidades();
+}
+async function historial() {
+  const d = await api('/conteo/api/historial'), el = document.getElementById('historial');
+  _avisarNuevos(d.conteos);
+  el.innerHTML = d.conteos.length ? d.conteos.map(x => {
+    const arts = [...new Set(x.items.map(i => i.articulo))];
+    return `<div class="flex flex-wrap items-center gap-3 py-2 border-b border-zinc-700 last:border-0">
+      <b>CT-${x.id}</b>${_chipNuevo(x)}<span class="text-zinc-500">${x.hora} · ${esc(x.usuario)}</span>
+      <span class="flex-1 min-w-[200px] truncate">${arts.map(esc).join(' · ')} · <b>${x.total} u.</b>${x.nota ? ' · ' + esc(x.nota) : ''}</span>
+      <a class="btn btn-gris btn-chico" href="/conteo/${x.id}/conteo.xlsx">⬇ Excel</a>
+      <button class="btn btn-primario btn-chico" onclick="marcarVisto(${x.id}); imprimirEtiquetas('conteo', ${x.id}, { btn: this })">🖨 Imprimir etiquetas</button>
+    </div>`;
+  }).join('') : '<p class="text-zinc-500">Todavía no hay conteos.</p>';
+}
+
+// Se actualiza solo: los conteos que carga otra persona aparecen acá para imprimirlos igual.
+const YO = {{ u.id }};
+let _vistos = null, _nuevos = new Set();
+function marcarVisto(id) { _nuevos.delete(id); document.getElementById('nuevo-CT-' + id)?.remove(); }
+function _avisarNuevos(xs) {
+  const ids = new Set(xs.map(x => x.id));
+  if (_vistos) for (const x of xs) if (!_vistos.has(x.id) && x.usuario_id !== YO) {
+    _nuevos.add(x.id);
+    toast(`Nuevo CT-${x.id} de ${x.usuario} · ${x.total} u. — imprimí las etiquetas desde la lista`, 'info', 8000);
+    beepOk();
+  }
+  _vistos = ids;
+}
+function _chipNuevo(x) { return _nuevos.has(x.id) ? `<span id="nuevo-CT-${x.id}" class="chip chip-alta">NUEVO</span>` : ''; }
+setInterval(() => { if (!document.hidden) historial().catch(() => {}); }, 20000);
+pintarLista(); historial();
+</script>
+{% endblock %}

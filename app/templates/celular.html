@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block titulo %}Usar en el celular · {{ APP_NOMBRE }}{% endblock %}
+{% block main_class %}max-w-lg mx-auto px-5 py-8{% endblock %}
+{% block contenido %}
+<a href="javascript:history.back()" class="text-sm text-zinc-500">← Volver</a>
+<div class="card p-6 mt-3 text-center">
+  <h1 class="text-2xl font-bold mb-1">📱 Usar en el celular</h1>
+  {% if url %}
+  <p class="text-sm text-zinc-500 mb-4">Con el celular conectado al <b>mismo WiFi</b> que esta PC, escaneá el QR con la cámara:</p>
+  <div class="mx-auto w-60 bg-white p-2 rounded-xl border border-zinc-700">{{ qr|safe }}</div>
+  <p class="font-mono text-sm mt-3 break-all">{{ url_ir }}</p>
+  <div class="text-left text-sm mt-5 bg-zinc-900 rounded-xl p-4 leading-relaxed">
+    <b>La primera vez:</b><br>
+    1. El celular avisa <i>"La conexión no es privada"</i> (es normal: el certificado lo hace esta PC).<br>
+    2. Tocá <b>Configuración avanzada</b> → <b>Continuar a {{ url.split('//')[1].split(':')[0] }}</b>.<br>
+    3. Entrá con tu nombre y PIN y, en Despacho, <b>permití la cámara</b>.<br>
+    Después podés agregarla a la pantalla de inicio (menú ⋮ → <i>Agregar a pantalla principal</i>).
+  </div>
+  {% else %}
+  <p class="text-red-600">La conexión segura para celulares no está activa. Abrí la app con <b>PARKA Deposito.exe</b>.</p>
+  {% endif %}
+</div>
+{% endblock %}

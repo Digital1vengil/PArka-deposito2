@@ -1,0 +1,313 @@
+{% extends "base.html" %}
+{% block titulo %}Despacho · {{ APP_NOMBRE }}{% endblock %}
+{% block contenido %}
+<div class="flex flex-wrap items-center gap-3 mb-6">
+  <div>
+    <a href="/despacho" class="text-sm text-zinc-400 hover:text-violeta">← Volver al scanner</a>
+    <h1 class="text-2xl font-bold">🚚 Despacho nuevo <span class="chip chip-auto align-middle">BETA</span></h1>
+  </div>
+  <a href="/despacho/escanear" class="btn btn-primario ml-auto !py-3 !px-6 !text-base">📷 Escanear paquetes</a>
+</div>
+
+<div class="grid lg:grid-cols-3 gap-6">
+  <!-- Columna izquierda: carga + lotes -->
+  <div class="lg:col-span-1 flex flex-col gap-6">
+    <section class="card p-5">
+      <h2 class="font-bold mb-3">Cargar despachos del día</h2>
+      <label class="lbl">Tipo</label>
+      <div class="grid grid-cols-3 gap-2 mb-3" id="tipos">
+        {% for k in ['flex','colecta','tiendanube'] %}
+        <button type="button" data-tipo="{{ k }}" class="btn btn-gris btn-chico !py-2 tipo-btn">{{ TIPOS_LOTE[k] }}</button>
+        {% endfor %}
+      </div>
+      <div class="flex gap-2 mb-3 text-sm">
+        <button type="button" class="btn btn-chico origen" data-o="drive">☁ Desde Google Drive</button>
+        <button type="button" class="btn btn-chico origen" data-o="pc">💻 Desde la PC</button>
+      </div>
+
+      <div id="origen-drive">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs text-zinc-400" id="drive-ruta">PARKA Despacho / …</span>
+          <button type="button" class="text-xs text-teal-400" onclick="listarDrive()">↻ Actualizar</button>
+        </div>
+        <div id="drive-lista" class="flex flex-col gap-2 max-h-72 overflow-y-auto mb-3 text-sm"><p class="text-zinc-500">Cargando…</p></div>
+      </div>
+
+      <div id="origen-pc" class="hidden">
+        <label class="lbl">Archivos (etiquetas ZPL/TXT de ML, o planilla CSV/XLSX)</label>
+        <input type="file" id="archivos" multiple accept=".txt,.zpl,.csv,.xlsx,.xlsm"
+               class="block w-full text-sm text-zinc-300  mb-3">
+      </div>
+
+      <div id="preview" class="hidden text-sm mb-3"></div>
+      <button id="btn-crear" class="btn btn-primario w-full" disabled onclick="crearLote()">Crear lote</button>
+    </section>
+
+    <section id="drive-aviso" class="card p-4 hidden border-amber-600">
+      <p class="text-sm text-amber-300 mb-2" id="drive-aviso-txt"></p>
+      <button class="btn btn-gris btn-chico" onclick="subirDrive(this)">☁ Guardar en Drive ahora</button>
+    </section>
+
+    <section class="card p-5">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-bold">Lotes</h2>
+        <button class="text-xs text-teal-400" onclick="filtrarLote(null)" id="btn-todos" style="display:none">Ver todos</button>
+      </div>
+      <div id="lotes" class="flex flex-col gap-3"><p class="text-zinc-500 text-sm">Cargando…</p></div>
+    </section>
+  </div>
+
+  <!-- Columna derecha: paquetes + tareas -->
+  <div class="lg:col-span-2 flex flex-col gap-6">
+    <section class="card p-5">
+      <div class="flex flex-wrap items-center gap-3 mb-3">
+        <h2 class="font-bold">Paquetes <span id="titulo-filtro" class="text-zinc-400 font-normal text-sm"></span></h2>
+        <input id="buscar" class="input !w-56 ml-auto" placeholder="Buscar tracking, venta, comprador, SKU…">
+      </div>
+      <div class="flex gap-2 mb-3 text-sm">
+        <button class="btn btn-chico pestana" data-p="pendiente">Pendientes <span id="n-pend"></span></button>
+        <button class="btn btn-chico pestana" data-p="despachado">Despachados <span id="n-desp"></span></button>
+      </div>
+      <div id="paquetes" class="flex flex-col gap-2 max-h-[60vh] overflow-y-auto"></div>
+    </section>
+
+    <a href="/tareas" class="card p-4 flex items-center gap-3 ">
+      <span class="text-2xl">✅</span><div class="flex-1"><b>Tareas</b><div class="text-xs text-zinc-400" id="resumen-tareas">—</div></div><span class="text-teal-400 text-sm">Ver →</span>
+    </a>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+let tipo = localStorage.getItem('parka_tipo') || 'flex';
+let pestana = 'pendiente', loteFiltro = null, estado = null, mapeo = null, ultimoPreview = null;
+let origen = localStorage.getItem('parka_origen') || 'drive', driveSel = new Set();
+const FORMATOS = { zpl: 'etiquetas ZPL', tiendanube: 'órdenes Tienda Nube', tabla: 'planilla' };
+const CAMPOS = { tracking: 'Nº de envío / código a escanear *', venta_id: 'Nº de venta / orden', comprador: 'Comprador',
+                 producto: 'Producto', sku: 'SKU', cantidad: 'Cantidad' };
+
+function pintarTipos() {
+  document.querySelectorAll('.tipo-btn').forEach(b => {
+    b.classList.toggle('btn-primario', b.dataset.tipo === tipo);
+    b.classList.toggle('btn-gris', b.dataset.tipo !== tipo);
+  });
+}
+document.querySelectorAll('.tipo-btn').forEach(b => b.onclick = () => {
+  tipo = b.dataset.tipo; try { localStorage.setItem('parka_tipo', tipo); } catch {}
+  pintarTipos(); mapeo = null;
+  if (origen === 'drive') { driveSel.clear(); listarDrive(); } else if (archivosSel().length) previsualizar();
+});
+pintarTipos();
+
+const archivosSel = () => Array.from(document.getElementById('archivos').files);
+document.getElementById('archivos').onchange = () => { mapeo = null; previsualizar(); };
+
+function pintarOrigen() {
+  document.querySelectorAll('.origen').forEach(b => { b.classList.toggle('btn-primario', b.dataset.o === origen); b.classList.toggle('btn-gris', b.dataset.o !== origen); });
+  document.getElementById('origen-drive').classList.toggle('hidden', origen !== 'drive');
+  document.getElementById('origen-pc').classList.toggle('hidden', origen !== 'pc');
+  document.getElementById('preview').classList.add('hidden'); document.getElementById('btn-crear').disabled = true;
+}
+document.querySelectorAll('.origen').forEach(b => b.onclick = () => {
+  origen = b.dataset.o; try { localStorage.setItem('parka_origen', origen); } catch {} mapeo = null; pintarOrigen();
+  if (origen === 'drive') listarDrive(); else if (archivosSel().length) previsualizar();
+});
+
+async function listarDrive() {
+  const el = document.getElementById('drive-lista');
+  const nom = { flex: 'Flex', colecta: 'Colecta', tiendanube: 'TiendaNube' }[tipo];
+  el.innerHTML = '<p class="text-zinc-500">Buscando en Google Drive…</p>';
+  try {
+    const d = await api('/despacho/api/drive/archivos?tipo=' + tipo);
+    document.getElementById('drive-ruta').innerHTML = `📁 PARKA Despacho / ${nom} ${d.carpeta ? `· <a class="text-teal-400 underline" target="_blank" href="${esc(d.carpeta)}">abrir carpeta</a>` : ''}`;
+    if (!d.grupos.length) { el.innerHTML = `<p class="text-zinc-500">No hay archivos. Subí las etiquetas a <b>PARKA Despacho / ${nom} / ${d.hoy}</b> en Drive.</p>`; return; }
+    el.innerHTML = d.grupos.map((g, gi) => `
+      <div class="bg-zinc-900 rounded-xl p-3">
+        <div class="flex items-center justify-between mb-1"><b class="${g.date === d.hoy ? 'text-teal-400' : ''}">${g.date === d.hoy ? 'Hoy · ' : ''}${esc(g.date)}</b>
+          ${g.files.length > 1 ? `<button type="button" class="text-xs text-teal-400" onclick="elegirGrupo(${gi})">Elegir todos</button>` : ''}</div>
+        ${g.files.map(f => `<label class="flex items-center gap-2 py-1 cursor-pointer">
+            <input type="checkbox" class="drive-chk accent-teal-500 w-4 h-4" data-g="${gi}" value="${esc(f.id)}" ${driveSel.has(f.id) ? 'checked' : ''}>
+            <span class="flex-1 truncate">${esc(f.name)}</span>
+            ${f.cargado ? '<span class="chip chip-hecha">YA CARGADO</span>' : ''}
+            <span class="text-xs text-zinc-500">${new Date(f.modifiedAt).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}</span></label>`).join('')}
+      </div>`).join('');
+    el.querySelectorAll('.drive-chk').forEach(c => c.onchange = () => { c.checked ? driveSel.add(c.value) : driveSel.delete(c.value); mapeo = null; previsualizar(); });
+  } catch (e) { el.innerHTML = `<p class="text-red-400">${esc(e.message)}</p>`; }
+}
+function elegirGrupo(gi) {
+  document.querySelectorAll(`.drive-chk[data-g="${gi}"]`).forEach(c => { c.checked = true; driveSel.add(c.value); });
+  mapeo = null; previsualizar();
+}
+
+async function subirDrive(btn) {
+  btn.disabled = true; btn.textContent = 'Guardando…';
+  try { const d = await api('/despacho/api/drive/informar', { method: 'POST' }); toast('☁ Guardado en Drive: ' + d.resultado.map(r => `${r.tipo} (${r.cantidad})`).join(', ')); cargar(); }
+  catch (e) { toast(e.message, 'error', 6000); }
+  btn.disabled = false; btn.textContent = '☁ Guardar en Drive ahora';
+}
+
+function formArchivos() {
+  const fd = new FormData();
+  archivosSel().forEach(f => fd.append('archivos', f));
+  fd.append('tipo', tipo);
+  if (mapeo) fd.append('mapeo', JSON.stringify(mapeo));
+  return fd;
+}
+
+async function previsualizar() {
+  const box = document.getElementById('preview'), btn = document.getElementById('btn-crear');
+  const hay = origen === 'drive' ? driveSel.size : archivosSel().length;
+  if (!hay) { box.classList.add('hidden'); btn.disabled = true; btn.textContent = 'Crear lote'; return; }
+  box.classList.remove('hidden'); box.innerHTML = `<p class="text-zinc-400">${origen === 'drive' ? 'Bajando de Drive y leyendo…' : 'Leyendo…'}</p>`; btn.disabled = true;
+  try {
+    const d = origen === 'drive'
+      ? await api('/despacho/api/drive/preview', { json: { ids: [...driveSel], tipo, mapeo } })
+      : await api('/despacho/api/preview', { method: 'POST', body: formArchivos() });
+    ultimoPreview = d.resultados;
+    let total = 0, html = '';
+    for (const r of d.resultados) {
+      if (r.error) { html += `<div class="text-red-400 mb-2">❌ ${esc(r.archivo)}: ${esc(r.error)}</div>`; continue; }
+      total += r.cantidad;
+      html += `<div class="mb-2"><b>${esc(r.archivo)}</b> — ${FORMATOS[r.formato] || r.formato} · <span class="${r.cantidad ? 'text-teal-400' : 'text-amber-400'}">${r.cantidad} paquetes</span></div>`;
+      if (r.formato === 'tabla') {
+        mapeo = mapeo || r.mapeo;
+        html += '<div class="grid grid-cols-1 gap-2 bg-zinc-900 rounded-lg p-3 mb-2">';
+        for (const [k, lbl] of Object.entries(CAMPOS)) {
+          html += `<div><label class="lbl">${lbl}</label><select class="input !py-1.5 map-sel" data-campo="${k}">
+            <option value="">— ninguna —</option>${r.headers.map(h => `<option ${mapeo[k] === h ? 'selected' : ''}>${esc(h)}</option>`).join('')}</select></div>`;
+        }
+        html += '</div>';
+      }
+      if (r.paquetes && r.paquetes.length) {
+        html += '<div class="text-xs text-zinc-400 bg-zinc-900 rounded-lg p-2">' + r.paquetes.slice(0, 4).map(p =>
+          `<div class="truncate">📮 ${esc(p.tracking)} · ${esc(p.comprador || '')} · ${esc(p.producto || '')}</div>`).join('') +
+          (r.cantidad > 4 ? `<div>…y ${r.cantidad - 4} más</div>` : '') + '</div>';
+      }
+    }
+    box.innerHTML = html;
+    box.querySelectorAll('.map-sel').forEach(s => s.onchange = () => { mapeo[s.dataset.campo] = s.value; previsualizar(); });
+    btn.disabled = total === 0;
+    btn.textContent = total ? `Crear lote (${total} paquetes)` : 'Crear lote';
+  } catch (e) { box.innerHTML = `<p class="text-red-400">${esc(e.message)}</p>`; }
+}
+
+async function crearLote() {
+  const btn = document.getElementById('btn-crear'); btn.disabled = true; btn.textContent = 'Creando…';
+  const nombre = '';
+  try {
+    let d;
+    if (origen === 'drive') d = await api('/despacho/api/drive/lotes', { json: { ids: [...driveSel], tipo, nombre, mapeo } });
+    else { const fd = formArchivos(); fd.append('nombre', nombre); d = await api('/despacho/api/lotes', { method: 'POST', body: fd }); }
+    toast(`✅ Lote creado con ${d.cantidad} paquetes`);
+    if (d.errores && d.errores.length) toast(d.errores.join(' · '), 'warn', 6000);
+    document.getElementById('archivos').value = '';
+    mapeo = null; document.getElementById('preview').classList.add('hidden');
+    btn.textContent = 'Crear lote';
+    if (origen === 'drive') { driveSel.clear(); listarDrive(); }
+    cargar();
+  } catch (e) { toast(e.message, 'error', 5000); btn.disabled = false; btn.textContent = 'Crear lote'; }
+}
+
+async function cargar() {
+  try {
+    estado = await api('/despacho/api/estado' + (loteFiltro ? `?lote=${loteFiltro}` : ''));
+    pintarLotes(); pintarPaquetes(); pintarTareas();
+    const av = document.getElementById('drive-aviso');
+    av.classList.toggle('hidden', !(estado.drive && estado.sin_drive));
+    document.getElementById('drive-aviso-txt').textContent = `${estado.sin_drive} paquetes despachados todavía no se guardaron en Drive (se guardan al tocar "Finalizar despacho").`;
+  } catch (e) { console.warn(e); }
+}
+
+function pintarLotes() {
+  const el = document.getElementById('lotes');
+  if (!estado.lotes.length) { el.innerHTML = '<p class="text-zinc-500 text-sm">No hay lotes abiertos. Cargá un archivo para empezar.</p>'; return; }
+  el.innerHTML = estado.lotes.map(l => {
+    const pct = l.total ? Math.round(l.hechos / l.total * 100) : 0;
+    return `<div class="bg-zinc-900 rounded-xl p-3 ${loteFiltro === l.id ? 'ring-2 ring-teal-500' : ''} ${l.cerrado ? 'opacity-60' : ''}">
+      <div class="flex items-center gap-2">
+        <span class="chip chip-auto">${esc(l.tipo_nombre)}</span>
+        <button class="font-semibold text-sm truncate text-left flex-1" onclick="filtrarLote(${l.id})">${esc(l.nombre)}</button>
+        ${!l.hoy ? `<span class="chip chip-vencida">${l.fecha}</span>` : ''}
+      </div>
+      <div class="flex items-center gap-2 mt-2"><div class="barra flex-1"><div style="width:${pct}%"></div></div>
+        <span class="text-xs text-zinc-400 w-16 text-right">${l.hechos}/${l.total}</span></div>
+      <div class="text-xs text-zinc-500 mt-1">${esc(l.creado_por)} · ${l.hora}${l.cerrado ? ' · CERRADO' : ''}</div>
+      <div class="flex gap-2 mt-2">
+        <a href="/despacho/lotes/${l.id}.xlsx" class="btn btn-gris btn-chico">Excel</a>
+        ${l.cerrado ? `<button class="btn btn-gris btn-chico" onclick="accionLote(${l.id},'reabrir')">Reabrir</button>`
+                    : `<button class="btn btn-gris btn-chico" onclick="accionLote(${l.id},'cerrar')">Cerrar</button>`}
+        ${estado.es_admin ? `<button class="btn btn-rojo btn-chico ml-auto" onclick="accionLote(${l.id},'borrar')">Borrar</button>` : ''}
+      </div></div>`;
+  }).join('');
+}
+
+async function accionLote(id, acc) {
+  const msgs = { cerrar: '¿Cerrar el lote? Los paquetes pendientes quedan como no despachados y dejan de aceptarse escaneos.',
+                 borrar: '¿Borrar el lote y todos sus paquetes? No se puede deshacer.', reabrir: null };
+  if (msgs[acc] && !confirm(msgs[acc])) return;
+  try { await api(`/despacho/api/lotes/${id}/${acc}`, { method: 'POST' }); if (acc === 'borrar' && loteFiltro === id) loteFiltro = null; cargar(); }
+  catch (e) { toast(e.message, 'error'); }
+}
+
+function filtrarLote(id) {
+  loteFiltro = id;
+  document.getElementById('btn-todos').style.display = id ? '' : 'none';
+  cargar();
+}
+
+document.querySelectorAll('.pestana').forEach(b => b.onclick = () => { pestana = b.dataset.p; pintarPaquetes(); });
+document.getElementById('buscar').oninput = () => pintarPaquetes();
+
+function pintarPaquetes() {
+  document.querySelectorAll('.pestana').forEach(b => {
+    b.classList.toggle('btn-primario', b.dataset.p === pestana); b.classList.toggle('btn-gris', b.dataset.p !== pestana);
+  });
+  const lf = loteFiltro ? estado.lotes.find(l => l.id === loteFiltro) : null;
+  document.getElementById('titulo-filtro').textContent = lf ? '· ' + lf.nombre : '· lotes abiertos';
+  const q = document.getElementById('buscar').value.trim().toLowerCase();
+  const todos = estado.paquetes;
+  document.getElementById('n-pend').textContent = todos.filter(p => p.estado === 'pendiente').length;
+  document.getElementById('n-desp').textContent = todos.filter(p => p.estado === 'despachado').length;
+  let lista = todos.filter(p => p.estado === pestana);
+  if (q) lista = lista.filter(p => [p.tracking, p.venta_id, p.comprador, p.producto, p.sku].join(' ').toLowerCase().includes(q));
+  const el = document.getElementById('paquetes');
+  if (!lista.length) { el.innerHTML = `<p class="text-zinc-500 text-sm py-6 text-center">${pestana === 'pendiente' ? '🎉 Nada pendiente' : 'Todavía no hay despachados'}</p>`; return; }
+  el.innerHTML = lista.slice(0, 300).map(p => `
+    <div class="bg-zinc-900 rounded-xl p-3 flex items-start gap-3">
+      <div class="flex-1 min-w-0">
+        <div class="font-semibold text-sm truncate">${esc(p.comprador || '(sin comprador)')} ${p.cantidad > 1 ? `<span class="chip chip-en_curso">x${p.cantidad}</span>` : ''}</div>
+        ${p.producto ? `<div class="text-xs text-zinc-400 truncate">${esc(p.producto)}</div>` : ''}
+        <div class="text-xs text-zinc-500 font-mono mt-1">📮 ${esc(p.tracking)} ${p.venta_id ? '· 🏷 ' + esc(p.venta_id) : ''} ${p.sku ? '· ' + esc(p.sku) : ''}</div>
+      </div>
+      <div class="text-right shrink-0">
+        ${p.estado === 'despachado'
+          ? `<div class="chip chip-hecha">✓ ${p.escaneado_at}</div><div class="text-xs text-zinc-500 mt-1">${esc(p.escaneado_por)}</div>
+             <button class="text-xs text-zinc-400 underline mt-1" onclick="marcar(${p.id}, false)">Deshacer</button>`
+          : `<button class="btn btn-gris btn-chico" onclick="marcar(${p.id}, true)">Marcar ✓</button>`}
+      </div>
+    </div>`).join('') + (lista.length > 300 ? `<p class="text-xs text-zinc-500 text-center">Mostrando 300 de ${lista.length}. Usá el buscador.</p>` : '');
+}
+
+async function marcar(id, desp) {
+  if (!desp && !confirm('¿Volver el paquete a pendiente?')) return;
+  if (desp && !confirm('¿Marcar como despachado sin escanear?')) return;
+  try { await api(`/despacho/api/paquetes/${id}/marcar`, { json: { despachado: desp } }); cargar(); }
+  catch (e) { toast(e.message, 'error'); }
+}
+
+function pintarTareas() {
+  const ab = estado.tareas.filter(t => t.estado !== 'hecha');
+  document.getElementById('resumen-tareas').textContent = ab.length
+    ? `${ab.length} abiertas en Despacho${ab.some(t => t.vencida) ? ' · hay vencidas' : ''}` : 'Sin tareas abiertas en Despacho';
+}
+
+async function accionTarea(id, acc) {
+  try { await api(`/tareas/api/${id}/${acc}`, { method: 'POST' }); cargar(); } catch (e) { toast(e.message, 'error'); }
+}
+
+pintarOrigen();
+if (origen === 'drive') listarDrive();
+cargar();
+setInterval(() => { if (!document.hidden) cargar(); }, 10000);
+</script>
+{% endblock %}

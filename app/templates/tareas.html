@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block titulo %}Tareas · {{ APP_NOMBRE }}{% endblock %}
+{% block contenido %}
+<a href="/" class="text-sm text-zinc-400 hover:text-violeta">← Inicio</a>
+<div class="flex flex-wrap items-center gap-3 mb-6">
+  <h1 class="text-2xl font-bold">✅ Tareas</h1>
+  <button class="btn btn-primario ml-auto" onclick="document.getElementById('form-nueva').classList.toggle('hidden')">+ Nueva tarea</button>
+</div>
+
+<form id="form-nueva" class="card p-5 mb-6 hidden grid sm:grid-cols-2 gap-3" onsubmit="event.preventDefault(); crear();">
+  <div class="sm:col-span-2"><label class="lbl">Qué hay que hacer *</label><input id="n-titulo" class="input" required maxlength="200"></div>
+  <div class="sm:col-span-2"><label class="lbl">Detalle</label><textarea id="n-detalle" class="input" rows="2"></textarea></div>
+  <div><label class="lbl">Sección</label>
+    <select id="n-seccion" class="input">{% for s in secciones %}<option value="{{ s.slug }}">{{ s.icono }} {{ s.nombre }}</option>{% endfor %}</select></div>
+  {% if puede_asignar %}
+  <div><label class="lbl">Asignar a</label>
+    <select id="n-asignado" class="input"><option value="">— cualquiera de la sección —</option>
+      {% for x in usuarios %}<option value="{{ x.id }}">{{ x.nombre }} ({{ ROLES[x.rol] }})</option>{% endfor %}</select></div>
+  {% endif %}
+  <div><label class="lbl">Vence</label><input id="n-vence" type="date" class="input"></div>
+  <div><label class="lbl">Prioridad</label>
+    <select id="n-prioridad" class="input"><option value="normal">Normal</option><option value="alta">Alta</option></select></div>
+  <div class="sm:col-span-2 flex justify-end gap-2">
+    <button type="button" class="btn btn-gris" onclick="document.getElementById('form-nueva').classList.add('hidden')">Cancelar</button>
+    <button class="btn btn-primario">Crear tarea</button>
+  </div>
+</form>
+
+<h2 class="text-lg font-bold mb-3">Asignadas a mí</h2>
+<div id="mias" class="flex flex-col gap-2 mb-8"></div>
+<div id="secciones" class="flex flex-col gap-8"></div>
+{% endblock %}
+{% block scripts %}
+<script>
+const ES_ADMIN = {{ 'true' if puede_asignar else 'false' }};
+const USUARIOS = {{ usuarios|map(attribute='nombre')|list|tojson }};
+const USUARIOS_ID = {{ usuarios|map(attribute='id')|list|tojson }};
+document.getElementById('n-vence').valueAsDate = new Date();
+
+function fila(t) {
+  const acciones = [];
+  if (t.estado !== 'hecha' && !(t.origen === 'auto' && t.titulo.startsWith('Despachar'))) {
+    if (!t.asignado_a) acciones.push(`<button class="btn btn-gris btn-chico" onclick="acc(${t.id},'tomar')">Tomar</button>`);
+    acciones.push(`<button class="btn btn-primario btn-chico" onclick="acc(${t.id},'completar')">Hecha</button>`);
+  }
+  if (ES_ADMIN) {
+    if (t.estado !== 'hecha') {
+      acciones.push(`<select class="input !w-auto !py-1 !text-xs" onchange="asignar(${t.id}, this.value)">
+        <option value="">${t.asignado_a ? 'Quitar asignación' : 'Asignar…'}</option>
+        ${USUARIOS.map((n, i) => `<option value="${USUARIOS_ID[i]}" ${t.asignado_a_id === USUARIOS_ID[i] ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>`);
+    } else acciones.push(`<button class="btn btn-gris btn-chico" onclick="acc(${t.id},'reabrir')">Reabrir</button>`);
+    if (t.origen !== 'auto') acciones.push(`<button class="text-xs text-red-400 underline" onclick="borrar(${t.id})">Borrar</button>`);
+  }
+  return `<div class="card p-4 flex flex-wrap items-center gap-3 ${t.estado === 'hecha' ? 'opacity-50' : ''}">
+    <div class="flex-1 min-w-[200px]">
+      <div class="font-semibold">${esc(t.titulo)}</div>
+      <div class="text-xs text-zinc-400 mt-1">${chipTarea(t)} ${t.asignado_a ? '· 👤 ' + esc(t.asignado_a) : '· sin asignar'} ${t.vence ? '· vence ' + t.vence : ''} ${t.hecha_por ? '· ✔ ' + esc(t.hecha_por) + ' ' + t.hecha_at : ''}</div>
+      ${t.detalle ? `<div class="text-sm text-zinc-400 mt-1">${esc(t.detalle)}</div>` : ''}
+    </div>
+    <div class="flex items-center gap-2 flex-wrap">${acciones.join('')}</div></div>`;
+}
+
+async function cargar() {
+  const d = await api('/tareas/api/lista');
+  document.getElementById('mias').innerHTML = d.mias.length ? d.mias.map(fila).join('') : '<p class="text-zinc-500 text-sm">Nada asignado a vos.</p>';
+  document.getElementById('secciones').innerHTML = d.secciones.map(s => `
+    <section><h2 class="text-lg font-bold mb-3">${s.icono} ${esc(s.nombre)} <span class="text-zinc-500 text-sm font-normal">${s.tareas.filter(t => t.estado !== 'hecha').length} abiertas</span></h2>
+    <div class="flex flex-col gap-2">${s.tareas.length ? s.tareas.map(fila).join('') : '<p class="text-zinc-500 text-sm">Sin tareas.</p>'}</div></section>`).join('');
+}
+
+async function crear() {
+  const as = document.getElementById('n-asignado');
+  try {
+    await api('/tareas/api', { json: {
+      titulo: document.getElementById('n-titulo').value, detalle: document.getElementById('n-detalle').value,
+      seccion: document.getElementById('n-seccion').value, prioridad: document.getElementById('n-prioridad').value,
+      vence: document.getElementById('n-vence').value || null, asignado_a_id: as && as.value ? +as.value : null } });
+    toast('Tarea creada'); document.getElementById('n-titulo').value = ''; document.getElementById('n-detalle').value = '';
+    document.getElementById('form-nueva').classList.add('hidden'); cargar();
+  } catch (e) { toast(e.message, 'error'); }
+}
+async function acc(id, a) { try { await api(`/tareas/api/${id}/${a}`, { method: 'POST' }); cargar(); } catch (e) { toast(e.message, 'error'); } }
+async function asignar(id, uid) { try { await api(`/tareas/api/${id}/asignar`, { json: { usuario_id: uid ? +uid : null } }); toast('Asignada'); cargar(); } catch (e) { toast(e.message, 'error'); } }
+async function borrar(id) { if (confirm('¿Borrar la tarea?')) { await api(`/tareas/api/${id}/borrar`, { method: 'POST' }); cargar(); } }
+cargar(); setInterval(() => { if (!document.hidden) cargar(); }, 15000);
+</script>
+{% endblock %}

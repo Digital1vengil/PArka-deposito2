@@ -1,0 +1,843 @@
+{% extends "base.html" %}
+{% block titulo %}Recolección Ecommerce · {{ APP_NOMBRE }}{% endblock %}
+{% block head %}<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  .re-card { border: 2px solid var(--line); border-radius: 14px; padding: .8rem; background: #fff; }
+  .re-card.listo { border-color: #bbf7d0; background: var(--turq-bg); }
+  .re-card.parcial { border-color: #fcd34d; }
+  .re-card.faltante { border-color: var(--alta); background: var(--alta-bg); }
+  .re-card.sinvinc { border-style: dashed; border-color: #f59e0b; }
+  .re-card.flash { animation: reFlash .9s ease-out; }
+  @keyframes reFlash { from { box-shadow: 0 0 0 6px rgba(20,184,166,.55) } to { box-shadow: none } }
+  .re-talle { font-size: 2rem; font-weight: 900; color: var(--violeta); line-height: 1; }
+  .re-nombre { font-size: 1.15rem; font-weight: 800; color: var(--ink); line-height: 1.2; }
+  .re-cuenta { font-size: 1.8rem; font-weight: 900; white-space: nowrap; }
+  .re-ub { display: inline-flex; align-items: center; gap: .3rem; font-weight: 800; font-size: 1.05rem; color: var(--violeta);
+           background: var(--violeta-bg); border-radius: 10px; padding: .2rem .6rem; }
+  .re-persona { border: 1px solid var(--line); border-radius: 12px; padding: .6rem .8rem; background: #fff; }
+  #re-ok, #re-alerta { position: fixed; inset: 0; z-index: 90; display: none; align-items: center; justify-content: center;
+                       padding: 1rem; text-align: center; }
+  #re-ok { background: rgba(13, 148, 136, .95); color: #fff; pointer-events: none; }
+  #re-ok.on { display: flex; }
+  #re-ok .tilde { font-size: 9rem; line-height: 1; font-weight: 900; }
+  #re-alerta { background: rgba(170, 16, 36, .96); color: #fff; }
+  #re-alerta.on { display: flex; animation: reTiembla .45s; }
+  #re-alerta.ajena { background: rgba(180, 83, 9, .97); }
+  #re-alerta.ajena .cruz { font-size: 6rem; }
+  .otros .otro { display: flex; align-items: center; gap: .6rem; padding: .45rem .25rem; border-top: 1px solid var(--line); font-size: .82rem; color: var(--muted); }
+  .otros .otro:first-child { border-top: 0; }
+  .otros .otro-hecho { opacity: .55; }
+  .otro-quien { flex: none; min-width: 5.5rem; max-width: 7rem; font-size: .72rem; font-weight: 700; color: var(--violeta-2); background: var(--violeta-bg); border-radius: 999px; padding: .1rem .55rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .otro-desc { flex: 1; min-width: 0; color: var(--ink); }
+  .otro-ub { font-size: .72rem; color: var(--muted); white-space: nowrap; }
+  .otro-est { flex: none; font-size: .72rem; font-weight: 700; }
+  .otro-ok { color: var(--turq); } .otro-falta { color: var(--alta); }
+  .otro-btn { flex: none; font-size: .72rem; font-weight: 700; color: var(--violeta-2); border: 1px solid var(--line2); border-radius: 999px; padding: .15rem .6rem; }
+  .otro-btn:hover { background: var(--violeta-bg); }
+  #re-alerta .cruz { font-size: 8rem; line-height: 1; font-weight: 900; }
+  @keyframes reTiembla { 0%,100% { transform: translateX(0) } 20%,60% { transform: translateX(-12px) } 40%,80% { transform: translateX(12px) } }
+  .sumarme { font-size: 1.25rem; padding: 1rem 1.5rem; }
+  /* ventas de 2 o más prendas: una sola ficha */
+  .re-venta { border: 2px solid var(--ink); border-radius: 16px; padding: .6rem; background: var(--soft); }
+  .re-venta.listo { border-color: #bbf7d0; }
+  .re-venta-cab { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; font-size: .9rem; margin: 0 .2rem .5rem; }
+  .re-venta-cab .vcant { font-size: 1.3rem; font-weight: 900; }
+  /* BOX */
+  .box-bar { display: flex; align-items: center; gap: .75rem; border: 2px dashed var(--line2); border-radius: 14px; padding: .55rem .75rem; }
+  .box-bar.on { border: 2px solid var(--ink); background: var(--soft); }
+  .box-prog { height: 6px; border-radius: 99px; background: var(--line); margin-top: .3rem; overflow: hidden; }
+  .box-prog i { display: block; height: 100%; background: var(--ink); }
+  .box-num { font-size: 2rem; font-weight: 900; line-height: 1; background: var(--ink); color: #fff; border-radius: 12px; padding: .3rem .7rem; }
+  .box-card { border: 2px solid var(--line); border-radius: 14px; padding: .7rem; background: #fff; }
+  .box-card.vacio { opacity: .55; }
+  .box-v { border-top: 1px solid var(--line); padding-top: .4rem; margin-top: .4rem; }
+  #re-box { position: fixed; inset: 0; z-index: 91; display: none; align-items: center; justify-content: center; padding: 1rem;
+            background: rgba(10, 10, 10, .96); color: #fff; overflow-y: auto; }
+  #re-box.on { display: flex; }
+  #re-box .grande { font-size: 7rem; font-weight: 900; line-height: 1; }
+  #re-box .bx { border: 2px solid rgba(255,255,255,.35); border-radius: 18px; padding: 1rem; margin-top: .8rem; text-align: left; }
+</style>{% endblock %}
+{% block contenido %}
+<a href="/" class="text-sm text-zinc-500 hover:text-violeta">← Inicio</a>
+<h1 class="text-2xl font-bold mb-1">🛍️ Recolección Ecommerce</h1>
+<p class="text-sm text-zinc-500 mb-5">Ventas del día de Mercado Libre (Flex y Colecta) y Tienda Nube. Sumate a la búsqueda, juntá las prendas de tu tramo y después controlá cada paquete en la mesa.</p>
+
+<!-- ───────── INICIO ───────── -->
+<div id="v-inicio" class="flex flex-col gap-5">
+  <section class="card p-4" id="auto-card">
+    <div class="flex flex-wrap items-center gap-2">
+      <h2 class="font-bold flex-1">🔄 Búsqueda automática del día</h2>
+      <span id="auto-chip" class="chip"></span>
+      {% if organiza %}<select id="auto-min" class="input !py-1 !w-auto text-sm" onchange="autoMinutos(this.value)" title="Cada cuánto revisa ML y Tienda Nube">
+        <option value="3">cada 3 min</option><option value="5">cada 5 min</option><option value="10">cada 10 min</option></select>
+      <button class="btn btn-gris btn-chico" id="auto-toggle" onclick="autoToggle()"></button>
+      <button class="btn btn-gris btn-chico" onclick="autoAhora(this)">↻ Revisar ahora</button>{% endif %}
+      <button class="btn btn-primario btn-chico hidden" id="auto-entrar">Entrar a la búsqueda</button>
+    </div>
+    <p class="text-sm text-zinc-500 mt-1" id="auto-info">Una sola búsqueda por día: se abre sola de lunes a viernes hábiles a las 8:00. Cada pocos minutos la app revisa Mercado Libre (Flex y Colecta: etiquetas por imprimir y listas para despachar) y Tienda Nube (por empaquetar): las ventas nuevas entran solas a la búsqueda del día. Si una venta de la búsqueda se cancela, sale de la búsqueda y aparece el aviso en la campana 🔔. Los Buscadores / Recolectores entran solos a cada búsqueda nueva.</p>
+  </section>
+
+
+  {% if organiza %}
+  <details class="card p-4" id="prep-manual">
+    <summary class="font-bold cursor-pointer">Crear una búsqueda a mano <span class="text-sm font-normal text-zinc-500">(no hace falta: la del día se abre sola a las 8:00)</span></summary>
+    <div class="mt-3">
+    <h2 class="font-bold mb-1">Preparar la búsqueda de hoy</h2>
+    <p class="text-sm text-zinc-500 mb-3">Elegí las ventas directo de Mercado Libre y Tienda Nube, o cargá los archivos como antes.</p>
+    <div class="tabs">
+      {% if tn_ok or ml_ok %}<button class="tab" data-o="api" onclick="origen('api')">📡 Ventas (ML + Tienda Nube)</button>{% endif %}
+      <button class="tab activo" data-o="drive" onclick="origen('drive')">☁ Carpeta del día (Drive)</button>
+      <button class="tab" data-o="archivo" onclick="origen('archivo')">⬆ Subir archivos</button>
+    </div>
+    <div id="o-api" class="hidden">
+      <div class="flex flex-wrap items-center gap-2 mb-3">
+        <div class="tabs !mb-0"><button class="tab activo" data-d="hoy" onclick="apiDia('hoy')">Envíos de hoy</button><button class="tab" data-d="prox" onclick="apiDia('prox')">Próximos días</button></div>
+        <span class="flex-1"></span>
+        <span class="text-xs text-zinc-500" id="api-hora"></span>
+        <button class="btn btn-gris btn-chico" onclick="apiCargar(true)">↻ Actualizar</button>
+      </div>
+      <div id="api-lista" class="flex flex-col gap-4 text-sm"><p class="text-zinc-500">Consultando…</p></div>
+    </div>
+    <div id="o-drive">
+      {% if drive_ok %}
+      <div class="flex flex-wrap items-end gap-2 mb-2">
+        <div><label class="lbl">Fecha</label><input type="date" id="fecha" class="input !py-1.5" onchange="driveArchivos()"></div>
+        <button class="btn btn-gris btn-chico" onclick="driveArchivos()">↻ Actualizar</button>
+        <a id="drive-link" class="text-sm underline text-violeta hidden" target="_blank">Abrir carpeta en Drive</a>
+      </div>
+      <div id="drive-lista" class="flex flex-col gap-1 text-sm"></div>
+      {% else %}
+      <p class="text-sm rounded-xl p-3" style="background:#fef3c7;color:#92400e">Falta conectar el Apps Script de la carpeta del día:
+        {% if u.es_admin %}<a class="underline" href="/admin/conexiones">Conexiones → Recolección Ecommerce</a>{% else %}pedíselo al admin{% endif %}.
+        Mientras tanto podés subir los archivos.</p>
+      {% endif %}
+    </div>
+    <div id="o-archivo" class="hidden">
+      <input type="file" id="archivos" multiple accept=".csv,.xlsx,.xls,.txt" class="text-sm">
+      <p class="text-xs text-zinc-500 mt-1">Podés elegir varios a la vez: Excel de ventas de ML (Flex / Colecta) y CSV de Tienda Nube.</p>
+    </div>
+    <div class="flex flex-wrap items-end gap-3 mt-4">
+      <div class="flex-1 min-w-[200px]"><label class="lbl">Nombre (opcional)</label><input id="nombre" class="input" placeholder="Ej: Ventas mañana"></div>
+      <button id="btn-crear" class="btn btn-primario !py-3" onclick="crear()">🛍️ Crear búsqueda</button>
+    </div>
+    </div>
+  </details>
+  {% endif %}
+
+  <section class="card p-4">
+    <h2 class="font-bold mb-3">Búsquedas</h2>
+    <div id="lista" class="flex flex-col gap-2 text-sm"><p class="text-zinc-500">Cargando…</p></div>
+  </section>
+</div>
+
+<!-- ───────── BÚSQUEDA ───────── -->
+<div id="v-re" class="hidden flex flex-col gap-4">
+  <section class="card p-4">
+    <div class="flex flex-wrap items-center gap-2">
+      <button class="btn btn-gris btn-chico" onclick="volver()">← Volver</button>
+      <h2 class="font-bold text-lg flex-1" id="re-titulo"></h2>
+      <span id="re-chips" class="flex flex-wrap gap-1"></span>
+    </div>
+    <div class="grid sm:grid-cols-2 gap-3 mt-3 text-sm">
+      <div><div class="flex justify-between"><span>🧺 Búsqueda</span><b id="re-prog-b"></b></div><div class="barra mt-1"><div id="re-barra-b" style="width:0"></div></div></div>
+      <div><div class="flex justify-between"><span>📦 Paquetes controlados</span><b id="re-prog-c"></b></div><div class="barra mt-1"><div id="re-barra-c" style="width:0"></div></div></div>
+    </div>
+    <div class="flex flex-wrap items-center gap-2 mt-3 text-sm">
+      <span class="font-semibold">👥 Participantes:</span>
+      <span id="re-gente" class="flex flex-wrap gap-1 flex-1"></span>
+      {% if organiza %}<button id="btn-sumar-gente" class="btn btn-turq btn-chico" onclick="tab('equipo'); abrirSumar()">➕ Sumar personas</button>{% endif %}
+    </div>
+    <div id="re-sumarme" class="mt-4 hidden"></div>
+  </section>
+
+  <div class="tabs !mb-0" id="tabs">
+    <button class="tab activo" data-tab="mia" onclick="tab('mia')">🧺 Mi búsqueda</button>
+    <button class="tab" data-tab="equipo" onclick="tab('equipo')">👥 Equipo</button>
+    {% if organiza %}<button class="tab" data-tab="todo" onclick="tab('todo')">📋 Guía completa</button>{% endif %}
+    <button class="tab" data-tab="box" onclick="tab('box')">🗃️ BOX</button>
+    <button class="tab" data-tab="mesa" onclick="tab('mesa')">📦 Mesa de control</button>
+  </div>
+
+  <!-- Mi búsqueda -->
+  <section id="t-mia" class="flex flex-col gap-3">
+    <div class="card p-4 sticky top-14 z-20">
+      <div class="flex gap-2">
+        <input id="esc" class="input flex-1 !text-lg !py-3" placeholder="Escaneá la prenda que encontraste" autocomplete="off">
+        <button class="btn btn-gris" onclick="toggleCam()" title="Usar la cámara del celular">📷</button>
+      </div>
+      <div id="cam-box" class="hidden mt-2"><div id="qr-reader" class="w-full min-h-[200px] bg-black rounded-xl overflow-hidden"></div></div>
+      <div id="mia-info" class="text-sm mt-2"></div>
+      <div id="box-bar" class="mt-2"></div>
+    </div>
+    <div id="mia-lista" class="flex flex-col gap-3"></div>
+  </section>
+
+  <!-- Equipo -->
+  <section id="t-equipo" class="card p-4 hidden">
+    <div class="flex flex-wrap items-center gap-2 mb-3">
+      <h2 class="font-bold flex-1">Quiénes buscan</h2>
+      {% if organiza %}<button class="btn btn-turq btn-chico" onclick="abrirSumar()">➕ Sumar personas</button>
+      <button class="btn btn-gris btn-chico" onclick="repartir()">↻ Repartir de nuevo</button>{% endif %}
+    </div>
+    {% if organiza %}
+    <div id="sumar-panel" class="hidden rounded-xl p-3 mb-3" style="background:var(--soft)">
+      <div class="font-bold mb-1">Sumar personas a la búsqueda</div>
+      <p class="text-xs text-zinc-500 mb-2">Quedan sumadas directamente (no hace falta que toquen "Me sumo") y la app les reparte un tramo de la ruta. Solo aparecen quienes tienen acceso a Recolección Ecommerce.</p>
+      <div id="sumar-lista" class="flex flex-col gap-1"></div>
+      <div class="flex flex-wrap gap-2 mt-3">
+        <button id="sumar-ok" class="btn btn-primario" onclick="sumarGente()">Sumar seleccionados</button>
+        <button class="btn btn-gris" onclick="cerrarSumar()">Cancelar</button>
+      </div>
+    </div>
+    {% endif %}
+    <div id="equipo" class="flex flex-col gap-2 text-sm"></div>
+    <p class="text-xs text-zinc-500 mt-3">La ruta del depósito se corta en tramos con una cantidad pareja de prendas, uno por persona, en el orden en que se sumaron.
+      Si alguien se suma o se va, se reparte de nuevo lo que falta buscar (lo que alguien ya empezó a traer sigue siendo suyo).</p>
+  </section>
+
+  <!-- Guía completa (organiza) -->
+  <section id="t-todo" class="card p-4 hidden">
+    <h2 class="font-bold mb-3">Guía completa</h2>
+    <div id="todo" class="flex flex-col gap-2 text-sm"></div>
+  </section>
+
+  <!-- BOX -->
+  <section id="t-box" class="card p-4 hidden">
+    <div class="flex flex-wrap items-center gap-2 mb-1">
+      <h2 class="font-bold flex-1">🗃️ Lista por BOX</h2>
+      {% if organiza %}<label class="text-sm flex items-center gap-2">Prendas por BOX
+        <input id="box-cant" type="number" min="1" max="50" class="input !w-20 !py-1" onchange="boxCant(this.value)"></label>{% endif %}
+    </div>
+    <p class="text-xs text-zinc-500 mb-3">Cada persona junta prendas y, al llegar a la cantidad del BOX (<b id="box-cant-txt">5</b>), las lleva a la mesa y la app le dice en qué BOX dejarlas.
+      Las ventas de varias prendas van siempre juntas en el mismo BOX. En la mesa de control, al escanear la etiqueta, aparece el BOX. Cuando todas las ventas de un BOX quedan controladas, el número se libera.</p>
+    <div id="box-lista" class="flex flex-col gap-2 text-sm"></div>
+  </section>
+
+  <!-- Mesa -->
+  <section id="t-mesa" class="card p-4 hidden">
+    <h2 class="font-bold mb-1">📦 Mesa de control</h2>
+    <p class="text-sm text-zinc-500 mb-3">Escaneá la <b>etiqueta del envío</b> y después <b>cada prenda</b>. Si coincide con la venta aparece la pantalla verde; si no, la roja y no se puede seguir hasta sacarla.</p>
+    <a id="mesa-link" class="btn btn-primario !py-3 !text-lg">Abrir la mesa de control</a>
+  </section>
+
+  {% if organiza %}
+  <section class="card p-4 flex flex-wrap gap-2 items-center">
+    <label class="btn btn-gris cursor-pointer">➕ Sumar archivo<input type="file" id="sumar" multiple accept=".csv,.xlsx,.xls,.txt" class="hidden" onchange="sumarArchivos(this)"></label>
+    {% if tn_ok or ml_ok %}<button class="btn btn-gris" onclick="sumarVentas(this)" title="TN por empaquetar + ML por imprimir / listas de hoy que todavía no están">➕ Ventas nuevas (ML + TN)</button>{% endif %}
+    <a id="re-excel" class="btn btn-gris">⬇ Excel</a>
+    <a id="re-drive" class="btn btn-gris hidden" target="_blank">☁ Resultado en Drive</a>
+    <span class="flex-1"></span>
+    <button id="re-borrar" class="btn btn-gris" onclick="borrar()">Borrar</button>
+    <button id="re-cerrar" class="btn btn-primario" onclick="cerrar()">✔ Cerrar búsqueda</button>
+    <button id="re-reabrir" class="btn btn-gris hidden" onclick="reabrir()">Reabrir</button>
+  </section>
+  {% endif %}
+</div>
+
+<div id="re-ok"><div><div class="tilde">✔</div><div id="ok-txt" class="text-3xl font-black mt-2">OK</div><div id="ok-sub" class="text-lg mt-2 opacity-90"></div></div></div>
+<div id="re-box"><div class="max-w-lg w-full text-center py-6">
+  <div class="text-xl font-bold opacity-80">Dejá las prendas en</div>
+  <div id="bx-cuerpo"></div>
+  <button class="btn !bg-white !text-black !border-white !py-3 !px-6 mt-6 w-full !text-lg font-black" onclick="cerrarBox()">Listo, ya las dejé</button>
+</div></div>
+<div id="re-alerta"><div class="max-w-lg w-full">
+  <div class="cruz">✖</div>
+  <div id="al-titulo" class="text-3xl font-black mt-2"></div>
+  <div id="al-cuerpo" class="text-lg mt-3"></div>
+  <div id="al-ajena" class="hidden mt-6 flex flex-col gap-2">
+    <button class="btn !bg-white !text-amber-700 !border-white !py-3 !px-6 w-full !text-lg font-black" onclick="trajeEscaneada()">Sí, la traje yo</button>
+    <button class="btn !bg-transparent !text-white !border-white !py-2 !px-6 w-full font-bold" onclick="cerrarAlerta()">No, la dejo donde estaba</button>
+  </div>
+  <button id="al-ok" class="btn !bg-white !text-red-700 !border-white !py-3 !px-6 mt-6 w-full !text-lg font-black" onclick="cerrarAlerta()">Entendido</button>
+</div></div>
+{% endblock %}
+{% block scripts %}
+<script>
+const ORGANIZA = {{ 'true' if organiza else 'false' }}, DRIVE_OK = {{ 'true' if drive_ok else 'false' }}, YO = {{ u.id }};
+const API_OK = {{ 'true' if (tn_ok or ml_ok) else 'false' }};
+let org = API_OK ? 'api' : DRIVE_OK ? 'drive' : 'archivo', apiData = null, apiSel = new Set(), apiDiaAct = 'hoy', driveSel = new Set(), re = null, tabAct = 'mia', alerta = false, grupos = [], poll = null;
+
+// ───────── inicio ─────────
+function origen(o) {
+  org = o;
+  document.querySelectorAll('[data-o]').forEach(b => b.classList.toggle('activo', b.dataset.o === o));
+  ['api', 'drive', 'archivo'].forEach(x => { const el = document.getElementById('o-' + x); if (el) el.classList.toggle('hidden', x !== o); });
+  if (o === 'drive') driveArchivos();
+  if (o === 'api' && !apiData) apiCargar(false);
+}
+// ───────── automática y avisos ─────────
+let AUTO = {{ auto | tojson }};
+function autoPintar(a) {
+  AUTO = a || AUTO;
+  const chip = document.getElementById('auto-chip');
+  chip.textContent = AUTO.activo ? `ACTIVA · cada ${AUTO.minutos} min` : 'PAUSADA';
+  chip.className = 'chip ' + (AUTO.activo ? 'chip-hecha' : 'chip-pendiente');
+  const t = document.getElementById('auto-toggle'); if (t) t.textContent = AUTO.activo ? '⏸ Pausar' : '▶ Activar';
+  const m = document.getElementById('auto-min'); if (m) m.value = String(AUTO.minutos);
+  const info = document.getElementById('auto-info');
+  if (AUTO.hora) info.innerHTML = `Última revisión <b>${AUTO.hora}</b>: ${AUTO.pendientes ?? 0} ventas pendientes · ${AUTO.nuevas ?? 0} nuevas · ${AUTO.canceladas ?? 0} canceladas`
+    + (AUTO.errores && AUTO.errores.length ? `<br><span class="text-red-600">${AUTO.errores.map(esc).join(' · ')}</span>` : '');
+  const b = document.getElementById('auto-entrar');
+  if (AUTO.busqueda_id) { b.classList.remove('hidden'); b.onclick = () => abrir(AUTO.busqueda_id); } else b.classList.add('hidden');
+}
+async function autoCargar() { try { autoPintar(await api('/ecommerce/api/auto')); } catch (e) {} }
+async function autoToggle() {
+  try { autoPintar(await api('/ecommerce/api/auto', { json: { activo: !AUTO.activo } })); } catch (e) { toast(e.message, 'error'); }
+}
+async function autoMinutos(v) {
+  try { autoPintar(await api('/ecommerce/api/auto', { json: { minutos: +v } })); toast(`Revisa cada ${v} minutos`); } catch (e) { toast(e.message, 'error'); }
+}
+async function autoAhora(b) {
+  b.disabled = true; const t = b.textContent; b.textContent = 'Revisando ML y Tienda Nube…';
+  try {
+    const r = await api('/ecommerce/api/auto/ahora', { method: 'POST' });
+    toast(r.ok ? `${r.nuevas} ventas nuevas · ${r.canceladas} canceladas` : 'No se pudo revisar: ' + (r.motivo || ''), r.ok ? 'ok' : 'warn', 5000);
+    await autoCargar(); lista(); novCargar(); if (window.pdNovedadesYa) pdNovedadesYa();
+  } catch (e) { toast(e.message, 'error', 7000); }
+  b.disabled = false; b.textContent = t;
+}
+async function novCargar() { if (window.pdAvisos && pdAvisos.cargar) pdAvisos.cargar(); }   // los avisos están en la campana de arriba
+window.addEventListener('pd-novedad', () => { novCargar(); autoCargar(); if (!document.getElementById('v-inicio').classList.contains('hidden')) lista(); else if (re) refrescar(); });
+autoPintar(AUTO); setInterval(autoCargar, 60000);
+
+// ───────── ventas por API ─────────
+const ETQ = { por_imprimir: ['🖨 Etiqueta por imprimir', '#fef3c7', '#92400e'], lista: ['✅ Lista para despachar', '#ccfbf1', '#115e59'] };
+async function apiCargar(refrescar) {
+  const el = document.getElementById('api-lista');
+  el.innerHTML = '<p class="text-zinc-500">Consultando Mercado Libre y Tienda Nube… (la primera vez puede tardar un poco)</p>';
+  try {
+    apiData = await api('/ecommerce/api/ventas' + (refrescar ? '?refrescar=1' : ''));
+    apiSel = new Set([...apiData.tn.ventas, ...apiData.ml.ventas].filter(v => v.hoy).map(v => v.clave));
+    document.getElementById('api-hora').textContent = 'Actualizado ' + apiData.hora;
+    apiPintar();
+  } catch (e) { el.innerHTML = `<p class="text-red-600">${esc(e.message)}</p>`; }
+}
+function apiDia(d) {
+  apiDiaAct = d;
+  document.querySelectorAll('[data-d]').forEach(b => b.classList.toggle('activo', b.dataset.d === d));
+  apiPintar();
+}
+function apiToggle(clave, on) { on ? apiSel.add(clave) : apiSel.delete(clave); apiResumen(); }
+function apiGrupo(claves, on) { claves.split(',').filter(Boolean).forEach(c => on ? apiSel.add(c) : apiSel.delete(c)); apiPintar(); }
+function apiResumen() {
+  const b = document.getElementById('btn-crear');
+  if (org === 'api' && b && !b.disabled) b.textContent = `🛍️ Crear búsqueda (${apiSel.size} ventas)`;
+}
+function apiFila(v) {
+  const e = ETQ[v.etiqueta];
+  return `<label class="flex items-start gap-2 py-1.5 px-2 rounded-lg cursor-pointer" style="background:var(--soft)">
+    <input type="checkbox" class="w-4 h-4 mt-0.5" ${apiSel.has(v.clave) ? 'checked' : ''} onchange="apiToggle('${v.clave}', this.checked)">
+    <span class="flex-1 min-w-0"><span class="flex flex-wrap items-center gap-2"><b>${v.tipo === 'tiendanube' ? '#' : ''}${esc(v.tracking)}</b>
+      ${e ? `<span class="chip" style="background:${e[1]};color:${e[2]}">${e[0]}</span>` : ''}
+      <span class="text-zinc-500 truncate">${esc(v.comprador || '')}</span>
+      ${v.hasta ? `<span class="text-xs text-zinc-500">despachar hasta ${esc(v.hasta)}</span>` : ''}${v.medio ? `<span class="text-xs text-zinc-500">${esc(v.medio)}</span>` : ''}</span>
+      <span class="block text-xs text-zinc-600 truncate">${esc(v.resumen)}</span></span>
+    <b class="text-xs">${v.cantidad} u.</b></label>`;
+}
+function apiBloque(titulo, ventas, nota) {
+  const claves = ventas.map(v => v.clave).join(','), todas = ventas.length && ventas.every(v => apiSel.has(v.clave));
+  return `<div><div class="flex items-center gap-2 mb-1"><b>${titulo}</b><span class="chip">${ventas.length}</span>
+      ${ventas.length ? `<label class="text-xs flex items-center gap-1 ml-auto cursor-pointer"><input type="checkbox" ${todas ? 'checked' : ''} onchange="apiGrupo('${claves}', this.checked)"> todas</label>` : ''}</div>
+    ${nota ? `<p class="text-xs text-zinc-500 mb-1">${nota}</p>` : ''}
+    <div class="flex flex-col gap-1">${ventas.map(apiFila).join('') || '<p class="text-xs text-zinc-500 px-2">Nada.</p>'}</div></div>`;
+}
+function apiPintar() {
+  const el = document.getElementById('api-lista'); if (!apiData) return;
+  const dia = v => apiDiaAct === 'hoy' ? v.hoy : !v.hoy;
+  let html = '';
+  const tn = apiData.tn, ml = apiData.ml;
+  if (!tn.conectado) html += '<p class="text-xs text-zinc-500">Tienda Nube sin conectar.</p>';
+  else if (tn.error) html += `<p class="text-red-600">Tienda Nube: ${esc(tn.error)}</p>`;
+  else if (apiDiaAct === 'hoy') html += `<section class="rounded-xl p-3 border" style="border-color:var(--line)"><h3 class="font-bold mb-2">🛒 Tienda Nube</h3>${apiBloque('Por empaquetar', tn.ventas)}</section>`;
+  if (!ml.conectado) html += '<p class="text-xs text-zinc-500">Mercado Libre sin conectar (Conexiones → Mercado Libre directo).</p>';
+  else if (ml.error) html += `<p class="text-red-600">Mercado Libre: ${esc(ml.error)}</p>`;
+  else ['flex', 'colecta'].forEach(t => {
+    const vs = ml.ventas.filter(v => v.tipo === t && dia(v));
+    html += `<section class="rounded-xl p-3 border flex flex-col gap-3" style="border-color:var(--line)"><h3 class="font-bold">🟡 Mercado Libre · ${t === 'flex' ? 'Flex' : 'Colecta'}</h3>
+      ${apiBloque('🖨 Etiquetas por imprimir', vs.filter(v => v.etiqueta === 'por_imprimir'), 'Todavía no se imprimió la etiqueta: imprimila antes de armar el paquete.')}
+      ${apiBloque('✅ Listas para despachar', vs.filter(v => v.etiqueta === 'lista'), 'La etiqueta ya está impresa.')}</section>`;
+  });
+  const canc = [...(apiData.ml.canceladas || []), ...(apiData.tn.canceladas || [])];
+  if (canc.length && apiDiaAct === 'hoy') html = `<section class="rounded-xl p-3 border-2" style="border-color:var(--alta);background:var(--alta-bg)">
+      <h3 class="font-bold text-red-700 mb-1">⛔ Canceladas · No despachar <span class="chip">${canc.length}</span></h3>
+      <p class="text-xs text-red-700 mb-2">Si ya imprimiste la etiqueta o juntaste las prendas, separalas: estas ventas no salen.</p>
+      ${canc.map(v => `<div class="py-1 px-2"><b>${v.tipo === 'tiendanube' ? 'TN #' : (v.tipo === 'flex' ? 'Flex ' : 'Colecta ')}${esc(v.tracking)}</b> · ${esc(v.comprador || '')} <span class="text-xs">${esc(v.resumen)}</span></div>`).join('')}</section>` + html;
+  el.innerHTML = html; apiResumen();
+}
+async function sumarVentas(b) {
+  b.disabled = true; const txt = b.textContent; b.textContent = 'Consultando…';
+  try {
+    const r = await api(`/ecommerce/api/${re.id}/agregar-ventas`, { method: 'POST' });
+    re = r.busqueda; pintarCabecera(); cargarTab();
+    toast(r.nuevos ? `${r.nuevos} ventas nuevas` + (r.actualizados ? ` · ${r.actualizados} actualizadas` : '') : 'No hay ventas nuevas', 'ok', 5000);
+    if (r.errores.length) toast(r.errores.join(' · '), 'warn', 8000);
+  } catch (e) { toast(e.message, 'error', 7000); }
+  b.disabled = false; b.textContent = txt;
+}
+const kb = n => n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+const TIPO_ARCH = { ml: 'Mercado Libre', tn: 'Tienda Nube', otro: 'Otro' };
+async function driveArchivos() {
+  const el = document.getElementById('drive-lista'); if (!el) return;
+  const f = document.getElementById('fecha').value;
+  el.innerHTML = '<p class="text-zinc-500">Buscando la carpeta del día…</p>';
+  try {
+    const d = await api('/ecommerce/api/drive' + (f ? '?fecha=' + f : ''));
+    if (!f) document.getElementById('fecha').value = d.fecha;
+    const lk = document.getElementById('drive-link');
+    if (d.url) { lk.href = d.url; lk.classList.remove('hidden'); } else lk.classList.add('hidden');
+    driveSel = new Set(d.archivos.filter(a => a.tipo !== 'otro').map(a => a.id));
+    el.innerHTML = !d.existe ? '<p class="text-zinc-500">No hay carpeta para esa fecha.</p>'
+      : d.archivos.length ? d.archivos.map(a => `<label class="flex items-center gap-2 py-1.5 px-2 rounded-lg cursor-pointer" style="background:var(--soft)">
+          <input type="checkbox" class="w-4 h-4" value="${esc(a.id)}" ${driveSel.has(a.id) ? 'checked' : ''} onchange="this.checked ? driveSel.add(this.value) : driveSel.delete(this.value)">
+          <span class="chip ${a.tipo === 'ml' ? 'chip-pendiente' : a.tipo === 'tn' ? 'chip-en_curso' : 'chip-auto'}">${TIPO_ARCH[a.tipo] || a.tipo}</span>
+          <span class="flex-1 truncate">${esc(a.nombre)}</span><span class="text-xs text-zinc-500">${a.modificado.slice(11, 16)} · ${kb(a.bytes)}</span></label>`).join('')
+      : '<p class="text-zinc-500">La carpeta de hoy está vacía: subí ahí los Excel de ML y el CSV de Tienda Nube y tocá ↻ Actualizar.</p>';
+  } catch (e) { el.innerHTML = `<p class="text-red-600">${esc(e.message)}</p>`; }
+}
+async function crear() {
+  const b = document.getElementById('btn-crear'), nombre = document.getElementById('nombre').value;
+  b.disabled = true; b.textContent = 'Leyendo las ventas…';
+  try {
+    let r;
+    const tnApi = false;
+    if (org === 'api') {
+      const visibles = new Set([...(apiData ? apiData.tn.ventas : []), ...(apiData ? apiData.ml.ventas : [])].map(v => v.clave));
+      const claves = [...apiSel].filter(c => visibles.has(c));
+      if (!claves.length) throw new Error('Marcá al menos una venta');
+      r = await api('/ecommerce/api/crear/ventas', { json: { claves, nombre } });
+      apiData = null;
+    } else if (org === 'drive') {
+      if (!driveSel.size && !tnApi) throw new Error('Marcá al menos un archivo o las órdenes de Tienda Nube');
+      r = await api('/ecommerce/api/crear/drive', { json: { ids: [...driveSel], nombre, tn_api: tnApi } });
+    } else {
+      const fs = document.getElementById('archivos').files;
+      if (!fs.length && !tnApi) throw new Error('Elegí los archivos de ventas');
+      const fd = new FormData(); fd.append('nombre', nombre); fd.append('tn_api', tnApi ? '1' : ''); [...fs].forEach(f => fd.append('archivos', f));
+      r = await api('/ecommerce/api/crear/archivo', { method: 'POST', body: fd });
+    }
+    if (r.errores && r.errores.length) toast(r.errores.join(' · '), 'warn', 8000);
+    document.getElementById('nombre').value = ''; const a = document.getElementById('archivos'); if (a) a.value = '';
+    await abrir(r.busqueda.id, 'equipo'); abrirSumar();
+  } catch (e) { toast(e.message, 'error', 7000); }
+  b.disabled = false; b.textContent = '🛍️ Crear búsqueda';
+}
+async function lista() {
+  const d = await api('/ecommerce/api/lista'), el = document.getElementById('lista');
+  el.innerHTML = d.busquedas.length ? d.busquedas.map(c => {
+    const b = c.busqueda, hoy = c.fecha === d.hoy, abierta = c.estado === 'abierto';
+    return `<div class="flex flex-wrap items-center gap-3 py-2 border-b last:border-0" style="border-color:var(--line)">
+      <b>RE-${c.id}</b><span class="chip ${abierta ? 'chip-en_curso' : 'chip-hecha'}">${abierta ? 'ABIERTA' : 'CERRADA'}</span>
+      <span class="flex-1 min-w-[160px] basis-40">${esc(c.nombre)} · <span class="text-zinc-500">${hoy ? 'hoy ' + c.hora.slice(6) : c.hora} · ${esc(c.usuario)}</span></span>
+      <span>🧺 ${b.buscadas}/${b.unidades}</span><span>📦 ${c.completo}/${c.paquetes}</span>
+      <span class="text-xs text-zinc-500" title="Participantes">👥 ${b.equipo.filter(x => x.activo).map(x => esc(corto(x.nombre))).join(', ') || 'nadie todavía'}</span>
+      ${c.me_sume ? '<span class="chip chip-hecha">ESTÁS</span>' : ''}
+      <button class="btn ${abierta ? 'btn-primario' : 'btn-gris'} btn-chico" onclick="abrir(${c.id})">${abierta ? (c.me_sume ? 'Seguir' : 'Entrar') : 'Ver'}</button></div>`;
+  }).join('') : '<p class="text-zinc-500">Todavía no hay búsquedas.' + (ORGANIZA ? '' : ' Cuando el encargado cree la de hoy, aparece acá.') + '</p>';
+}
+
+// ───────── búsqueda ─────────
+async function abrir(id, t) {
+  try { re = (await api('/ecommerce/api/' + id)).busqueda; } catch (e) { toast(e.message, 'error'); return; }
+  location.hash = 're' + id;
+  document.getElementById('v-inicio').classList.add('hidden');
+  document.getElementById('v-re').classList.remove('hidden');
+  pintarCabecera();
+  tab(t || (re.me_sume ? 'mia' : 'equipo'));
+  clearInterval(poll); poll = setInterval(refrescar, 15000);
+}
+function volver() {
+  location.hash = ''; re = null; clearInterval(poll); pararCam();
+  document.getElementById('v-re').classList.add('hidden'); document.getElementById('v-inicio').classList.remove('hidden'); lista();
+}
+async function refrescar() {
+  if (!re || alerta || document.hidden) return;
+  try { re = (await api('/ecommerce/api/' + re.id)).busqueda; pintarCabecera(); if (tabAct !== 'mesa') cargarTab(); } catch {}
+}
+function pintarCabecera() {
+  const b = re.busqueda, abierta = re.estado === 'abierto';
+  document.getElementById('re-titulo').textContent = `RE-${re.id} · ${re.nombre}`;
+  document.getElementById('re-chips').innerHTML = `<span class="chip ${abierta ? 'chip-en_curso' : 'chip-hecha'}">${abierta ? 'ABIERTA' : 'CERRADA'}</span>`
+    + `<span class="chip chip-en_curso" title="Total de ventas de la salida (incluye las ya buscadas y controladas)">🧾 ${re.paquetes} ventas</span>`
+    + Object.entries(re.tipos).map(([t, n]) => `<span class="chip chip-auto">${esc(t)} ${n}</span>`).join('')
+    + (re.sin_vincular ? `<span class="chip chip-pendiente" title="SKU que no se encontró en el catálogo">${re.sin_vincular} sin vincular</span>` : '')
+    + (b.faltantes ? `<span class="chip chip-vencida">${b.faltantes} faltantes</span>` : '');
+  document.getElementById('re-prog-b').textContent = `${b.buscadas} / ${b.unidades} prendas`;
+  document.getElementById('re-barra-b').style.width = (b.unidades ? 100 * b.buscadas / b.unidades : 0) + '%';
+  document.getElementById('re-prog-c').textContent = `${re.completo} / ${re.paquetes}`;
+  document.getElementById('re-barra-c').style.width = (re.paquetes ? 100 * re.completo / re.paquetes : 0) + '%';
+  const act = b.equipo.filter(x => x.activo);
+  document.getElementById('re-gente').innerHTML = act.length
+    ? act.map(p => `<span class="chip ${p.usuario_id === YO ? 'chip-hecha' : 'chip-auto'}" title="${esc(p.nombre)}">${esc(corto(p.nombre))} · ${p.buscadas}/${p.unidades}</span>`).join('')
+    : '<span class="text-zinc-500">Todavía no hay nadie sumado</span>';
+  const bs = document.getElementById('btn-sumar-gente'); if (bs) bs.classList.toggle('hidden', !abierta);
+  const s = document.getElementById('re-sumarme');
+  s.classList.toggle('hidden', !abierta || re.me_sume);
+  s.innerHTML = `<button class="btn btn-turq sumarme w-full" onclick="sumarme()">🙋 Me sumo a la búsqueda</button>
+    <p class="text-xs text-zinc-500 mt-1 text-center">Al sumarte, la app te asigna un tramo de la ruta.</p>`;
+  document.getElementById('mesa-link').href = `/control?re=${re.id}#cp${re.id}`;
+  if (ORGANIZA) {
+    document.getElementById('re-excel').href = `/control/${re.id}/control.xlsx`;
+    const dr = document.getElementById('re-drive'); dr.classList.toggle('hidden', !re.drive_resultado); dr.href = re.drive_resultado || '#';
+    document.getElementById('re-cerrar').classList.toggle('hidden', !abierta);
+    document.getElementById('re-reabrir').classList.toggle('hidden', abierta);
+  }
+  document.getElementById('esc').disabled = !abierta || !re.me_sume;
+}
+function tab(t) {
+  tabAct = t;
+  document.querySelectorAll('#tabs [data-tab]').forEach(b => b.classList.toggle('activo', b.dataset.tab === t));
+  ['mia', 'equipo', 'todo', 'box', 'mesa'].forEach(x => { const el = document.getElementById('t-' + x); if (el) el.classList.toggle('hidden', x !== t); });
+  if (t !== 'mia') pararCam();
+  cargarTab(); foco();
+}
+function cargarTab() { if (tabAct === 'mia') cargarMia(); else if (tabAct === 'equipo') pintarEquipo(); else if (tabAct === 'todo') cargarTodo(); else if (tabAct === 'box') cargarBoxes(); }
+async function sumarme() {
+  try { re = (await api(`/ecommerce/api/${re.id}/sumarme`, { method: 'POST' })).busqueda; beepOk(); pintarCabecera(); tab('mia'); toast('¡Listo! Ya tenés tu tramo asignado'); }
+  catch (e) { toast(e.message, 'error'); }
+}
+async function salir() {
+  if (!confirm('¿Salir de la búsqueda? Lo que te faltaba buscar se reparte entre los demás.')) return;
+  try { re = (await api(`/ecommerce/api/${re.id}/salir`, { method: 'POST' })).busqueda; pintarCabecera(); pintarEquipo(); } catch (e) { toast(e.message, 'error'); }
+}
+async function sacar(uid, nombre) {
+  if (!confirm(`¿Sacar a ${nombre} de la búsqueda? Lo que le faltaba se reparte entre los demás.`)) return;
+  try { re = (await api(`/ecommerce/api/${re.id}/sacar/${uid}`, { method: 'POST' })).busqueda; pintarCabecera(); pintarEquipo(); } catch (e) { toast(e.message, 'error'); }
+}
+// "OCONA MIJARES, DIEGO JESUS" → "Diego Ocona"
+function corto(n) {
+  n = String(n || ''); const cap = w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+  if (!n.includes(',')) return n.split(/\s+/).map(cap).join(' ');
+  const [ap, no] = n.split(',').map(x => x.trim());
+  return [no.split(/\s+/)[0], ap.split(/\s+/)[0]].filter(Boolean).map(cap).join(' ');
+}
+async function abrirSumar() {
+  const panel = document.getElementById('sumar-panel'), el = document.getElementById('sumar-lista');
+  if (!panel || re.estado !== 'abierto') return;
+  panel.classList.remove('hidden'); el.innerHTML = '<p class="text-zinc-500 text-sm">Cargando…</p>';
+  try {
+    const d = await api(`/ecommerce/api/${re.id}/candidatos`);
+    el.innerHTML = d.usuarios.length ? d.usuarios.map(x => `<label class="flex items-center gap-2 py-1.5 px-2 rounded-lg bg-white ${x.esta ? 'opacity-60' : 'cursor-pointer'}">
+        <input type="checkbox" class="w-5 h-5" value="${x.id}" ${x.esta ? 'checked disabled' : ''}>
+        <span class="flex-1"><b>${esc(corto(x.nombre))}</b> <span class="text-xs text-zinc-500">${esc(x.nombre)} · ${esc(x.rol)}</span></span>
+        ${x.esta ? '<span class="chip chip-hecha">YA ESTÁ</span>' : ''}${x.id === YO ? '<span class="chip chip-auto">VOS</span>' : ''}</label>`).join('')
+      : '<p class="text-zinc-500 text-sm">No hay usuarios con acceso a Recolección Ecommerce.</p>';
+  } catch (e) { el.innerHTML = `<p class="text-red-600 text-sm">${esc(e.message)}</p>`; }
+}
+function cerrarSumar() { const p = document.getElementById('sumar-panel'); if (p) p.classList.add('hidden'); }
+async function sumarGente() {
+  const ids = [...document.querySelectorAll('#sumar-lista input:checked:not(:disabled)')].map(x => +x.value);
+  if (!ids.length) { toast('Marcá al menos una persona', 'warn'); return; }
+  const b = document.getElementById('sumar-ok'); b.disabled = true;
+  try {
+    const r = await api(`/ecommerce/api/${re.id}/sumar`, { json: { usuario_ids: ids } });
+    re = r.busqueda; cerrarSumar(); pintarCabecera(); pintarEquipo();
+    toast(r.sumados.length ? 'Sumados: ' + r.sumados.map(corto).join(', ') + ' · ruta repartida' : 'Ya estaban todos sumados');
+  } catch (e) { toast(e.message, 'error'); }
+  b.disabled = false;
+}
+async function repartir() {
+  try { re = (await api(`/ecommerce/api/${re.id}/repartir`, { method: 'POST' })).busqueda; pintarEquipo(); toast('Repartido de nuevo'); } catch (e) { toast(e.message, 'error'); }
+}
+function pintarEquipo() {
+  const b = re.busqueda, el = document.getElementById('equipo'), abierta = re.estado === 'abierto';
+  const act = b.equipo.filter(x => x.activo);
+  el.innerHTML = (act.length ? '' : '<p class="text-zinc-500">Todavía no se sumó nadie. Cuando se sumen, la app les reparte la ruta.</p>')
+    + b.equipo.map(p => `<div class="re-persona flex flex-wrap items-center gap-3 ${p.activo ? '' : 'opacity-50'}">
+      <b class="text-base">${esc(p.nombre)}</b>${p.usuario_id === YO ? '<span class="chip chip-auto">VOS</span>' : ''}
+      ${p.activo ? `<span class="text-xs text-zinc-500">desde las ${p.unido}</span>` : '<span class="chip chip-pendiente">SALIÓ</span>'}
+      <span class="flex-1"></span>
+      <span><b>${p.buscadas}</b> / ${p.unidades} prendas</span>
+      ${p.faltantes ? `<span class="chip chip-vencida">${p.faltantes} faltantes</span>` : ''}
+      <div class="barra w-24"><div style="width:${p.unidades ? 100 * p.buscadas / p.unidades : 0}%"></div></div>
+      ${abierta && p.activo && p.usuario_id === YO ? '<button class="btn btn-gris btn-chico" onclick="salir()">Salir</button>' : ''}
+      ${abierta && p.activo && ORGANIZA && p.usuario_id !== YO ? `<button class="btn btn-gris btn-chico" onclick="sacar(${p.usuario_id}, '${esc(p.nombre)}')">Sacar</button>` : ''}
+    </div>`).join('')
+    + (b.sin_asignar ? `<p class="text-sm mt-2 text-amber-700">⚠ ${b.sin_asignar} prendas sin asignar (no hay nadie sumado).</p>` : '');
+}
+
+// ───────── mi búsqueda ─────────
+async function cargarMia() {
+  const el = document.getElementById('mia-lista'), info = document.getElementById('mia-info');
+  if (!re.me_sume) {
+    el.innerHTML = ''; info.innerHTML = re.estado === 'abierto' ? '👆 Tocá <b>Me sumo</b> para que te asignen un tramo.' : 'La búsqueda está cerrada.';
+    boxEst = null; boxBar();
+    return;
+  }
+  try { const d = await api(`/ecommerce/api/${re.id}/mia`); grupos = d.grupos; otros = d.otros || []; re = d.busqueda; boxEst = d.box || null; } catch (e) { toast(e.message, 'error'); return; }
+  pintarMia();
+}
+function pintarMia() {
+  const el = document.getElementById('mia-lista'), info = document.getElementById('mia-info');
+  const bs = bloques(grupos), pend = bs.filter(b => bFaltan(b) > 0), listos = bs.filter(b => bFaltan(b) === 0);
+  const faltan = pend.reduce((a, b) => a + bFaltan(b), 0);
+  info.innerHTML = !grupos.length ? 'No tenés prendas asignadas.'
+    : faltan ? `👉 Te faltan <b>${faltan}</b> prenda${faltan > 1 ? 's' : ''}. Seguí la ruta de arriba hacia abajo: escaneá el código de barras de cada prenda (se suma sola) o tocá <b>✓ La tengo</b>. Si no está, <b>✗ No la encontré</b>.`
+    : '✅ <b>¡Terminaste tu tramo!</b> Llevá las prendas a la mesa de control.';
+  boxBar();
+  el.innerHTML = pend.map(b => bloqueHtml(b, true)).join('')
+    + (listos.length ? `<details class="card p-3"><summary class="font-bold cursor-pointer">✔ Ya juntadas o faltantes (${listos.length})</summary>
+        <div class="flex flex-col gap-2 mt-2">${listos.map(b => bloqueHtml(b, false)).join('')}</div></details>` : '')
+    + otrosHtml();
+}
+// ───────── ventas de 2 o más prendas: una sola ficha ─────────
+function bloques(gs) {
+  const out = [], idx = {};
+  gs.forEach(g => {
+    if (!g.venta) { out.push({ g }); return; }
+    const k = g.venta.clave + '-' + (g.asignado_id || 0);
+    if (idx[k] === undefined) { idx[k] = out.length; out.push({ venta: g.venta, gs: [] }); }
+    out[idx[k]].gs.push(g);
+  });
+  return out;
+}
+const bFaltan = b => b.g ? b.g.faltan : b.gs.reduce((a, g) => a + g.faltan, 0);
+function bloqueHtml(b, activo) {
+  if (b.g) return grupoHtml(b.g, activo);
+  const v = b.venta, falta = bFaltan(b);
+  const cant = b.gs.reduce((a, g) => a + g.cantidad, 0), bus = b.gs.reduce((a, g) => a + g.buscado, 0);
+  const bx = [...new Set(b.gs.flatMap(g => g.boxes || []))];
+  return `<div class="re-venta ${falta ? '' : 'listo'}"><div class="re-venta-cab">🧾 <b>Venta de ${v.prendas} prendas · van juntas</b>
+      <span class="text-xs text-zinc-500">${esc(v.tipo)} ${esc(v.tracking)}${v.comprador ? ' · ' + esc(v.comprador) : ''}</span>
+      ${bx.length ? `<span class="chip chip-hecha">📦 BOX ${bx.join(' + ')}</span>` : ''}<span class="flex-1"></span>
+      <span class="vcant ${falta ? '' : 'text-teal-600'}">${bus}<span class="text-zinc-400 text-base">/${cant}</span></span></div>
+    <div class="flex flex-col gap-2">${b.gs.map(g => grupoHtml(g, activo && g.faltan > 0)).join('')}</div></div>`;
+}
+
+// ───────── BOX: llevar lo juntado a la mesa ─────────
+let boxEst = null;
+function boxBar() {
+  const el = document.getElementById('box-bar'); if (!el) return;
+  const b = boxEst;
+  if (!b || !re || !re.me_sume || re.estado !== 'abierto') { el.innerHTML = ''; return; }
+  if (!b.en_mano) { el.innerHTML = `<div class="text-xs text-zinc-500">📦 BOX: cuando juntes <b>${b.cantidad}</b> prendas (o termines tu tramo) se habilita <b>Llevar a la mesa</b>.</div>`; return; }
+  el.innerHTML = `<div class="box-bar ${b.habilitado ? 'on' : ''}"><div class="flex-1 min-w-0"><b>📦 En la mano: ${b.en_mano}</b>
+      <span class="text-sm">${b.habilitado ? '· ¡listo para la mesa!' : 'de ' + b.cantidad}</span>
+      <div class="box-prog"><i style="width:${Math.min(100, 100 * b.en_mano / b.cantidad)}%"></i></div></div>
+    <button class="btn ${b.habilitado ? 'btn-primario' : 'btn-gris'} font-bold" onclick="llevarBox(${b.habilitado ? 'false' : 'true'})">📦 Llevar a la mesa</button></div>`;
+}
+async function llevarBox(forzar) {
+  if (forzar && !confirm(`Todavía no llegaste a ${boxEst.cantidad} prendas. ¿Las llevás igual a la mesa?`)) return;
+  try { const r = await api(`/ecommerce/api/${re.id}/box/llevar`, { json: { forzar } }); boxEst = r.box; mostrarBox(r.boxes); cargarMia(); }
+  catch (e) { toast(e.message, 'error'); }
+}
+function mostrarBox(bs) {
+  alerta = true; beepOk();
+  document.getElementById('bx-cuerpo').innerHTML = bs.map(b => `<div class="bx"><div class="flex items-center gap-4">
+      <div class="grande">${b.numero}</div><div><div class="text-2xl font-black">BOX ${b.numero}</div>
+      <div class="opacity-80">${b.unidades} prenda${b.unidades > 1 ? 's' : ''}${b.nuevo ? '' : ' · <b>ya tiene prendas de esta venta</b>'}</div></div></div>
+    ${b.ventas.map(v => `<div class="mt-2 text-sm"><b>${esc(v.tipo)} ${esc(v.tracking)}</b>${v.comprador ? ' · ' + esc(v.comprador) : ''}<br><span class="opacity-80">${v.prendas.map(esc).join(' · ')}</span></div>`).join('')}</div>`).join('');
+  document.getElementById('re-box').classList.add('on');
+}
+function cerrarBox() { alerta = false; document.getElementById('re-box').classList.remove('on'); foco(); }
+async function cargarBoxes() {
+  let d; try { d = await api(`/ecommerce/api/${re.id}/boxes`); } catch (e) { toast(e.message, 'error'); return; }
+  document.getElementById('box-cant-txt').textContent = d.cantidad;
+  const inp = document.getElementById('box-cant'); if (inp && document.activeElement !== inp) inp.value = d.cantidad;
+  const card = b => `<div class="box-card ${b.activo ? '' : 'vacio'}"><div class="flex items-center gap-3">
+      <span class="box-num">${b.numero}</span><div class="flex-1"><b>BOX ${b.numero}</b> · ${b.unidades} prenda${b.unidades > 1 ? 's' : ''}
+      <div class="text-xs text-zinc-500">👤 ${esc(b.quien || '—')} · ${b.hora}</div></div>
+      <span class="chip ${b.activo ? 'chip-en_curso' : 'chip-hecha'}">${b.activo ? `${b.controladas}/${b.ventas.length} controladas` : 'vacío · libre'}</span></div>
+    ${b.ventas.map(v => `<div class="box-v"><div class="flex flex-wrap items-center gap-2"><b>${esc(v.tipo)} ${esc(v.tracking)}</b>
+        ${v.cancelado ? '<span class="chip chip-vencida">CANCELADA</span>' : v.estado === 'completo' ? '<span class="chip chip-hecha">✔ controlada</span>' : ''}
+        <span class="text-zinc-500">${esc(v.comprador || '')}</span>${v.unidades < v.total ? `<span class="text-xs text-amber-700">${v.unidades} de ${v.total} en este BOX</span>` : ''}</div>
+      <div class="text-xs text-zinc-600">${v.prendas.map(esc).join(' · ')}</div></div>`).join('')}</div>`;
+  const act = d.boxes.filter(b => b.activo), vac = d.boxes.filter(b => !b.activo);
+  document.getElementById('box-lista').innerHTML = (act.map(card).join('') || '<p class="text-zinc-500">Todavía no se llevó nada a la mesa.</p>')
+    + (vac.length ? `<details class="mt-2"><summary class="cursor-pointer font-bold text-zinc-500">Ya vaciados (${vac.length})</summary><div class="flex flex-col gap-2 mt-2">${vac.map(card).join('')}</div></details>` : '');
+}
+async function boxCant(v) {
+  try { const r = await api('/ecommerce/api/box/cantidad', { json: { cantidad: parseInt(v, 10) } }); toast(`BOX de ${r.cantidad} prendas`); cargarBoxes(); }
+  catch (e) { toast(e.message, 'error'); }
+}
+
+// ───────── lo que buscan los demás (plegado, compacto) ─────────
+let otros = [], otrosAbierto = false;
+function otrosHtml() {
+  if (!otros.length) return '';
+  const pend = otros.filter(g => g.faltan > 0), hechos = otros.filter(g => g.faltan === 0);
+  const nPend = pend.reduce((a, g) => a + g.faltan, 0);
+  const abierta = re.estado === 'abierto';
+  const fila = g => {
+    const desc = (g.venta ? `<span title="Venta de ${g.venta.prendas} prendas: van juntas">🧾</span> ` : '') + (g.vinculado ? `${esc(g.articulo)} · ${esc(g.color)} <b>${esc(g.talle)}</b>` : esc(g.producto || g.sku || '(sin título)'));
+    const ub = g.ubicacion ? `<span class="otro-ub">📍 ${esc(g.ubicacion.split(',')[0].trim())}</span>` : '';
+    const estado = g.faltan === 0
+      ? (g.faltante && !g.buscado ? '<span class="otro-est otro-falta">no la encontró</span>' : `<span class="otro-est otro-ok">✓ trajo ${esc((g.trajo || []).map(corto).join(', ') || corto(g.asignado || ''))}</span>`)
+      : `<span class="otro-est">${g.buscado}/${g.cantidad}</span>`;
+    const btn = abierta && g.faltan > 0 ? `<button class="otro-btn" onclick='traje(${JSON.stringify(g.item_ids)}, ${JSON.stringify(g.asignado || '')})'>La traje yo</button>` : '';
+    return `<div class="otro ${g.faltan === 0 ? 'otro-hecho' : ''}"><span class="otro-quien">${esc(corto(g.asignado || 'Sin asignar'))}</span>
+      <span class="otro-desc">${desc} ${ub}</span>${estado}${btn}</div>`;
+  };
+  return `<details class="card p-3 otros" ${otrosAbierto ? 'open' : ''} ontoggle="otrosAbierto = this.open">
+    <summary class="cursor-pointer"><b>👀 Lo que buscan los demás</b> <span class="text-sm text-zinc-500">· ${nPend} pendiente${nPend === 1 ? '' : 's'} · ${hechos.length} ya juntada${hechos.length === 1 ? '' : 's'}</span></summary>
+    <p class="text-xs text-zinc-500 mt-1 mb-2">Es solo para que sepas qué buscan tus compañeros. Si encontrás una de estas, escaneala o tocá <b>La traje yo</b>: queda a tu nombre.</p>
+    <div class="flex flex-col">${pend.map(fila).join('')}${hechos.map(fila).join('')}</div></details>`;
+}
+async function traje(ids, quien, desdeEscaneo) {
+  if (!desdeEscaneo && !confirm(`Esta prenda la tiene asignada ${quien || 'otra persona'}. ¿La trajiste vos? Va a quedar a tu nombre.`)) return;
+  try {
+    const r = await api(`/ecommerce/api/${re.id}/la-tengo`, { json: { item_ids: ids, ajena: true } });
+    okGrande('LA TRAJISTE VOS', `queda a tu nombre${quien ? ' (era de ' + corto(quien) + ')' : ''}`); cargarTab(); refrescar();
+  } catch (e) { toast(e.message, 'error'); }
+}
+function grupoHtml(g, activo) {
+  const abierta = re.estado === 'abierto';
+  const cls = g.faltante && !g.faltan ? 'faltante' : !g.vinculado ? 'sinvinc' : !g.faltan ? 'listo' : g.buscado ? 'parcial' : '';
+  const titulo = g.vinculado
+    ? `<div class="re-nombre">${esc(g.articulo)}</div><div class="flex items-baseline gap-3 mt-1"><span class="text-base font-bold text-zinc-600">${esc(g.color)}</span><span class="re-talle">${esc(g.talle)}</span></div>`
+    : `<div class="re-nombre">${esc(g.producto || g.sku || '(sin título)')}</div><div class="text-sm text-amber-700 font-semibold mt-1">⚠ SKU sin vincular al catálogo: buscala por el título y la variante</div>`;
+  const ub = g.ubicacion ? g.ubicacion.split(',').map(u => `<span class="re-ub">📍 ${esc(u.trim())}</span>`).join(' ')
+    : '<span class="text-xs text-zinc-500">Sin ubicación cargada</span>';
+  const ids = JSON.stringify(g.item_ids);
+  let acc = '';
+  if (abierta && activo) {
+    acc = `<button class="btn btn-turq !py-2.5 !px-4 font-bold" onclick='manual(${ids})'>✓ La tengo${g.cantidad > 1 ? ` <span class="opacity-80 font-normal">(${g.buscado + 1} de ${g.cantidad})</span>` : ''}</button>`
+      + `<button class="btn btn-rojo !py-2.5 !px-4 font-bold" style="background:var(--alta);color:#fff" onclick='faltante(${ids})'>✗ No la encontré</button>`
+      + (g.vinculado ? `<button class="btn btn-gris btn-chico" onclick="donde(${g.item_ids[0]}, '${g.clave}')">🔍 ¿Dónde más puede estar?</button>` : '');
+  }
+  if (abierta && g.buscado && !(activo && g.cantidad > 1)) acc += `<button class="btn btn-gris btn-chico" onclick='deshacer(${ids})' title="Me equivoqué: restar una">−1</button>`;
+  if (abierta && g.faltante) acc += `<button class="btn btn-gris btn-chico" onclick='quitarFaltante(${ids})'>Apareció: quitar faltante</button>`;
+  return `<div class="re-card ${cls}" id="g-${g.clave}">
+    <div class="flex items-start gap-3"><div class="flex-1 min-w-0">${titulo}</div>
+      <div class="flex flex-col items-end gap-1"><div class="re-cuenta ${!g.faltan ? 'text-teal-600' : ''}">${g.faltante ? '<span class="text-red-700 text-base">FALTA ' + g.faltante + '</span> ' : ''}${g.buscado}<span class="text-zinc-400 text-xl">/${g.cantidad}</span></div>
+        ${abierta && activo && g.cantidad > 1 ? `<div class="flex gap-1">${g.buscado ? `<button class="btn btn-gris !px-3 !py-1 text-lg font-black" onclick='deshacer(${ids})' title="Restar una">−</button>` : ''}${g.faltan ? `<button class="btn btn-turq !px-3 !py-1 text-lg font-black" onclick='manual(${ids})' title="Sumar una más">+</button>` : ''}</div>` : ''}</div></div>
+    <div class="flex flex-wrap gap-2 mt-2">${ub}</div>
+    <div class="text-xs text-zinc-500 mt-2">${g.variante ? 'En la venta: ' + esc(g.variante) + ' · ' : ''}${g.sku ? 'SKU ' + esc(g.sku) : ''}${g.codigo_barras ? ' · cód. ' + esc(g.codigo_barras) : ''}</div>
+    <div class="text-xs text-zinc-400">Va en: ${g.paquetes.map(esc).join(', ')}${g.asignado && tabAct === 'todo' ? ' · 👤 ' + esc(g.asignado) : ''}${g.buscado && g.trajo && g.trajo.length ? ' · ✓ trajo ' + esc(g.trajo.join(', ')) : ''}${(g.boxes || []).length ? ' · <b>📦 BOX ' + g.boxes.join(' + ') + '</b>' : ''}</div>
+    <div class="flex flex-wrap gap-2 mt-2">${acc}</div><div id="extra-${g.clave}"></div></div>`;
+}
+async function donde(iid, clave) {
+  const el = document.getElementById('extra-' + clave);
+  try {
+    const d = await api(`/control/api/item/${iid}/donde`);
+    el.innerHTML = `<div class="mt-2 rounded-xl p-3 text-sm" style="background:var(--soft)"><b>Dónde puede estar</b> (sirve cualquiera de estas):
+      ${d.opciones.map(o => `<div class="mt-2"><div class="font-semibold">${esc(o.nombre)}</div><div class="text-xs text-zinc-500">cód. ${esc(o.codigo_barras || '—')} · ${esc(o.sku)}</div>
+        <div class="flex flex-wrap gap-1 mt-1">${o.ubicaciones.length ? o.ubicaciones.map(u => `<span class="re-ub">📍 ${esc(u.codigo)}</span>`).join('') : '<span class="text-xs text-zinc-500">sin ubicación cargada</span>'}</div></div>`).join('')}
+      <div class="text-xs text-zinc-500 mt-2">Si no está en ningún lado, tocá <b>✗ No la encontré</b>: queda una tarea para el depósito.</div></div>`;
+  } catch (e) { toast(e.message, 'error'); }
+}
+async function faltante(ids) {
+  const nota = prompt('No la encontraste. ¿Qué pasó? (opcional: "no hay stock", "está fallada"…)', '');
+  if (nota === null) return;
+  try { const r = await api(`/ecommerce/api/${re.id}/faltante`, { json: { item_ids: ids, nota } }); beepWarn(); toast('Marcada como no encontrada · ' + (r.aviso || 'se creó una tarea'), r.sin_stock ? 'error' : 'warn', 6000); cargarTab(); refrescar(); }
+  catch (e) { toast(e.message, 'error'); }
+}
+async function quitarFaltante(ids) {
+  try { await api(`/ecommerce/api/${re.id}/quitar-faltante`, { json: { item_ids: ids } }); cargarTab(); refrescar(); } catch (e) { toast(e.message, 'error'); }
+}
+async function deshacer(ids) {
+  try { await api(`/ecommerce/api/${re.id}/deshacer`, { json: { item_ids: ids } }); cargarTab(); refrescar(); } catch (e) { toast(e.message, 'error'); }
+}
+async function manual(ids) {
+  try {
+    const r = await api(`/ecommerce/api/${re.id}/la-tengo`, { json: { item_ids: ids } });
+    if (r.ok === false && r.motivo === 'otro') return traje(ids, r.quien);
+    okGrande('LA TENGO', r.faltan ? `faltan ${r.faltan} de esta prenda` : 'completa'); cargarTab(); refrescar();
+  } catch (e) { toast(e.message, 'error'); }
+}
+async function cargarTodo() {
+  try { const d = await api(`/ecommerce/api/${re.id}/todo`); grupos = d.grupos; } catch (e) { toast(e.message, 'error'); return; }
+  const porPersona = {};
+  grupos.forEach(g => (porPersona[g.asignado || 'Sin asignar'] = porPersona[g.asignado || 'Sin asignar'] || []).push(g));
+  document.getElementById('todo').innerHTML = Object.entries(porPersona).map(([p, gs]) =>
+    `<details class="card p-3" open><summary class="font-bold cursor-pointer">👤 ${esc(p)} · ${gs.reduce((a, g) => a + g.buscado, 0)}/${gs.reduce((a, g) => a + g.cantidad, 0)}</summary>
+     <div class="flex flex-col gap-2 mt-2">${bloques(gs).map(b => bloqueHtml(b, false)).join('')}</div></details>`).join('') || '<p class="text-zinc-500">Sin prendas.</p>';
+}
+
+// ───────── escaneo en la búsqueda: pantalla verde / roja ─────────
+let enviando = false;
+async function procesar(v) {
+  v = String(v || '').trim(); if (!v || !re) return;
+  if (alerta) { beepError(); return; }
+  if (!re.me_sume) { toast('Primero tocá "Me sumo"', 'warn'); return; }
+  if (enviando) return; enviando = true;
+  try {
+    const r = await api(`/ecommerce/api/${re.id}/encontre`, { json: { codigo: v } });
+    re = r.busqueda; pintarCabecera();
+    if (r.ok) {
+      okGrande('OK', r.escaneado + (r.grupo && r.grupo.faltan ? ` · faltan ${r.grupo.faltan}` : ''));
+      await cargarMia();
+      if (r.grupo) { const c = document.getElementById('g-' + r.grupo.clave); if (c) { c.classList.add('flash'); c.scrollIntoView({ block: 'center', behavior: 'smooth' }); } }
+    } else mostrarAlerta(r);
+  } catch (e) { beepError(); toast(e.message, 'error', 5000); }
+  finally { enviando = false; }
+}
+function okGrande(txt, sub) {
+  beepOk();
+  const o = document.getElementById('re-ok');
+  document.getElementById('ok-txt').textContent = txt; document.getElementById('ok-sub').textContent = sub || '';
+  o.classList.add('on'); clearTimeout(okGrande.t); okGrande.t = setTimeout(() => o.classList.remove('on'), 1100);
+}
+function mostrarAlerta(r) {
+  alerta = true; beepError(); setTimeout(beepError, 450);
+  const tit = { desconocido: 'CÓDIGO DESCONOCIDO', otro: 'ES DE ' + String(corto(r.quien || 'OTRA PERSONA')).toUpperCase(), sobra: 'YA ESTÁN TODAS', equivocado: 'PRENDA EQUIVOCADA' }[r.motivo] || 'ERROR';
+  document.getElementById('al-titulo').textContent = tit;
+  const ajena = r.motivo === 'otro' && r.item_ids && r.item_ids.length;
+  alertaAjena = ajena ? { ids: r.item_ids, quien: r.quien } : null;
+  document.getElementById('re-alerta').classList.toggle('ajena', !!ajena);
+  document.querySelector('#re-alerta .cruz').textContent = ajena ? '✋' : '✖';
+  document.getElementById('al-ajena').classList.toggle('hidden', !ajena);
+  document.getElementById('al-ok').classList.toggle('hidden', !!ajena);
+  document.getElementById('al-cuerpo').innerHTML = ajena
+    ? `<b>${esc(r.escaneado || 'Esta prenda')}</b> la tiene asignada <b>${esc(corto(r.quien))}</b>.<br>¿La trajiste vos? Si decís que sí, queda a tu nombre.`
+    : esc(r.mensaje);
+  document.getElementById('re-alerta').classList.add('on');
+  document.activeElement && document.activeElement.blur();
+}
+let alertaAjena = null;
+function trajeEscaneada() { const a = alertaAjena; cerrarAlerta(); if (a) traje(a.ids, a.quien, true); }
+function cerrarAlerta() { alerta = false; document.getElementById('re-alerta').classList.remove('on'); foco(); }
+function foco() { if (!alerta && tabAct === 'mia' && innerWidth > 700) { const e = document.getElementById('esc'); if (!e.disabled) e.focus(); } }
+const inpEsc = document.getElementById('esc');
+inpEsc.addEventListener('keydown', e => { if (e.key !== 'Enter') return; e.preventDefault(); const v = inpEsc.value; inpEsc.value = ''; procesar(v); });
+
+let scanner = null, ultimo = '', ultimoT = 0;
+async function toggleCam() {
+  if (scanner) { pararCam(); return; }
+  if (typeof Html5Qrcode === 'undefined') { toast('No se pudo cargar el lector de la cámara (¿sin internet?)', 'error'); return; }
+  document.getElementById('cam-box').classList.remove('hidden');
+  try {
+    scanner = new Html5Qrcode('qr-reader', { verbose: false, experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
+    await scanner.start({ facingMode: 'environment' }, { fps: 12, qrbox: (w, h) => ({ width: Math.round(w * .9), height: Math.max(80, Math.round(h * .35)) }) },
+      t => { const n = Date.now(); if (t === ultimo && n - ultimoT < 2500) return; ultimo = t; ultimoT = n; procesar(t); }, () => {});
+  } catch (e) { toast('No se pudo abrir la cámara: ' + e, 'error', 6000); pararCam(); }
+}
+async function pararCam() { if (scanner) { try { await scanner.stop(); } catch {} scanner = null; } const b = document.getElementById('cam-box'); if (b) b.classList.add('hidden'); }
+
+// ───────── acciones de quien organiza ─────────
+async function sumarArchivos(input) {
+  if (!input.files.length) return;
+  const fd = new FormData(); [...input.files].forEach(f => fd.append('archivos', f)); input.value = '';
+  try {
+    const r = await api(`/ecommerce/api/${re.id}/agregar`, { method: 'POST', body: fd });
+    re = r.busqueda; pintarCabecera(); cargarTab();
+    toast(`${r.nuevos} paquetes nuevos · ${r.actualizados} actualizados`, 'ok', 5000);
+    if (r.errores.length) toast(r.errores.join(' · '), 'warn', 8000);
+  } catch (e) { toast(e.message, 'error', 7000); }
+}
+async function sumarTN(b) {
+  b.disabled = true;
+  try {
+    const r = await api(`/ecommerce/api/${re.id}/agregar-tn`, { method: 'POST' });
+    re = r.busqueda; pintarCabecera(); cargarTab();
+    toast(r.nuevos ? `${r.nuevos} órdenes nuevas de Tienda Nube` : 'No hay órdenes nuevas de Tienda Nube', 'ok', 5000);
+  } catch (e) { toast(e.message, 'error', 7000); }
+  b.disabled = false;
+}
+async function cerrar() {
+  const sin = re.paquetes - re.completo;
+  if (!confirm(sin ? `Hay ${sin} paquetes sin controlar. ¿Cerrar igual?` : '¿Cerrar la búsqueda? Se guarda el Excel en la carpeta del día.')) return;
+  try { const r = await api(`/ecommerce/api/${re.id}/cerrar`, { method: 'POST' }); re = r.busqueda; pintarCabecera(); cargarTab();
+        toast(r.aviso || (re.drive_resultado ? 'Cerrada · Excel guardado en Drive' : 'Cerrada'), r.aviso ? 'warn' : 'ok', 6000); }
+  catch (e) { toast(e.message, 'error'); }
+}
+async function reabrir() { try { re = (await api(`/ecommerce/api/${re.id}/reabrir`, { method: 'POST' })).busqueda; pintarCabecera(); cargarTab(); } catch (e) { toast(e.message, 'error'); } }
+async function borrar() {
+  if (!confirm(`¿Borrar RE-${re.id}? Se pierde lo buscado y controlado.`)) return;
+  try { await api('/ecommerce/api/' + re.id, { method: 'DELETE' }); volver(); } catch (e) { toast(e.message, 'error'); }
+}
+
+if (ORGANIZA) origen(org);
+lista();
+const mh = location.hash.match(/^#re(\d+)$/); if (mh) abrir(+mh[1]);
+</script>
+{% endblock %}

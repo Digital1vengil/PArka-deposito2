@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block titulo %}Cambios · {{ APP_NOMBRE }}{% endblock %}
+{% block contenido %}
+<a href="/" class="text-sm text-zinc-500 hover:text-violeta">← Inicio</a>
+<h1 class="text-2xl font-bold mb-1">🔁 Cambios</h1>
+<p class="text-sm text-zinc-500 mb-5">Los cambios aceptados en la app de cambios: qué hay que mandarle a cada cliente y por dónde.
+  La prenda entra sola a la búsqueda del día de <a class="underline" href="/ecommerce">Recolección Ecommerce</a> y se controla en la mesa;
+  al despacharla, escaneá o escribí el número de cambio (CAM-000N) o de orden y en la app de cambios queda <b>Despachado</b>.</p>
+
+{% if not conectado %}
+<section class="card p-4 mb-4" style="background:#fef3c7;color:#92400e">Falta conectar la app de cambios:
+  {% if u.es_admin %}<a class="underline" href="/admin/conexiones#cambios">Conexiones → App de cambios</a> (dirección y clave del panel){% else %}pedíselo al admin{% endif %}.</section>
+{% endif %}
+
+<section class="card p-4 mb-4 sticky top-14 z-20">
+  <div class="flex gap-2">
+    <input id="esc" class="input flex-1 !text-lg !py-3" placeholder="Despachar: escaneá o escribí CAM-000N o el nº de orden" autocomplete="off">
+    <button class="btn btn-primario" onclick="despachar()">Despachado</button>
+  </div>
+  <div id="res" class="text-sm mt-2"></div>
+</section>
+
+<section class="card p-4 mb-4">
+  <div class="flex flex-wrap items-center gap-2 mb-3">
+    <h2 class="font-bold flex-1">📦 Para despachar <span id="n" class="chip"></span></h2>
+    <span class="text-xs text-zinc-500" id="info"></span>
+    <button class="btn btn-gris btn-chico" onclick="cargar(true)">↻ Actualizar</button>
+  </div>
+  <div id="lista" class="flex flex-col gap-3 text-sm"><p class="text-zinc-500">Cargando…</p></div>
+</section>
+
+<section class="card p-4">
+  <h2 class="font-bold mb-2">✅ Últimos despachados</h2>
+  <div id="desp" class="flex flex-col gap-1 text-sm"></div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+const ICON = { 'Correo Argentino': '📮', 'Envío Flex': '🛵', 'Cambio en oficina': '🏢' };
+function chipBusq(b) {
+  if (!b) return '<span class="chip chip-pendiente">todavía no está en la búsqueda</span>';
+  if (b.cancelado) return '<span class="chip" style="background:#b91c1c;color:#fff">salió de la búsqueda</span>';
+  if (b.estado === 'completo') return '<span class="chip chip-hecha">✅ controlado en la mesa</span>';
+  if (b.faltante) return '<span class="chip chip-vencida">no la encontraron</span>';
+  return `<span class="chip chip-en_curso">🧺 juntadas ${b.juntadas}/${b.unidades}</span>`;
+}
+function fila(c, desp) {
+  const prendas = c.items.map(i => `<div class="font-bold text-base">${i.cantidad}× ${esc(i.producto)} <span class="text-violeta">${esc(i.color)} ${esc(i.talle)}</span></div><div class="text-xs text-zinc-500">${i.sku ? 'SKU ' + esc(i.sku) : ''}</div>`).join('');
+  return `<div class="rounded-xl p-3 border" style="border-color:var(--line)">
+    <div class="flex flex-wrap items-center gap-2"><b class="text-base">${esc(c.id)}</b><span class="text-zinc-500">orden #${esc(c.orden)}</span>
+      <span class="chip">${esc(c.estado)}</span>${desp ? '' : chipBusq(c.busqueda)}<span class="flex-1"></span>
+      <span class="font-semibold">${ICON[c.envio] || '📦'} ${esc(c.envio || 'sin envío elegido')}</span></div>
+    <div class="mt-2">${prendas || '<span class="text-zinc-500">(sin prenda cargada)</span>'}</div>
+    <div class="text-xs text-zinc-600 mt-1">Para <b>${esc(c.cliente)}</b>${c.localidad ? ' · ' + esc(c.localidad) : ''} · devuelve: ${esc(c.devuelve)}</div>
+    ${desp ? '' : `<div class="mt-2"><button class="btn btn-turq btn-chico" onclick="despachar('${esc(c.id)}')">✔ Despachado</button></div>`}</div>`;
+}
+async function cargar(refrescar) {
+  const el = document.getElementById('lista');
+  try {
+    const d = await api('/cambios/api/lista' + (refrescar ? '?refrescar=1' : ''));
+    if (!d.conectado) { el.innerHTML = '<p class="text-zinc-500">App de cambios sin conectar.</p>'; return; }
+    if (d.error) { el.innerHTML = `<p class="text-red-600">${esc(d.error)}</p>`; return; }
+    document.getElementById('n').textContent = d.cambios.length;
+    document.getElementById('info').textContent = d.pendientes_aceptar ? `${d.pendientes_aceptar} pendientes de aceptar en la app de cambios` : '';
+    el.innerHTML = d.cambios.map(c => fila(c, false)).join('') || '<p class="text-zinc-500">No hay cambios para despachar.</p>';
+    document.getElementById('desp').innerHTML = d.despachados.slice().reverse().map(c => `<div>${esc(c.id)} · orden #${esc(c.orden)} · ${esc(c.cliente)} · <span class="text-zinc-500">${esc(c.estado)}</span></div>`).join('') || '<p class="text-zinc-500">Todavía nada.</p>';
+  } catch (e) { el.innerHTML = `<p class="text-red-600">${esc(e.message)}</p>`; }
+}
+async function despachar(codigo) {
+  const inp = document.getElementById('esc'), res = document.getElementById('res');
+  codigo = (codigo || inp.value).trim(); if (!codigo) return;
+  inp.value = '';
+  try {
+    const r = await api('/cambios/api/despachar', { json: { codigo } });
+    if (r.ok) { beepOk(); res.innerHTML = `<b class="text-teal-700">${esc(r.mensaje)}</b> · ${esc(r.cliente)}` + (r.aviso ? ` <span class="text-amber-700">· ${esc(r.aviso)}</span>` : ''); cargar(true); }
+    else { beepError(); res.innerHTML = `<b class="text-red-700">${esc(r.mensaje)}</b>`; }
+  } catch (e) { beepError(); res.innerHTML = `<b class="text-red-700">${esc(e.message)}</b>`; }
+  inp.focus();
+}
+document.getElementById('esc').addEventListener('keydown', e => { if (e.key === 'Enter') despachar(); });
+cargar(false); setInterval(() => cargar(false), 60000);
+</script>
+{% endblock %}

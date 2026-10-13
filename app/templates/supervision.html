@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block titulo %}Supervisión · {{ APP_NOMBRE }}{% endblock %}
+{% block contenido %}
+<div class="flex flex-wrap items-end gap-3 mb-6">
+  <div><h1 class="text-2xl font-bold">👁 Supervisión</h1><p class="text-xs text-zinc-400">Se actualiza sola cada 15 segundos</p></div>
+  <div class="ml-auto flex gap-2 items-end">
+    <div><label class="lbl">Día</label><input type="date" id="f-fecha" class="input !py-1.5"></div>
+    <a href="/tareas" class="btn btn-primario">+ Asignar tarea</a>
+  </div>
+</div>
+
+<div id="secciones" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6"></div>
+
+<div class="grid lg:grid-cols-3 gap-6">
+  <div class="lg:col-span-1 flex flex-col gap-6">
+    <section class="card p-5"><h2 class="font-bold mb-3">Lotes abiertos</h2><div id="lotes" class="flex flex-col gap-3"></div></section>
+    <section class="card p-5"><h2 class="font-bold mb-3">Operarios del día</h2>
+      <table class="tabla"><thead><tr><th>Operario</th><th>Paq.</th><th>Tareas</th><th>Errores</th><th>Última</th></tr></thead><tbody id="ops"></tbody></table>
+    </section>
+  </div>
+  <section class="card p-5 lg:col-span-2">
+    <div class="flex items-center gap-3 mb-3"><h2 class="font-bold">Actividad</h2>
+      <select id="f-usuario" class="input !w-auto !py-1.5 ml-auto"><option value="">Todos</option>
+        {% for x in usuarios %}<option value="{{ x.id }}">{{ x.nombre }}</option>{% endfor %}</select></div>
+    <div class="max-h-[70vh] overflow-y-auto"><table class="tabla"><thead><tr><th>Hora</th><th>Quién</th><th>Acción</th><th>Detalle</th></tr></thead><tbody id="feed"></tbody></table></div>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const fF = document.getElementById('f-fecha'), fU = document.getElementById('f-usuario');
+fF.valueAsDate = new Date(); fF.onchange = cargar; fU.onchange = cargar;
+const colAccion = t => t === 'escaneo_ok' ? 'text-green-400' : t.includes('no_encontrado') || t.includes('fallido') ? 'text-red-400' : t === 'escaneo_dup' ? 'text-amber-400' : 'text-zinc-300';
+async function cargar() {
+  const d = await api(`/supervision/api/datos?fecha=${fF.value}${fU.value ? '&usuario_id=' + fU.value : ''}`);
+  document.getElementById('secciones').innerHTML = d.secciones.map(s => `
+    <a href="/s/${s.slug}" class="card p-4 block  ${s.activa ? '' : 'opacity-60'}">
+      <div class="flex items-center gap-2"><span class="text-2xl">${s.icono}</span><b>${esc(s.nombre)}</b></div>
+      <div class="grid grid-cols-3 gap-2 mt-3 text-center">
+        ${s.paquetes_pendientes !== undefined ? `<div><div class="text-2xl font-bold ${s.paquetes_pendientes ? 'text-amber-400' : 'text-green-400'}">${s.paquetes_pendientes}</div><div class="text-[10px] text-zinc-400">PAQ. PEND.</div></div>` : '<div></div>'}
+        <div><div class="text-2xl font-bold">${s.tareas}</div><div class="text-[10px] text-zinc-400">TAREAS</div></div>
+        <div><div class="text-2xl font-bold ${s.vencidas ? 'text-red-400' : ''}">${s.vencidas}</div><div class="text-[10px] text-zinc-400">VENCIDAS</div></div>
+      </div></a>`).join('');
+  document.getElementById('lotes').innerHTML = d.lotes.length ? d.lotes.map(l => {
+    const pct = l.total ? Math.round(l.hechos / l.total * 100) : 0;
+    return `<div><div class="flex justify-between text-sm"><span class="truncate"><span class="chip chip-auto">${esc(l.tipo)}</span> ${esc(l.nombre)}</span><span class="text-zinc-400">${l.hechos}/${l.total}</span></div>
+      <div class="barra mt-1"><div style="width:${pct}%"></div></div></div>`;
+  }).join('') : '<p class="text-zinc-500 text-sm">Sin lotes abiertos.</p>';
+  document.getElementById('ops').innerHTML = d.operarios.length ? d.operarios.map(o =>
+    `<tr><td>${esc(o.nombre)}</td><td>${o.paquetes}</td><td>${o.tareas}</td><td class="${o.errores ? 'text-red-400' : ''}">${o.errores}</td><td class="text-zinc-400">${o.ultima}</td></tr>`).join('')
+    : '<tr><td colspan="5" class="text-zinc-500">Sin actividad.</td></tr>';
+  document.getElementById('feed').innerHTML = d.feed.length ? d.feed.map(a =>
+    `<tr><td class="text-zinc-400 whitespace-nowrap">${a.hora}</td><td>${esc(a.usuario)}</td><td class="${colAccion(a.tipo)} whitespace-nowrap">${esc(a.accion)}</td><td class="text-zinc-400">${esc(a.detalle)}</td></tr>`).join('')
+    : '<tr><td colspan="4" class="text-zinc-500">Sin actividad.</td></tr>';
+}
+cargar(); setInterval(() => { if (!document.hidden) cargar(); }, 15000);
+</script>
+{% endblock %}

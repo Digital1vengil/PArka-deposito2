@@ -1,0 +1,255 @@
+{% extends "base.html" %}
+{% block titulo %}Escanear · {{ APP_NOMBRE }}{% endblock %}
+{% block head %}<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>{% endblock %}
+{% block main_class %}max-w-lg mx-auto px-3 py-3{% endblock %}
+{% block contenido %}
+<div class="flex items-center gap-3 mb-3">
+  <a href="/despacho" class="btn btn-gris btn-chico">← Despacho</a>
+  <div class="flex-1">
+    <div class="text-sm font-semibold" id="prog-txt">— / —</div>
+    <div class="barra mt-1"><div id="prog-bar" style="width:0%"></div></div>
+  </div>
+  <span id="cola" class="chip chip-pendiente hidden" title="Escaneos sin enviar por falta de conexión"></span>
+</div>
+
+<div id="banner" class="rounded-xl px-4 py-3 bg-violeta text-white flex items-center gap-3 mb-3 transition-colors">
+  <div id="b-icono" class="text-3xl">📷</div>
+  <div class="min-w-0">
+    <div id="b-titulo" class="font-bold">Listo para escanear</div>
+    <div id="b-sub1" class="text-sm opacity-90 truncate">Usá la cámara o el lector de códigos</div>
+    <div id="b-sub2" class="text-xs opacity-75 truncate"></div>
+  </div>
+</div>
+
+<div class="grid grid-cols-2 gap-2 mb-3">
+  <button id="btn-ini" class="btn btn-primario !py-3" onclick="iniciarTanda()">🚀 Iniciar despacho</button>
+  <button id="btn-fin" class="btn btn-gris !py-3" onclick="finalizarTanda()" disabled>✅ Finalizar despacho</button>
+</div>
+<p id="tanda-info" class="text-xs text-zinc-400 text-center mb-3 hidden"></p>
+
+<div class="card overflow-hidden mb-3">
+  <div class="relative">
+    <div id="qr-reader" class="w-full min-h-[220px] bg-black"></div>
+    <div id="cam-overlay" class="absolute inset-0 flex flex-col items-center justify-center bg-white/95 gap-3">
+      <button class="btn btn-primario !py-3 !px-6" onclick="startScanner()">📷 Activar cámara</button>
+      <p class="text-xs text-zinc-400 px-6 text-center">Si usás un lector de códigos por USB/Bluetooth no hace falta la cámara: escaneá directamente.</p>
+    </div>
+  </div>
+  <div class="flex gap-2 p-2 bg-zinc-900">
+    <button class="btn btn-chico modo" data-m="barra">▮▮ Barras</button>
+    <button class="btn btn-chico modo" data-m="qr">▦ QR</button>
+    <button class="btn btn-gris btn-chico ml-auto" onclick="stopScanner()">⏸ Pausar</button>
+  </div>
+</div>
+
+<form class="flex gap-2 mb-4" onsubmit="event.preventDefault(); enviarManual();">
+  <input id="manual" class="input" placeholder="Ingresar código a mano" inputmode="numeric" autocomplete="off">
+  <button class="btn btn-gris">OK</button>
+</form>
+
+<h3 class="text-sm font-bold text-zinc-400 mb-2">Últimos escaneos</h3>
+<div id="ultimos" class="flex flex-col gap-2 mb-10"></div>
+{% endblock %}
+{% block scripts %}
+<script>
+let scanner = null, corriendo = false, arrancando = false;
+let modo = localStorage.getItem('parka_modo') || 'barra';
+let ultimoRaw = '', ultimoT = 0, tanda = null;
+const ultimos = [];
+const COLA_KEY = 'parka_cola_v1';
+const leerCola = () => { try { return JSON.parse(localStorage.getItem(COLA_KEY) || '[]'); } catch { return []; } };
+const guardarCola = c => { try { localStorage.setItem(COLA_KEY, JSON.stringify(c)); } catch {} pintarCola(); };
+
+function banner(tipo, titulo, s1 = '', s2 = '') {
+  const col = { ok: 'bg-green-700', error: 'bg-red-700', warn: 'bg-amber-700', idle: 'bg-violeta', info: 'bg-sky-800' };
+  const ic = { ok: '✅', error: '❌', warn: '⚠️', idle: '📷', info: '📡' };
+  const b = document.getElementById('banner');
+  b.className = `rounded-xl px-4 py-3 ${col[tipo]} text-white flex items-center gap-3 mb-3 transition-colors`;
+  document.getElementById('b-icono').textContent = ic[tipo];
+  document.getElementById('b-titulo').textContent = titulo;
+  document.getElementById('b-sub1').textContent = s1;
+  document.getElementById('b-sub2').textContent = s2;
+}
+
+function agregarUltimo(tipo, texto, sub) {
+  ultimos.unshift({ tipo, texto, sub, hora: new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) });
+  ultimos.splice(15);
+  const col = { ok: 'border-green-800 bg-green-950/40', dup: 'border-amber-800 bg-amber-950/30', error: 'border-red-800 bg-red-950/30', cola: 'border-sky-800 bg-sky-950/30' };
+  document.getElementById('ultimos').innerHTML = ultimos.map(u =>
+    `<div class="border rounded-xl p-3 text-sm ${col[u.tipo]}"><div class="flex justify-between gap-2"><b class="truncate">${esc(u.texto)}</b><span class="text-xs text-zinc-400">${u.hora}</span></div>
+     ${u.sub ? `<div class="text-xs text-zinc-400 truncate">${esc(u.sub)}</div>` : ''}</div>`).join('');
+}
+
+async function enviar(raw) {
+  return api('/despacho/api/scan', { json: { codigo: raw } });
+}
+
+async function procesar(raw) {
+  raw = (raw || '').trim();
+  if (!raw) return;
+  const now = Date.now();
+  if (raw === ultimoRaw && now - ultimoT < 2000) return;
+  ultimoRaw = raw; ultimoT = now;
+  let r;
+  try { r = await enviar(raw); }
+  catch (e) {
+    if (e.message.includes('Failed to fetch') || e.message.includes('NetworkError') || e.name === 'TypeError') {
+      const c = leerCola(); c.push(raw); guardarCola(c);
+      beepWarn(); banner('info', 'Sin conexión — guardado', raw, 'Se envía solo cuando vuelva la señal');
+      agregarUltimo('cola', raw, 'En espera de conexión');
+    } else { beepError(); banner('error', 'Error', e.message); }
+    return;
+  }
+  mostrarResultado(r);
+}
+
+function mostrarResultado(r) {
+  const p = r.paquete || {};
+  if (r.resultado === 'ok') {
+    beepOk();
+    banner('ok', `Despachado (${r.lote.hechos}/${r.lote.total})`, p.comprador || p.tracking, p.producto || p.venta_id || '');
+    agregarUltimo('ok', p.comprador || p.tracking, `📮 ${p.tracking} · ${p.producto || ''}`);
+    if (tanda) { tanda.cantidad++; pintarTanda(); }
+    refrescarProgreso();
+  } else if (r.resultado === 'dup') {
+    beepWarn();
+    banner('warn', 'Ya fue despachado', p.comprador || p.tracking, `${p.escaneado_at} · ${p.escaneado_por}`);
+    agregarUltimo('dup', p.comprador || p.tracking, 'Repetido · ' + p.escaneado_at);
+  } else if (r.resultado === 'no_encontrado') {
+    beepError();
+    banner('error', 'No encontrado', 'Código: ' + r.codigo, 'No está en ningún lote abierto');
+    agregarUltimo('error', r.codigo, 'No está en la lista');
+  }
+}
+
+async function vaciarCola() {
+  const c = leerCola();
+  if (!c.length) return;
+  const resto = [];
+  for (const raw of c) {
+    try { const r = await enviar(raw); if (r.resultado === 'ok') agregarUltimo('ok', r.paquete.comprador || r.codigo, 'Enviado al volver la conexión'); }
+    catch { resto.push(raw); }
+  }
+  guardarCola(resto);
+  if (!resto.length) { toast('📡 Escaneos pendientes enviados'); refrescarProgreso(); }
+}
+function pintarCola() {
+  const n = leerCola().length, el = document.getElementById('cola');
+  el.classList.toggle('hidden', !n); el.textContent = `${n} sin enviar`;
+}
+
+async function refrescarProgreso() {
+  try {
+    const d = await api('/despacho/api/estado');
+    const abiertos = d.lotes.filter(l => !l.cerrado);
+    const h = abiertos.reduce((a, l) => a + l.hechos, 0), t = abiertos.reduce((a, l) => a + l.total, 0);
+    document.getElementById('prog-txt').textContent = t ? `${h}/${t} despachados · ${abiertos.length} ${abiertos.length === 1 ? 'lote' : 'lotes'}` : 'No hay lotes abiertos';
+    document.getElementById('prog-bar').style.width = (t ? h / t * 100 : 0) + '%';
+    tanda = d.tanda; pintarTanda();
+    if (t && h === t && !window._festejo) { window._festejo = true; beepOk(); setTimeout(beepOk, 280); toast(`🎉 ¡Todos los ${t} paquetes despachados!`, 'ok', 6000); }
+  } catch {}
+}
+
+function pintarTanda() {
+  const ini = document.getElementById('btn-ini'), fin = document.getElementById('btn-fin'), info = document.getElementById('tanda-info');
+  ini.disabled = !!tanda; fin.disabled = !tanda;
+  fin.className = 'btn !py-3 ' + (tanda ? 'btn-primario' : 'btn-gris');
+  ini.textContent = tanda ? '⏺ Despacho activo' : '🚀 Iniciar despacho';
+  info.classList.toggle('hidden', !tanda);
+  if (tanda) info.textContent = `Despacho iniciado ${tanda.inicio} · ${tanda.cantidad} paquetes en esta tanda`;
+}
+
+async function iniciarTanda() {
+  try { await api('/despacho/api/tanda/iniciar', { method: 'POST' }); await refrescarProgreso(); startScanner(); toast('🚀 Despacho iniciado — escaneá los paquetes'); }
+  catch (e) { toast(e.message, 'error'); }
+}
+async function finalizarTanda() {
+  if (!confirm('¿Finalizar este despacho? Se guarda en Google Drive y se descarga el Excel de la tanda.')) return;
+  const b = document.getElementById('btn-fin'); b.disabled = true; b.textContent = '⏳ Guardando en Drive…';
+  try {
+    const d = await api('/despacho/api/tanda/finalizar', { method: 'POST' });
+    toast(`✅ Despacho finalizado (${d.cantidad} paquetes)`);
+    if (d.drive && d.drive.length) toast('☁ Guardado en Drive: ' + d.drive.map(r => r.archivo || r.tipo).join(', '), 'ok', 6000);
+    if (d.drive_error) toast('⚠️ No se guardó en Drive: ' + d.drive_error + ' — se reintenta desde Despacho', 'error', 9000);
+    location.href = `/despacho/tanda/${d.id}.xlsx`;
+    await stopScanner(); refrescarProgreso();
+  } catch (e) { toast(e.message, 'error'); refrescarProgreso(); }
+}
+
+// ── Cámara (misma configuración robusta del scanner) ──
+function pintarModo() {
+  document.querySelectorAll('.modo').forEach(b => { b.classList.toggle('btn-primario', b.dataset.m === modo); b.classList.toggle('btn-gris', b.dataset.m !== modo); });
+}
+document.querySelectorAll('.modo').forEach(b => b.onclick = () => {
+  modo = b.dataset.m; try { localStorage.setItem('parka_modo', modo); } catch {} pintarModo(); if (corriendo) startScanner();
+});
+pintarModo();
+
+async function stopScanner() {
+  if (scanner) { try { if (corriendo) await scanner.stop(); } catch {} try { scanner.clear(); } catch {} }
+  scanner = null; corriendo = false;
+  document.getElementById('cam-overlay').classList.remove('hidden');
+}
+
+async function startScanner() {
+  if (arrancando) return;
+  arrancando = true;
+  document.getElementById('cam-overlay').classList.add('hidden');
+  await stopScanner();
+  document.getElementById('cam-overlay').classList.add('hidden');
+  const old = document.getElementById('qr-reader');
+  const nuevo = document.createElement('div'); nuevo.id = 'qr-reader'; nuevo.className = old.className;
+  old.replaceWith(nuevo);
+  try { scanner = new Html5Qrcode('qr-reader', { verbose: false, experimentalFeatures: { useBarCodeDetectorIfSupported: true } }); }
+  catch { scanner = new Html5Qrcode('qr-reader', { verbose: false }); }
+  const cfg = {
+    fps: 15,
+    qrbox: (w, h) => modo === 'qr'
+      ? { width: Math.round(Math.min(w, h) * .75), height: Math.round(Math.min(w, h) * .75) }
+      : { width: Math.round(w * .92), height: Math.max(70, Math.round(h * .25)) },
+    aspectRatio: modo === 'qr' ? 1.0 : 1.7778,
+  };
+  let ok = false, err = '';
+  for (const cam of [{ facingMode: { ideal: 'environment' } }, { facingMode: 'environment' }, {}]) {
+    try { await scanner.start(cam, cfg, t => procesar(t), () => {}); ok = true; break; }
+    catch (e) { err = String(e); if (err.includes('NotAllowed') || err.includes('Permission')) break; }
+  }
+  arrancando = false;
+  if (!ok) {
+    document.getElementById('cam-overlay').classList.remove('hidden');
+    banner('error', 'No se pudo abrir la cámara', err.includes('NotAllowed') || err.includes('Permission') ? 'Dale permiso de cámara al navegador' : 'Probá con el lector o ingresá el código a mano');
+    return;
+  }
+  corriendo = true;
+  const v = document.querySelector('#qr-reader video'); if (v) { v.setAttribute('playsinline', ''); v.muted = true; }
+}
+
+function enviarManual() {
+  const i = document.getElementById('manual'); const v = i.value.trim(); i.value = '';
+  if (v) { ultimoRaw = ''; procesar(v); }
+}
+
+// ── Lector USB/Bluetooth (teclado HID): tecleo muy rápido + Enter ──
+let buf = '', ultimaTecla = 0, timerHid = null;
+document.addEventListener('keydown', e => {
+  const enManual = document.activeElement === document.getElementById('manual');
+  const now = Date.now(), rapido = now - ultimaTecla < 40;
+  if (enManual && !rapido && !buf) { ultimaTecla = now; return; }
+  if (e.key === 'Enter' || e.key === 'Tab') {
+    if (buf.length >= 4) { e.preventDefault(); const c = buf; buf = ''; procesar(c); if (enManual) document.getElementById('manual').value = ''; }
+    else buf = '';
+    ultimaTecla = now; return;
+  }
+  if (e.key.length === 1) {
+    buf += e.key; ultimaTecla = now;
+    clearTimeout(timerHid);
+    timerHid = setTimeout(() => { if (buf.length >= 6) { const c = buf; buf = ''; procesar(c); } else buf = ''; }, 120);
+  }
+});
+
+pintarCola();
+refrescarProgreso();
+setInterval(() => { if (!document.hidden) { refrescarProgreso(); vaciarCola(); } }, 8000);
+window.addEventListener('online', vaciarCola);
+</script>
+{% endblock %}

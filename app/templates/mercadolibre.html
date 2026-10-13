@@ -1,0 +1,280 @@
+{% extends "base.html" %}
+{% block titulo %}Mercado Libre · {{ APP_NOMBRE }}{% endblock %}
+{% block contenido %}
+<div class="flex flex-wrap items-center gap-3 mb-4">
+  <h1 class="text-2xl font-bold">🛒 Mercado Libre</h1>
+  <span class="chip {{ 'chip-hecha' if conectado else 'chip-pendiente' }}">{% if fuente == 'parkahub' %}ParkaHub conectado{% elif fuente == 'directo' %}ML directo (API de Costos){% else %}Sin conectar{% endif %}</span>
+  <span id="ml-estado" class="text-xs text-zinc-500"></span>
+</div>
+{% if not conectado %}
+<div class="card p-4 mb-4 text-sm">ℹ️ Esta sección muestra los datos que ParkaHub ya tiene de Mercado Libre. Falta conectar Mercado Libre{% if u.es_admin %}: en <a class="underline text-violeta" href="/admin/conexiones">Conexiones</a> cargá la clave de la API de Costos (te la pasa Gonzalo) o el token de ParkaHub (Martin){% else %}: pedíselo al admin{% endif %}.</div>
+{% endif %}
+
+<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4" id="kpis">
+  <div class="card p-4"><div class="text-xs text-zinc-500">Ventas de hoy</div><div class="text-2xl font-bold" id="k-ventas">—</div></div>
+  <div class="card p-4"><div class="text-xs text-zinc-500">Preguntas sin responder</div><div class="text-2xl font-bold" id="k-preg">—</div></div>
+  <div class="card p-4"><div class="text-xs text-zinc-500">Reputación</div><div class="text-2xl font-bold" id="k-rep">—</div></div>
+  <div class="card p-4"><div class="text-xs text-zinc-500">Reclamos / demoras / cancel.</div><div class="text-lg font-bold" id="k-met">—</div></div>
+</div>
+
+<div class="flex flex-wrap gap-2 mb-3 text-sm" id="tabs">
+  <button class="btn btn-primario btn-chico" data-tab="preguntas" onclick="tab('preguntas')">Preguntas</button>
+  <button class="btn btn-gris btn-chico" data-tab="ventas" onclick="tab('ventas')">Ventas</button>
+  <button class="btn btn-gris btn-chico" data-tab="devoluciones" onclick="tab('devoluciones')">Devoluciones</button>
+  <button class="btn btn-gris btn-chico" data-tab="buscar" onclick="tab('buscar')">🔍 Buscar</button>
+</div>
+<div id="panel" class="card p-4 text-sm">Cargando…</div>
+<p class="text-xs text-zinc-500 mt-2">Las respuestas a preguntas se publican en ML desde acá (respondedor con Gemini). Ventas, devoluciones y publicaciones: solo lectura.</p>
+{% endblock %}
+{% block scripts %}
+<script>
+const $ = id => document.getElementById(id);
+const pesos = n => n == null ? '' : '$' + Number(n).toLocaleString('es-AR', { maximumFractionDigits: 0 });
+const fecha = s => s ? new Date(s).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+const pct = m => m && m.rate != null ? (m.rate * 100).toFixed(1) + '%' : '—';
+let cache = {};
+
+async function resumen() {
+  try {
+    const r = await api('/ml/api/resumen');
+    if (r.ventas_hoy) $('k-ventas').textContent = r.ventas_hoy.total ?? r.ventas_hoy.mostradas;
+    if (r.preguntas) { $('k-preg').textContent = r.preguntas.length; cache.pendientes = r.preguntas; }
+    if (r.reputacion) {
+      const niv = { '5_green': 'Verde', '4_light_green': 'Verde claro', '3_yellow': 'Amarilla', '2_orange': 'Naranja', '1_red': 'Roja' };
+      $('k-rep').textContent = (niv[r.reputacion.nivel] || r.reputacion.nivel || '—') + (r.reputacion.mercadolider ? ' · ' + r.reputacion.mercadolider : '');
+      const m = r.reputacion.metricas || {};
+      $('k-met').textContent = [pct(m.claims), pct(m.delayed_handling_time), pct(m.cancellations)].join(' / ');
+    }
+    if (r.estado) $('ml-estado').textContent = (r.estado.fuente === 'directo' ? 'ML directo · cuenta ' + (r.estado.cuenta || '') : (r.estado.ml_conectado ? 'ML conectado en ParkaHub' : '⚠️ ML desconectado en ParkaHub')) +
+      (r.estado.actualizado && r.estado.actualizado.ventas ? ' · ventas al ' + fecha(r.estado.actualizado.ventas) : '');
+    const errs = Object.values(r.errores || {});
+    if (errs.length) $('ml-estado').textContent += ' · ' + errs[0];
+  } catch (e) { $('ml-estado').textContent = e.message; }
+}
+
+function tab(t) {
+  if (t !== 'preguntas') clearInterval(timerResp);
+  document.querySelectorAll('#tabs button').forEach(b => b.className = 'btn btn-chico ' + (b.dataset.tab === t ? 'btn-primario' : 'btn-gris'));
+  ({ preguntas, ventas, devoluciones, buscar: pestBuscar })[t]();
+}
+
+// ─────────── Preguntas + respondedor (Gemini) ───────────
+const ES_ADMIN = {{ 'true' if u.es_admin else 'false' }};
+let RS = null, revisando = false, timerResp = null;
+const hora = s => s ? new Date(s).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : '—';
+const linkMla = m => `<a class="underline" target="_blank" href="https://articulo.mercadolibre.com.ar/${esc(String(m || '').replace('MLA', 'MLA-'))}">${esc(m)}</a>`;
+
+async function preguntas() {
+  if (!RS) $('panel').innerHTML = 'Cargando…';
+  try { RS = await api('/ml/api/respondedor'); pintarPreguntas(); } catch (e) { $('panel').innerHTML = '<p class="text-red-400">' + esc(e.message) + '</p>'; return; }
+  revisar(true);
+  clearInterval(timerResp);
+  timerResp = setInterval(() => { if (document.querySelector('#tabs [data-tab=preguntas].btn-primario') && !document.querySelector('#panel textarea:focus')) revisar(true); }, 60000);
+}
+
+async function revisar(silencioso) {
+  if (revisando) return;
+  revisando = true;
+  const b = $('btn-revisar'); if (b) { b.disabled = true; b.textContent = 'Revisando…'; }
+  try {
+    const r = await api('/ml/api/respondedor/revisar', { method: 'POST' });
+    RS = { config: r.config, pendientes: r.pendientes, publicadas: r.publicadas };
+    if (!document.querySelector('#panel textarea:focus')) pintarPreguntas();
+    const v = r.vuelta || {};
+    if (v.sin_responder != null) $('k-preg').textContent = v.sin_responder;
+    if (!silencioso) toast(v.error ? v.error : v.publicadas ? `Listo: ${v.publicadas} respondidas solas` : 'Preguntas al día', v.error ? 'info' : 'ok');
+    if (v.publicadas && silencioso) toast(`El respondedor publicó ${v.publicadas} respuesta${v.publicadas > 1 ? 's' : ''}`, 'info', 5000);
+  } catch (e) { if (!silencioso) toast(e.message, 'error', 6000); }
+  finally { revisando = false; const b2 = $('btn-revisar'); if (b2) { b2.disabled = false; b2.textContent = '↻ Revisar ahora'; } }
+}
+
+function pintarPreguntas() {
+  const c = RS.config, est = c.estado || {};
+  const modos = Object.entries(c.modos).map(([k, n]) => `<button class="btn btn-chico ${k === c.modo ? 'btn-primario' : 'btn-gris'}" ${ES_ADMIN ? '' : 'disabled'} onclick="cambiarModo('${k}')">${n}</button>`).join('');
+  const ayudaModo = { manual: 'Gemini redacta y vos publicás.', mixto: 'Las simples (talle, color, stock, envío) salen solas; el resto espera tu OK.', auto: 'Se publican todas, salvo las que tienen datos de contacto o links.' }[c.modo];
+  const avisos = [
+    !c.ml ? `⚠️ Mercado Libre no está conectado${ES_ADMIN ? ' (<a class="underline" href="/admin/conexiones">Conexiones</a>)' : ''}.` : '',
+    !c.gemini ? `⚠️ Falta la clave de Gemini${ES_ADMIN ? ' en <a class="underline" href="/admin/conexiones">Conexiones</a>' : ''}: sin eso no hay borradores.` : '',
+    c.ml && !c.publica ? 'ℹ️ Con ParkaHub solo se pueden redactar borradores: para publicar desde acá cargá la clave de la API de Costos (Conexiones → Mercado Libre directo).' : '',
+    est.error ? '⚠️ Última revisión: ' + esc(est.error) : '',
+  ].filter(Boolean).map(a => `<p class="text-xs mt-1">${a}</p>`).join('');
+  const ajustes = ES_ADMIN ? `<details class="mt-2"><summary class="cursor-pointer text-xs text-zinc-500">⚙ Ajustes del respondedor</summary>
+      <div class="grid md:grid-cols-3 gap-3 mt-2">
+        <label class="text-xs">Revisar cada<select id="r-min" class="input mt-1">${c.minutos_opciones.map(m => `<option value="${m}" ${m === c.minutos ? 'selected' : ''}>${m} minutos</option>`).join('')}</select></label>
+        <label class="text-xs md:col-span-2">Firma (se agrega al final)<input id="r-firma" class="input mt-1" maxlength="120" value="${esc(c.firma)}"></label>
+        <label class="text-xs md:col-span-3">Políticas de PARKA que Gemini puede usar (envíos, cambios, tiempos, guía de talles…)<textarea id="r-instr" class="input mt-1" rows="4" maxlength="3000" placeholder="Ej.: Despachamos en el día si comprás antes de las 13 hs. Los talles son estándar argentinos. Para cambios, después de la compra escribinos por la mensajería de la venta.">${esc(c.instrucciones)}</textarea></label>
+      </div><button class="btn btn-turq btn-chico mt-2" onclick="guardarAjustes()">Guardar ajustes</button></details>` : '';
+  const cab = `<div class="rounded-xl p-3 mb-3" style="background:var(--soft)">
+      <div class="flex flex-wrap items-center gap-2"><b>🤖 Respondedor Gemini</b><span class="flex gap-1 flex-wrap">${modos}</span>
+        <button id="btn-revisar" class="btn btn-gris btn-chico ml-auto" onclick="revisar(false)">↻ Revisar ahora</button></div>
+      <p class="text-xs text-zinc-500 mt-1">${ayudaModo} Revisa cada ${c.minutos} min · última: ${hora(est.ultima)}${est.publicadas ? ' · publicó ' + est.publicadas + ' en esa vuelta' : ''}</p>
+      ${avisos}${ajustes}</div>`;
+  const pend = RS.pendientes.map(tarjeta).join('') || '<p class="text-zinc-500 py-2">No hay preguntas pendientes 🎉</p>';
+  const pub = RS.publicadas.map(q => `<div class="py-2 border-b border-zinc-700">
+      <div class="flex gap-2 text-xs text-zinc-500 flex-wrap"><span>${fecha(q.publicada_at)}</span>${linkMla(q.mla)}<span class="truncate">${esc(q.publicacion || '')}</span>
+      <span class="chip ${q.auto ? 'chip-auto' : 'chip-hecha'}">${q.auto ? '🤖 Automático' : '✓ ' + esc(q.publicada_por)}</span></div>
+      <div class="font-semibold mt-1">${esc(q.pregunta)}</div><div class="text-zinc-500">↳ ${esc(q.respuesta)}</div></div>`).join('') || '<p class="text-zinc-500 py-2">Todavía no se respondió ninguna desde la app.</p>';
+  $('panel').innerHTML = cab + `<h3 class="font-semibold">Sin responder (${RS.pendientes.length})</h3>${pend}
+    <details class="mt-4"><summary class="cursor-pointer font-semibold">Respondidas desde la app (${RS.publicadas.length})</summary>${pub}</details>
+    <details class="mt-2" ontoggle="if(this.open) respondidasML(this)"><summary class="cursor-pointer font-semibold">Últimas respondidas en ML</summary><div>Cargando…</div></details>`;
+}
+
+function tarjeta(q) {
+  const chip = !q.borrador ? (q.error ? `<span class="chip chip-vencida">Error: ${esc(q.error)}</span>` : '<span class="chip chip-pendiente">Redactando…</span>')
+    : q.saldria_sola ? `<span class="chip chip-hecha" title="${esc(q.motivo)}">✓ Simple${RS.config.modo !== 'manual' && RS.config.publica ? ' · sale sola' : ''}</span>`
+    : `<span class="chip chip-en_curso">⚠ Revisar: ${esc(q.frenos.join(' · ') || q.motivo)}</span>`;
+  return `<div class="py-3 border-b border-zinc-700" id="q-${q.id}">
+    <div class="flex gap-2 text-xs text-zinc-500 flex-wrap items-center"><span>${fecha(q.fecha)}</span>${linkMla(q.mla)}<span class="truncate">${esc(q.publicacion || '')}</span>${chip}${q.categoria ? `<span class="chip chip-auto">${esc(q.categoria)}</span>` : ''}</div>
+    <div class="font-semibold mt-1">${esc(q.pregunta)}</div>
+    ${q.borrador ? `<textarea class="input mt-2 w-full" rows="3" maxlength="2000" id="t-${q.id}" oninput="$('n-${q.id}').textContent=this.value.length">${esc(q.borrador)}</textarea>
+      <div class="flex flex-wrap gap-2 items-center mt-1">
+        <button class="btn btn-primario btn-chico" onclick="publicar(${q.id}, this)">Publicar en ML</button>
+        <input id="i-${q.id}" class="input !py-1 text-xs flex-1 min-w-[160px]" placeholder="Pedile un cambio a Gemini (ej.: más corto, ofrecé el talle L)">
+        <button class="btn btn-gris btn-chico" onclick="otraVersion(${q.id}, this)">✨ Otra versión</button>
+        <button class="btn btn-gris btn-chico" onclick="navigator.clipboard.writeText($('t-${q.id}').value);toast('Copiado')">Copiar</button>
+        <button class="btn btn-gris btn-chico" onclick="descartar(${q.id})" title="La saca de esta lista; en ML sigue sin responder">Descartar</button>
+        <span class="text-xs text-zinc-500 ml-auto"><span id="n-${q.id}">${q.borrador.length}</span>/2000</span>
+      </div>` : `<button class="btn btn-gris btn-chico mt-2" onclick="otraVersion(${q.id}, this)">✨ Redactar con Gemini</button>`}
+  </div>`;
+}
+
+async function cambiarModo(m) {
+  if (m === 'auto' && !confirm('Todo automático: el respondedor va a publicar en ML todas las respuestas sin que las veas (salvo las que tengan datos de contacto o links). ¿Seguro?')) return;
+  try { RS.config = await api('/ml/api/respondedor/config', { json: { modo: m } }); pintarPreguntas(); toast('Modo: ' + RS.config.modos[m]); if (m !== 'manual') revisar(true); }
+  catch (e) { toast(e.message, 'error'); }
+}
+
+async function guardarAjustes() {
+  try {
+    RS.config = await api('/ml/api/respondedor/config', { json: { minutos: +$('r-min').value, firma: $('r-firma').value, instrucciones: $('r-instr').value } });
+    toast('Ajustes guardados'); pintarPreguntas();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function reemplazar(q) {
+  const i = RS.pendientes.findIndex(x => x.id === q.id);
+  if (q.estado === 'publicada') { if (i >= 0) RS.pendientes.splice(i, 1); RS.publicadas.unshift(q); }
+  else if (i >= 0) RS.pendientes[i] = q;
+  pintarPreguntas();
+}
+
+async function publicar(id, b) {
+  const texto = $('t-' + id).value.trim();
+  if (!texto) return toast('La respuesta está vacía', 'error');
+  b.disabled = true; b.textContent = 'Publicando…';
+  try { reemplazar(await api(`/ml/api/preguntas/${id}/publicar`, { json: { texto } })); toast('Respuesta publicada en ML'); $('k-preg').textContent = Math.max(0, (+$('k-preg').textContent || 1) - 1); }
+  catch (e) { toast(e.message, 'error', 7000); b.disabled = false; b.textContent = 'Publicar en ML'; }
+}
+
+async function otraVersion(id, b) {
+  const ind = $('i-' + id) ? $('i-' + id).value.trim() : '';
+  b.disabled = true; b.textContent = 'Gemini escribiendo…';
+  try { reemplazar(await api(`/ml/api/preguntas/${id}/redactar`, { json: { indicacion: ind } })); }
+  catch (e) { toast(e.message, 'error', 6000); b.disabled = false; b.textContent = '✨ Otra versión'; }
+}
+
+async function descartar(id) {
+  try { await api(`/ml/api/preguntas/${id}/descartar`, { method: 'POST' }); RS.pendientes = RS.pendientes.filter(x => x.id !== id); pintarPreguntas(); }
+  catch (e) { toast(e.message, 'error'); }
+}
+
+async function respondidasML(det) {
+  const box = det.querySelector('div');
+  try {
+    const r = await api('/ml/api/preguntas');
+    box.innerHTML = r.respondidas.map(q => `<div class="py-2 border-b border-zinc-700"><div class="flex gap-2 text-xs text-zinc-500"><span>${fecha(q.fecha)}</span>${linkMla(q.mla)}<span class="truncate">${esc(q.publicacion || '')}</span></div>
+      <div class="font-semibold mt-1">${esc(q.pregunta)}</div>${q.respuesta ? `<div class="text-zinc-500">↳ ${esc(q.respuesta)}</div>` : ''}</div>`).join('') || '<p class="text-zinc-500 py-2">Sin datos.</p>';
+  } catch (e) { box.innerHTML = '<p class="text-red-400">' + esc(e.message) + '</p>'; }
+}
+
+async function ventas(dias = 0) {
+  $('panel').innerHTML = 'Cargando…';
+  try {
+    const r = await api('/ml/api/ventas?dias=' + dias);
+    const sel = [0, 1, 7].map(d => `<button class="btn btn-chico ${d === dias ? 'btn-primario' : 'btn-gris'}" onclick="ventas(${d})">${d === 0 ? 'Hoy' : d === 1 ? 'Desde ayer' : '7 días'}</button>`).join(' ');
+    $('panel').innerHTML = `<div class="flex gap-2 items-center mb-2">${sel}<span class="text-zinc-500 ml-auto">${r.total ?? r.mostradas} ventas${r.total > r.mostradas ? ' (se muestran ' + r.mostradas + ')' : ''}</span></div>
+      <div class="overflow-x-auto"><table class="w-full text-left"><thead class="text-xs text-zinc-500"><tr><th class="py-1">Fecha</th><th>Venta</th><th>Comprador</th><th>Artículo</th><th>SKU</th><th class="text-right">Total</th><th>Estado</th></tr></thead><tbody>
+      ${r.ventas.map(v => `<tr class="border-t border-zinc-700"><td class="py-1 whitespace-nowrap">${fecha(v.fecha)}</td><td><button class="underline" onclick="irBuscar('${v.venta}')">${v.venta}</button></td><td>${esc(v.comprador || '')}</td>
+        <td>${v.items.map(i => esc(i.titulo) + (i.variante ? ' <span class="text-zinc-500">(' + esc(i.variante) + ')</span>' : '') + (i.cantidad > 1 ? ' ×' + i.cantidad : '')).join('<br>')}</td>
+        <td>${v.items.map(i => esc(i.sku || '')).join('<br>')}</td><td class="text-right">${pesos(v.total)}</td><td>${esc(v.estado)}</td></tr>`).join('')}
+      </tbody></table></div>`;
+  } catch (e) { $('panel').innerHTML = '<p class="text-red-400">' + esc(e.message) + '</p>'; }
+}
+
+async function devoluciones(dias = 30) {
+  $('panel').innerHTML = 'Cargando…';
+  try {
+    const r = await api('/ml/api/devoluciones?dias=' + dias);
+    const sel = [7, 30, 90].map(d => `<button class="btn btn-chico ${d === dias ? 'btn-primario' : 'btn-gris'}" onclick="devoluciones(${d})">${d} días</button>`).join(' ');
+    const max = Math.max(1, ...Object.values(r.por_motivo));
+    $('panel').innerHTML = `<div class="flex gap-2 items-center mb-3">${sel}<span class="text-zinc-500 ml-auto">${r.total} devoluciones en ML</span></div>
+      <div class="grid md:grid-cols-2 gap-6">
+        <div><h3 class="font-semibold mb-2">Por motivo</h3>${Object.entries(r.por_motivo).map(([m, n]) => `<div class="mb-1"><div class="flex justify-between"><span>${esc(m)}</span><b>${n}</b></div><div class="h-2 rounded bg-zinc-800"><div class="h-2 rounded bg-violeta" style="width:${n / max * 100}%"></div></div></div>`).join('') || '<p class="text-zinc-500">Sin devoluciones.</p>'}</div>
+        <div><h3 class="font-semibold mb-2">SKUs más devueltos</h3><ol class="list-decimal pl-5">${r.skus_mas_devueltos.map(s => `<li><code>${esc(s.sku)}</code> — ${s.cantidad}</li>`).join('')}</ol></div>
+      </div>
+      <p class="text-xs text-zinc-500 mt-3">El SKU sale de la venta (no de la publicación actual), igual que en ParkaHub.</p>`;
+  } catch (e) { $('panel').innerHTML = '<p class="text-red-400">' + esc(e.message) + '</p>'; }
+}
+
+// ─────────── Pestaña Buscar ───────────
+const CLAVE_REC = 'parka_ml_busquedas';
+let ultimaQ = '', ultimoRes = '';
+function recientes() { try { return JSON.parse(localStorage.getItem(CLAVE_REC) || '[]'); } catch (e) { return []; } }
+function guardarReciente(q) {
+  const l = [q, ...recientes().filter(x => x !== q)].slice(0, 8);
+  try { localStorage.setItem(CLAVE_REC, JSON.stringify(l)); } catch (e) {}
+  pintarRecientes();
+}
+function pintarRecientes() {
+  const box = $('recientes'); if (!box) return;
+  const l = recientes();
+  box.innerHTML = l.length ? '<span class="text-zinc-500 self-center">Recientes:</span>' + l.map((x, i) => `<button class="btn btn-gris btn-chico" onclick="irBuscar(recientes()[${i}])">${esc(x)}</button>`).join('') +
+    `<button class="text-zinc-500 underline self-center ml-1" onclick="try{localStorage.removeItem(CLAVE_REC)}catch(e){};pintarRecientes()">borrar</button>` : '';
+}
+function pestBuscar() {
+  $('panel').innerHTML = `<form class="flex gap-2 mb-2" onsubmit="event.preventDefault(); buscar();">
+      <input id="q" class="input flex-1 !text-base" placeholder="Nº de venta, MLA, nº de envío o modelo" autocomplete="off">
+      <button class="btn btn-primario">Buscar</button>
+    </form>
+    <div id="recientes" class="flex flex-wrap gap-2 mb-3 text-xs"></div>
+    <div id="res-busqueda">${ultimoRes || '<p class="text-zinc-500">Escribí o escaneá un nº de venta, MLA, nº de envío o modelo y apretá Enter.</p>'}</div>`;
+  $('q').value = ultimaQ;
+  pintarRecientes();
+  $('q').focus(); $('q').select();
+}
+function irBuscar(v) {
+  if (!document.querySelector('#tabs [data-tab=buscar].btn-primario')) tab('buscar');
+  $('q').value = v; buscar();
+}
+
+async function buscar() {
+  const q = $('q').value.trim(), box = $('res-busqueda');
+  if (!q) return;
+  ultimaQ = q; guardarReciente(q);
+  box.innerHTML = '<p class="text-zinc-500">Buscando…</p>';
+  try {
+    const r = await api('/ml/api/buscar?q=' + encodeURIComponent(q)), d = r.dato;
+    const cerrar = '';
+    if (r.tipo === 'venta') {
+      box.innerHTML = cerrar + `<h3 class="font-bold">Venta ${d.venta} · ${esc(d.estado)} · ${pesos(d.total)}</h3>
+        <p class="text-zinc-500">${fecha(d.fecha)} · ${esc(d.comprador || '')}${d.pack ? ' · pack ' + d.pack : ''}</p>
+        <ul class="mt-2">${d.items.map(i => `<li>• ${esc(i.titulo)} ${i.variante ? '(' + esc(i.variante) + ')' : ''} ×${i.cantidad} — <code>${esc(i.sku || '')}</code> <span class="text-zinc-500">${esc(i.mla)}</span></li>`).join('')}</ul>
+        ${d.envio ? `<p class="mt-2"><b>Envío ${d.envio_id}:</b> ${esc(d.envio.estado || '')}${d.envio.subestado ? ' / ' + esc(d.envio.subestado) : ''} · ${esc(d.envio.veredicto_despacho || '')} <span class="text-zinc-500">${esc(d.envio.detalle || '')}</span></p>` : ''}`;
+    } else if (r.tipo === 'envio') {
+      const col = { verde: 'text-teal-400', rojo: 'text-red-400', amarillo: 'text-amber-400' }[d.semaforo] || '';
+      box.innerHTML = cerrar + `<h3 class="font-bold ${col}">Envío ${esc(d.codigo)} · ${esc(d.veredicto || '')}</h3><p>${esc(d.detalle || '')}</p><p class="text-zinc-500">${esc(d.estado || '')} ${esc(d.subestado || '')} · ${esc(d.logistica || '')}</p>`;
+    } else if (r.tipo === 'publicacion') {
+      box.innerHTML = cerrar + `<h3 class="font-bold"><a class="underline" href="${esc(d.link)}" target="_blank">${esc(d.mla)}</a> · ${esc(d.titulo)}</h3>
+        <p class="text-zinc-500">${esc(d.estado)} · ${pesos(d.precio)} · ${esc(d.tipo)} · modelo <b>${esc(d.modelo || '—')}</b> · stock ${d.stock_total}</p>
+        <table class="mt-2 text-left"><tbody>${d.variaciones.map(v => `<tr><td class="pr-4">${esc(v.variante)}</td><td class="pr-4"><code>${esc(v.sku)}</code></td><td>${v.stock}</td></tr>`).join('')}</tbody></table>`;
+    } else {
+      box.innerHTML = cerrar + `<h3 class="font-bold">Publicaciones (${d.length})</h3><ul>${d.map(h => `<li class="py-0.5"><button class="underline" onclick="irBuscar('${h.mla}')">${h.mla}</button> · <b>${esc(h.modelo || '')}</b> · ${esc(h.titulo)} · <span class="text-zinc-500">${esc(h.estado)} · stock ${h.stock ?? '—'} · ${h.ventas_14d ?? 0} ventas 14d</span></li>`).join('') || '<li class="text-zinc-500">Sin resultados</li>'}</ul>`;
+    }
+  } catch (e) { box.innerHTML = '<p class="text-red-400">' + esc(e.message) + '</p>'; }
+  if ($('res-busqueda') === box) ultimoRes = box.innerHTML;
+}
+
+resumen();
+tab('preguntas');
+</script>
+{% endblock %}

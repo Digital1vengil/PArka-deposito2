@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block titulo %}Artículos · {{ APP_NOMBRE }}{% endblock %}
+{% block contenido %}
+<a href="/" class="text-sm text-zinc-400 hover:text-violeta">← Inicio</a>
+<div class="flex flex-wrap items-end gap-3 mb-5">
+  <div>
+    <h1 class="text-2xl font-bold">🏷️ Artículos</h1>
+    <p class="text-xs text-zinc-400">{{ total }} artículos · {{ con_codigo }} con código de barras{% if ultima %} · actualizado {{ ultima.strftime('%d/%m/%Y') }}{% endif %}</p>
+  </div>
+</div>
+
+<div class="card p-4 mb-5 flex flex-wrap items-center gap-3" id="odoo-box">
+  <div class="text-2xl">🔗</div>
+  <div class="mr-auto">
+    <div class="font-bold">Odoo</div>
+    <div class="text-sm text-zinc-500" id="odoo-estado">
+      {% if not est.configurado %}Sin conectar.{% if u.es_admin %} Cargá el usuario y la API key en <a class="underline text-violeta" href="/admin/conexiones">Conexiones</a>.{% else %} Pedile al admin que lo conecte.{% endif %}
+      {% elif est.ultima.fecha %}Última sincronización: {{ est.ultima.fecha.replace('T', ' ')[:16] }} · {{ est.ultima.cantidad }} artículos ({{ est.ultima.con_codigo }} con código){% if est.ultima.ok is sameas false %} · <span class="text-red-600">último intento falló: {{ est.ultima.error }}</span>{% endif %}
+      {% elif est.ultima.error %}<span class="text-red-600">Error: {{ est.ultima.error }}</span>
+      {% else %}Conectado, todavía sin sincronizar.{% endif %}
+    </div>
+  </div>
+  {% if est.configurado and 'importar_articulos' in acc %}
+  <button class="btn btn-primario btn-chico" id="btn-sync" onclick="sincronizar(this)">⟳ Sincronizar ahora</button>
+  {% endif %}
+</div>
+
+<div class="card p-4 mb-5">
+  <input id="q" class="input !text-lg !py-3" placeholder="Escaneá un código de barras o escribí SKU / nombre (ej: 00AXE negro XL)" autocomplete="off" autofocus>
+  <p class="text-xs text-zinc-500 mt-2">Con el lector de códigos: hacé clic en el buscador y escaneá la etiqueta.</p>
+</div>
+
+<div id="exacto" class="hidden mb-5"></div>
+<div class="card overflow-x-auto mb-8">
+  <table class="tabla"><thead><tr><th>Código de barras</th><th>SKU</th><th>Artículo</th><th>Color</th><th>Talle</th><th>Marca</th><th class="text-right">Stock</th></tr></thead>
+  <tbody id="res"><tr><td colspan="7" class="text-zinc-500">Escribí algo para buscar.</td></tr></tbody></table>
+</div>
+
+{% if 'importar_articulos' in acc %}
+<section class="card p-5">
+  <h2 class="font-bold mb-1">Importar desde archivo (respaldo)</h2>
+  <p class="text-sm text-zinc-400 mb-3">Normalmente el catálogo se actualiza solo desde Odoo. Si hace falta, subí el PDF de <b>Etiquetas de producto</b> que sale de Odoo (el de 4x12 sin precio), o un Excel/CSV con columnas de código de barras, SKU y nombre.</p>
+  <div class="flex flex-wrap gap-3 items-center">
+    <input type="file" id="archivo" accept=".pdf,.csv,.xlsx"
+           class="text-sm text-zinc-300 ">
+    <label class="text-sm flex items-center gap-2"><input type="checkbox" id="reemplazar" class="accent-teal-500"> Reemplazar todo el catálogo</label>
+    <button class="btn btn-primario" onclick="importar(this)">Importar</button>
+  </div>
+  <p id="imp-estado" class="text-sm mt-3 text-zinc-400"></p>
+</section>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+let timer = null;
+const q = document.getElementById('q');
+q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(buscar, 250); });
+q.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); clearTimeout(timer); buscar(true); } });
+
+const VACIO = '<tr><td colspan="7" class="text-zinc-500">Escribí algo para buscar.</td></tr>';
+const fmtStock = v => (v === null || v === undefined) ? '—' : (Number.isInteger(v) ? v : v.toFixed(1));
+
+async function buscar(escaneo = false) {
+  const v = q.value.trim();
+  const ex = document.getElementById('exacto'), res = document.getElementById('res');
+  if (!v) { ex.classList.add('hidden'); res.innerHTML = VACIO; return; }
+  const d = await api('/articulos/api/buscar?q=' + encodeURIComponent(v));
+  if (d.exacto && d.resultados.length) {
+    const a = d.resultados[0];
+    ex.classList.remove('hidden');
+    ex.innerHTML = `<div class="card p-5 border-teal-600"><div class="text-xs text-teal-500 font-bold mb-1">ENCONTRADO${a.inactivo ? ' · <span class="text-red-600">ARCHIVADO EN ODOO</span>' : ''}</div>
+      <div class="text-2xl font-bold">${esc(a.nombre || a.articulo)}</div>
+      <div class="grid sm:grid-cols-4 gap-3 mt-3 text-sm">
+        <div><div class="lbl">SKU</div><div class="font-mono text-lg break-all">${esc(a.sku) || '—'}</div></div>
+        <div><div class="lbl">Código de barras</div><div class="font-mono text-lg">${esc(a.codigo_barras) || '—'}</div></div>
+        <div><div class="lbl">Color / Talle / Marca</div><div class="text-lg">${esc(a.color_nombre || a.color) || '—'} · ${esc(a.talle) || '—'} · ${esc(a.marca) || '—'}</div></div>
+        <div><div class="lbl">Stock en Odoo</div><div class="text-lg"><span id="stk-${a.id}">${fmtStock(a.stock)}</span>
+          ${a.odoo_id ? `<button class="text-xs underline text-violeta ml-1" onclick="stockVivo(${a.id})">actualizar</button>` : ''}</div></div>
+      </div>${a.categoria ? `<div class="text-xs text-zinc-500 mt-2">${esc(a.categoria)}</div>` : ''}</div>`;
+    if (escaneo) { beepOk(); q.select(); }
+  } else {
+    ex.classList.add('hidden');
+    if (escaneo && /^\d{8,14}$/.test(v)) { beepError(); toast('Código no encontrado en el catálogo ni en Odoo', 'error'); q.select(); }
+  }
+  res.innerHTML = d.resultados.length ? d.resultados.map(a => `<tr class="${a.inactivo ? 'opacity-50' : ''}">
+      <td class="font-mono">${esc(a.codigo_barras) || '<span class="text-zinc-400">sin código</span>'}</td><td class="font-mono">${esc(a.sku)}</td>
+      <td>${esc(a.articulo)}</td><td>${esc(a.color_nombre || a.color)}</td><td>${esc(a.talle)}</td><td>${esc(a.marca)}</td>
+      <td class="text-right">${fmtStock(a.stock)}</td></tr>`).join('')
+    : '<tr><td colspan="7" class="text-zinc-500">Sin resultados.</td></tr>';
+}
+
+async function stockVivo(id) {
+  const el = document.getElementById('stk-' + id);
+  el.textContent = '…';
+  const r = await Catalogo.stock([id]);
+  el.textContent = fmtStock(r.stock[id]);
+  if (!r.ok) toast(r.mensaje, 'error');
+}
+
+async function sincronizar(btn) {
+  btn.disabled = true;
+  try { await api('/api/catalogo/sincronizar', { method: 'POST' }); seguirSync(btn); }
+  catch (e) { toast(e.message, 'error'); btn.disabled = false; }
+}
+async function seguirSync(btn) {
+  const el = document.getElementById('odoo-estado');
+  const d = await Catalogo.estado();
+  const c = d.en_curso;
+  el.textContent = c.mensaje || 'Sincronizando…';
+  el.className = 'text-sm ' + (c.estado === 'error' ? 'text-red-600' : c.estado === 'listo' ? 'text-teal-600' : 'text-zinc-500');
+  if (c.estado === 'procesando') setTimeout(() => seguirSync(btn), 1500);
+  else { btn.disabled = false; if (c.estado === 'listo') { toast(c.mensaje, 'ok', 5000); setTimeout(() => location.reload(), 1500); } }
+}
+
+async function importar(btn) {
+  const f = document.getElementById('archivo').files[0];
+  if (!f) { toast('Elegí un archivo', 'warn'); return; }
+  const reemplazar = document.getElementById('reemplazar').checked;
+  if (reemplazar && !confirm('Se borra el catálogo actual y se reemplaza por el del archivo. ¿Seguir?')) return;
+  const fd = new FormData(); fd.append('archivo', f); fd.append('reemplazar', reemplazar);
+  btn.disabled = true;
+  try { await api('/articulos/api/importar', { method: 'POST', body: fd }); seguir(btn); }
+  catch (e) { toast(e.message, 'error'); btn.disabled = false; }
+}
+async function seguir(btn) {
+  const el = document.getElementById('imp-estado');
+  const d = await api('/articulos/api/importar/estado');
+  el.textContent = d.mensaje;
+  el.className = 'text-sm mt-3 ' + (d.estado === 'error' ? 'text-red-400' : d.estado === 'listo' ? 'text-teal-400' : 'text-zinc-400');
+  if (d.estado === 'procesando') setTimeout(() => seguir(btn), 2000);
+  else { btn.disabled = false; if (d.estado === 'listo') toast(d.mensaje, 'ok', 5000); }
+}
+</script>
+{% endblock %}

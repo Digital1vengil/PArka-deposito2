@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block titulo %}Recolecciones Odoo · {{ APP_NOMBRE }}{% endblock %}
+{% block contenido %}
+<a href="/" class="text-sm text-zinc-500 hover:text-violeta">← Inicio</a>
+<h1 class="text-2xl font-bold mb-1">📋 Recolecciones Odoo</h1>
+<p class="text-sm text-zinc-500 mb-5">Las recolecciones de Odoo (operación <b>Recolectar</b>, WH/PICK), las más nuevas arriba.
+  Las que todavía nadie imprimió tienen <span class="chip chip-alta">NUEVO</span>. Con <b>🖨 Imprimir etiquetas</b> sale una etiqueta por unidad,
+  en el rollo Honeywell (40×25, de a 2) con el diálogo de impresión. Se actualiza sola cada minuto.
+  Arranca filtrada en <b>Disponible</b>; tocá la ✕ del filtro para ver todas (también las hechas y canceladas).</p>
+
+{% if not conectado %}
+<section class="card p-4 mb-4" style="background:#fef3c7;color:#92400e">Falta conectar Odoo:
+  {% if u.es_admin %}<a class="underline" href="/admin/conexiones">Conexiones → Odoo</a> (usuario y API key){% else %}pedíselo al admin{% endif %}.</section>
+{% endif %}
+
+<section class="card p-4 mb-4">
+  <div class="flex flex-wrap items-center gap-2 mb-3">
+    <h2 class="font-bold flex-1">Recolecciones <span id="n" class="chip"></span> <span id="nn"></span></h2>
+    <select id="filtro" class="input !w-auto !py-1 text-sm" onchange="cambiarFiltro()">
+      <option value="assigned">Disponible (Listo)</option>
+      <option value="abiertas">Abiertas (Listo + En espera)</option>
+      <option value="nuevas">Solo NUEVAS</option>
+      <option value="espera">En espera</option>
+      <option value="done">Hechas</option>
+      <option value="cancel">Canceladas</option>
+      <option value="">Todas (sin filtro)</option>
+    </select>
+    <input id="q" class="input !w-48 !py-1 text-sm" placeholder="Buscar PICK, venta o cliente" oninput="pintar()">
+    <button class="btn btn-gris btn-chico" onclick="cargar(true)">↻ Actualizar</button>
+  </div>
+  <div id="facetas" class="flex flex-wrap items-center gap-1 mb-3 text-sm"></div>
+  <div id="lista" class="flex flex-col gap-3 text-sm"><p class="text-zinc-500">Cargando…</p></div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+let _data = [], _vistas = null, _abiertas = new Set(), _todas = false;
+const COLOR = { assigned: 'chip-hecha', confirmed: 'chip-pendiente', waiting: 'chip-pendiente', draft: '', done: '', cancel: '' };
+const FILTRO_TXT = { assigned: 'Disponible', abiertas: 'Abiertas', nuevas: 'NUEVAS', espera: 'En espera', done: 'Hechas', cancel: 'Canceladas' };
+// Los filtros que necesitan también las hechas/canceladas piden a Odoo la lista completa
+const necesitaTodas = f => f === '' || f === 'done' || f === 'cancel';
+
+function facetas() {
+  const f = document.getElementById('filtro').value;
+  const chip = (etq, val, x) => `<span class="inline-flex items-center rounded-md overflow-hidden border" style="border-color:var(--line)">
+      <span class="px-2 py-0.5 text-white text-xs font-semibold" style="background:#714b67">${etq}</span>
+      <span class="px-2 py-0.5">${val}</span>${x ? `<button class="px-2 py-0.5 hover:bg-zinc-200" title="Quitar filtro" onclick="${x}">✕</button>` : ''}</span>`;
+  let h = chip('Tipo de operación', 'Magontex: Recolectar', '');
+  h += f ? chip('Estado', FILTRO_TXT[f] || f, "quitarFiltro()")
+         : '<span class="text-xs text-zinc-500 ml-1">Mostrando todas (también hechas y canceladas)</span>';
+  document.getElementById('facetas').innerHTML = h;
+}
+
+function quitarFiltro() { document.getElementById('filtro').value = ''; cambiarFiltro(); }
+
+function cambiarFiltro() {
+  const quiere = necesitaTodas(document.getElementById('filtro').value);
+  facetas();
+  if (quiere !== _todas) { _todas = quiere; document.getElementById('lista').innerHTML = '<p class="text-zinc-500">Cargando…</p>'; cargar(false); }
+  else pintar();
+}
+
+function fila(p) {
+  const nuevo = p.abierta && !p.impresion;
+  const abierta = _abiertas.has(p.id);
+  const imp = p.impresion ? `<span class="text-xs text-zinc-500">🖨 ${esc(p.impresion.usuario)} · ${esc(p.impresion.at)} · ${p.impresion.etiquetas} etiq.${p.impresion.veces > 1 ? ` (${p.impresion.veces} veces)` : ''}</span>` : '';
+  const items = abierta ? `<div class="mt-2 flex flex-col gap-1">${p.items.map(i => `
+      <div class="flex gap-2 items-baseline"><b class="w-12 text-right">${i.cantidad}×</b>
+        <span class="flex-1">${esc(i.nombre)} <span class="text-xs text-zinc-500">${esc(i.sku)}${i.codigo_barras ? ' · ' + esc(i.codigo_barras) : ' · <span style="color:#b91c1c">sin código de barras</span>'}</span></span>
+        ${i.reservado < i.cantidad ? `<span class="text-xs" style="color:#b45309">reservado ${i.reservado}</span>` : ''}</div>`).join('')}</div>` : '';
+  return `<div class="rounded-xl p-3 border" style="border-color:${nuevo ? 'var(--violeta, #7c3aed)' : 'var(--line)'}">
+    <div class="flex flex-wrap items-center gap-2">
+      <b class="text-base">${esc(p.nombre)}</b>${nuevo ? '<span class="chip chip-alta">NUEVO</span>' : ''}
+      <span class="chip ${COLOR[p.estado] || ''}">${esc(p.estado_txt)}</span>
+      <span class="text-zinc-500">${esc(p.origen)}</span><span class="flex-1"></span>
+      <span class="text-xs text-zinc-500">creada ${esc(p.creada.slice(8, 10) + '/' + p.creada.slice(5, 7) + ' ' + p.creada.slice(11))}</span>
+    </div>
+    <div class="mt-1"><b>${esc(p.cliente)}</b> · ${p.items.length} artículo${p.items.length === 1 ? '' : 's'} · <b>${p.unidades}</b> unidades</div>
+    ${items}
+    <div class="mt-2 flex flex-wrap items-center gap-2">
+      <button class="btn btn-chico" style="background:#7c3aed;color:#fff" onclick="imprimir(${p.id}, this)">🖨 Imprimir etiquetas (${p.unidades})</button>
+      <button class="btn btn-gris btn-chico" onclick="imprimir(${p.id}, this, true)">Prueba (1 fila)</button>
+      <button class="btn btn-gris btn-chico" onclick="verItems(${p.id})">${abierta ? '▲ Ocultar' : '▼ Ver artículos'}</button>
+      ${imp}
+    </div></div>`;
+}
+
+function pintar() {
+  const f = document.getElementById('filtro').value, q = document.getElementById('q').value.trim().toLowerCase();
+  let ps = _data;
+  if (f === 'nuevas') ps = ps.filter(p => p.abierta && !p.impresion);
+  else if (f === 'abiertas') ps = ps.filter(p => p.abierta);
+  else if (f === 'assigned') ps = ps.filter(p => p.estado === 'assigned');
+  else if (f === 'espera') ps = ps.filter(p => p.abierta && p.estado !== 'assigned');
+  else if (f === 'done' || f === 'cancel') ps = ps.filter(p => p.estado === f);
+  if (q) ps = ps.filter(p => (p.nombre + ' ' + p.origen + ' ' + p.cliente).toLowerCase().includes(q));
+  document.getElementById('n').textContent = ps.length;
+  document.getElementById('lista').innerHTML = ps.map(fila).join('') || '<p class="text-zinc-500">No hay recolecciones para mostrar.</p>';
+}
+
+function verItems(id) { _abiertas.has(id) ? _abiertas.delete(id) : _abiertas.add(id); pintar(); }
+
+async function cargar(refrescar) {
+  try {
+    const pedidoTodas = _todas;
+    const d = await api('/recolecciones-odoo/api/lista?todas=' + (pedidoTodas ? 1 : 0) + (refrescar ? '&refrescar=1' : ''));
+    if (pedidoTodas !== _todas) return;   // cambiaron el filtro mientras cargaba
+    const ids = new Set(d.recolecciones.filter(p => p.abierta).map(p => p.id));
+    if (_vistas) {
+      const llegaron = d.recolecciones.filter(p => p.abierta && !_vistas.has(p.id));
+      if (llegaron.length) {
+        toast(`📋 Nueva recolección en Odoo: ${llegaron.map(p => p.nombre + ' (' + p.cliente + ')').join(', ')}`, 'ok', 8000);
+        try { beepOk(); } catch (e) {}
+      }
+    }
+    _vistas = new Set([...(_vistas || []), ...ids]); _data = d.recolecciones;
+    document.getElementById('nn').innerHTML = d.nuevas ? `<span class="chip chip-alta">${d.nuevas} NUEVA${d.nuevas === 1 ? '' : 'S'}</span>` : '';
+    pintar();
+  } catch (e) {
+    document.getElementById('lista').innerHTML = `<p style="color:#b91c1c">No se pudo leer Odoo: ${esc(e.message)}</p>`;
+  }
+}
+
+async function imprimir(id, btn, prueba = false) {
+  await imprimirEtiquetas('recolecciones-odoo', id, { prueba, btn, formato: 'rollo-driver' });
+  if (!prueba) setTimeout(() => cargar(false), 1500);
+}
+
+facetas();
+cargar(false);
+setInterval(() => { if (!document.hidden) cargar(false); }, 60000);
+</script>
+{% endblock %}

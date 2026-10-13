@@ -1,0 +1,524 @@
+{% extends "base.html" %}
+{% block titulo %}Control de paquetes · {{ APP_NOMBRE }}{% endblock %}
+{% block head %}<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  .cp-item { border: 2px solid var(--line); border-radius: 14px; padding: .8rem; background: #fff; }
+  .cp-item.completo { border-color: #bbf7d0; background: var(--turq-bg); }
+  .cp-item.parcial { border-color: #fcd34d; }
+  .cp-item.faltante { border-color: var(--alta); background: var(--alta-bg); }
+  .cp-item.sinvinc { border-style: dashed; border-color: #f59e0b; }
+  .cp-item.flash { animation: flash .8s ease-out; }
+  .cp-talle { font-size: 1.9rem; font-weight: 900; color: var(--violeta); line-height: 1; }
+  .cp-nombre { font-size: 1.15rem; font-weight: 800; color: var(--ink); line-height: 1.2; }
+  .cp-cuenta { font-size: 1.8rem; font-weight: 900; white-space: nowrap; }
+  .cp-ub { display: inline-flex; align-items: center; gap: .3rem; font-weight: 800; font-size: 1.05rem; color: var(--violeta);
+           background: var(--violeta-bg); border-radius: 10px; padding: .2rem .6rem; }
+  .cp-fila { border: 1px solid var(--line); border-radius: 12px; padding: .55rem .7rem; background: #fff; cursor: pointer; }
+  .cp-fila:hover { border-color: var(--violeta-2); }
+  .cp-fila.activo { outline: 3px solid var(--turq-2); }
+  #cp-alerta { position: fixed; inset: 0; z-index: 80; display: none; align-items: center; justify-content: center; padding: 1rem;
+               background: rgba(120, 10, 25, .92); }
+  #cp-alerta.on { display: flex; animation: cpTiembla .45s; }
+  #cp-ok { position: fixed; inset: 0; z-index: 79; display: none; align-items: center; justify-content: center; pointer-events: none;
+           background: rgba(13, 148, 136, .95); color: #fff; font-size: 2rem; font-weight: 900; text-align: center; padding: 1rem; }
+  #cp-ok .tilde { font-size: 9rem; line-height: 1; }
+  #cp-ok.on { display: flex; }
+  .box-badge { display:inline-flex; align-items:center; gap:.35rem; background:#111; color:#fff; border-radius:12px;
+    padding:.35rem .8rem; font-weight:900; font-size:1.5rem; letter-spacing:.02em; }
+  .box-badge.parcial { background:#92400e; }
+  .box-chip { background:#111; color:#fff; border-radius:999px; padding:0 .55rem; font-size:.75rem; font-weight:800; }
+  @keyframes cpTiembla { 0%,100% { transform: translateX(0) } 20%,60% { transform: translateX(-12px) } 40%,80% { transform: translateX(12px) } }
+</style>{% endblock %}
+{% block contenido %}
+{% if re_id %}
+<a href="/ecommerce#re{{ re_id }}" class="text-sm text-zinc-500 hover:text-violeta">← Recolección Ecommerce</a>
+<h1 class="text-2xl font-bold mb-1">📦 Mesa de control</h1>
+<p class="text-sm text-zinc-500 mb-5">Escaneá la etiqueta del envío y después cada prenda: si coincide con la venta aparece la pantalla verde; si no, la roja y no se puede seguir hasta sacarla.</p>
+{% else %}
+<a href="/" class="text-sm text-zinc-500 hover:text-violeta">← Inicio</a>
+<h1 class="text-2xl font-bold mb-1">🔎 Control de paquetes</h1>
+<p class="text-sm text-zinc-500 mb-5">Escaneá la etiqueta del envío y después cada prenda. Si algo no coincide con la venta, la app frena y no deja cerrar el paquete.</p>
+{% endif %}
+
+<!-- INICIO -->
+<div id="v-inicio" class="flex flex-col gap-5{% if re_id %} hidden{% endif %}">
+  <section class="card p-4">
+    <h2 class="font-bold mb-3">Cargar las ventas a controlar</h2>
+    <div class="tabs">
+      <button class="tab activo" data-o="archivo" onclick="origen('archivo')">⬆ Subir archivos</button>
+      <button class="tab" data-o="drive" onclick="origen('drive')">☁ Archivos de Drive</button>
+      <button class="tab" data-o="despacho" onclick="origen('despacho')">🚚 Lista cargada en Despacho</button>
+    </div>
+    <div class="flex flex-wrap gap-2 mb-3" id="tipos">
+      <button class="btn btn-chico" data-t="flex" onclick="tipoSel('flex')">Flex</button>
+      <button class="btn btn-chico" data-t="colecta" onclick="tipoSel('colecta')">Colecta</button>
+      <button class="btn btn-chico" data-t="tiendanube" onclick="tipoSel('tiendanube')">Tienda Nube</button>
+    </div>
+    <div id="o-archivo">
+      <input type="file" id="archivos" multiple accept=".txt,.zpl,.csv,.xlsx,.xls" class="text-sm">
+      <p class="text-xs text-zinc-500 mt-1">Podés elegir <b>los dos a la vez</b>: el TXT de etiquetas de ML (trae el nº de envío y qué lleva cada paquete)
+        y el Excel de ventas (completa variante y cantidades). Para Tienda Nube, el CSV de órdenes.</p>
+    </div>
+    <div id="o-drive" class="hidden">
+      {% if drive_ok %}<div id="drive-lista" class="flex flex-col gap-2 text-sm max-h-80 overflow-y-auto"></div>
+      {% else %}<p class="text-sm text-zinc-500">Google Drive no está configurado.</p>{% endif %}
+    </div>
+    <div id="o-despacho" class="hidden text-sm">
+      <p class="text-zinc-500 mb-2">Usa los paquetes <b>pendientes</b> de la lista cargada en Despacho <b>en este equipo</b>.
+        Esa lista trae solo el SKU (no el color y talle de la etiqueta): si podés, subí el TXT.</p>
+      <div id="desp-info" class="rounded-xl p-3" style="background:var(--soft)"></div>
+    </div>
+    <div class="flex flex-wrap items-end gap-3 mt-4">
+      <div class="flex-1 min-w-[200px]"><label class="lbl">Nombre (opcional)</label><input id="nombre" class="input" placeholder="Ej: Flex mañana"></div>
+      <button id="btn-cargar" class="btn btn-primario !py-3" onclick="cargar()">🔎 Empezar control</button>
+    </div>
+  </section>
+
+  <section class="card p-4">
+    <h2 class="font-bold mb-2">Buscar un envío</h2>
+    <input id="q-global" class="input" placeholder="Nº de envío, nº de venta, comprador, SKU o artículo" autocomplete="off">
+    <label class="text-xs text-zinc-500 flex items-center gap-1 mt-1"><input type="checkbox" id="q-todos"> Buscar también en días anteriores</label>
+    <div id="q-global-res" class="flex flex-col gap-2 mt-2 text-sm"></div>
+  </section>
+
+  <section class="card p-4">
+    <h2 class="font-bold mb-3">Controles</h2>
+    <div id="lista" class="flex flex-col gap-2 text-sm"></div>
+  </section>
+</div>
+
+<!-- CONTROL EN CURSO -->
+<div id="v-cp" class="hidden flex flex-col gap-4">
+  <section class="card p-4 sticky top-14 z-20">
+    <div class="flex flex-wrap items-center gap-2">
+      <button class="btn btn-gris btn-chico" onclick="volver()">← Volver</button>
+      <h2 class="font-bold text-lg flex-1" id="cp-titulo"></h2>
+      <span id="cp-estado"></span>
+    </div>
+    <div class="flex items-center gap-3 mt-3">
+      <div class="barra flex-1"><div id="cp-barra" style="width:0"></div></div>
+      <b id="cp-prog" class="text-sm whitespace-nowrap"></b>
+    </div>
+    <div class="flex gap-2 mt-3">
+      <input id="esc" class="input flex-1 !text-lg !py-3" placeholder="Escaneá la etiqueta del envío o la prenda" autocomplete="off">
+      <button class="btn btn-gris" onclick="toggleCam()" title="Usar la cámara del celular">📷</button>
+    </div>
+    <div id="cam-box" class="hidden mt-2"><div id="qr-reader" class="w-full min-h-[200px] bg-black rounded-xl overflow-hidden"></div></div>
+    <div id="cp-guia" class="text-sm mt-2"></div>
+  </section>
+
+  <!-- paquete abierto -->
+  <section id="pk" class="card p-4 hidden"></section>
+
+  <section class="card p-4">
+    <div class="flex flex-wrap items-center gap-2 mb-3">
+      <h2 class="font-bold flex-1">Paquetes</h2>
+      <input id="q" class="input !py-1.5 text-sm max-w-xs" placeholder="Buscar: envío, venta, comprador, SKU" autocomplete="off">
+    </div>
+    <div class="flex flex-wrap gap-1 mb-3" id="filtros">
+      <button class="btn btn-chico btn-primario" data-f="" onclick="filtro('')">Todos</button>
+      <button class="btn btn-chico btn-gris" data-f="pend" onclick="filtro('pend')">Sin controlar</button>
+      <button class="btn btn-chico btn-gris" data-f="completo" onclick="filtro('completo')">Controlados</button>
+      <button class="btn btn-chico btn-gris" data-f="faltante" onclick="filtro('faltante')">Con faltante</button>
+      <button class="btn btn-chico btn-gris" data-f="errores" onclick="filtro('errores')">Con errores</button>
+    </div>
+    <div id="cp-lista" class="flex flex-col gap-2 text-sm"></div>
+  </section>
+
+  <section class="card p-4 flex flex-wrap gap-2 items-center">
+    <label class="btn btn-gris cursor-pointer{% if re_id %} hidden{% endif %}">➕ Sumar archivo (Excel / TXT)<input type="file" id="sumar" multiple accept=".txt,.zpl,.csv,.xlsx,.xls" class="hidden" onchange="sumarArchivos(this)"></label>
+    <button class="btn btn-gris" onclick="verEventos()">⚠ Errores y faltantes</button>
+    <a id="cp-excel" class="btn btn-gris">⬇ Excel</a>
+    <span class="flex-1"></span>
+    <button id="cp-borrar" class="btn btn-gris{% if re_id %} hidden{% endif %}" onclick="borrarCp()">Borrar</button>
+    <button id="cp-cerrar" class="btn btn-primario" onclick="cerrarCp()">✔ Cerrar control</button>
+    <button id="cp-reabrir" class="btn btn-gris hidden" onclick="reabrirCp()">Reabrir</button>
+  </section>
+  <section id="eventos" class="card p-4 hidden"></section>
+</div>
+
+<!-- alerta de error: bloquea hasta confirmar -->
+<div id="cp-alerta"><div class="bg-white rounded-2xl p-5 max-w-lg w-full text-center shadow-2xl">
+  <div class="text-6xl mb-2">⛔</div>
+  <div id="al-titulo" class="text-2xl font-black text-red-700 mb-2"></div>
+  <div id="al-cuerpo" class="text-base text-left" style="color:var(--ink)"></div>
+  <button id="al-boton" class="btn btn-rojo !py-3 !px-6 mt-4 w-full !text-lg" onclick="cerrarAlerta()">Ya la saqué del paquete</button>
+  <div id="al-extra" class="mt-2"></div>
+</div></div>
+<div id="cp-ok"></div>
+{% endblock %}
+{% block scripts %}
+<script>
+const PUEDE_VINCULAR = {{ 'true' if puede_vincular else 'false' }}, RE_ID = {{ re_id or 0 }};
+let org = 'archivo', tipos = new Set(['flex']), driveSel = new Set(), cp = null, pk = null, filtroAct = '', alerta = false, vincItem = null;
+try { const t = localStorage.getItem('parka_dispatch_type'); if (['flex', 'colecta', 'tiendanube'].includes(t)) tipos = new Set([t]); } catch {}
+const NOM = { flex: 'Flex', colecta: 'Colecta', tiendanube: 'Tienda Nube', cambio: 'Cambio' };
+const chipCanc = p => p && p.cancelado ? '<span class="chip" style="background:#b91c1c;color:#fff">⛔ CANCELADA · NO DESPACHAR</span>' : '';
+const chipEtq = e => e === 'por_imprimir' ? '<span class="chip" style="background:#fef3c7;color:#92400e">🖨 etiqueta por imprimir</span>'
+  : e === 'lista' ? '<span class="chip" style="background:#ccfbf1;color:#115e59">✅ etiqueta impresa</span>' : '';
+const PREFIJO = '/control', ORG_DRIVE = () => org === 'drive';
+const EST = { pendiente: ['SIN CONTROLAR', 'chip-pendiente'], en_curso: ['EN CURSO', 'chip-en_curso'], completo: ['CONTROLADO', 'chip-hecha'], faltante: ['FALTANTE', 'chip-vencida'] };
+const chipEst = e => `<span class="chip ${(EST[e] || ['', ''])[1]}">${(EST[e] || [e])[0]}</span>`;
+
+// ── carga de ventas ──
+function origen(o) {
+  org = o;
+  document.querySelectorAll('[data-o]').forEach(b => b.classList.toggle('activo', b.dataset.o === o));
+  ['drive', 'despacho', 'archivo'].forEach(x => document.getElementById('o-' + x).classList.toggle('hidden', x !== o));
+  document.getElementById('tipos').classList.toggle('hidden', o === 'despacho');
+  if (o === 'despacho') infoDespacho();
+  if (o === 'drive') driveArchivos();
+}
+function tipoSel(t) {
+  if (t === '__init__') t = null;
+  // Se pueden elegir varios (ej. Flex + Colecta juntos); siempre queda al menos uno.
+  if (t) { if (tipos.has(t)) { if (tipos.size > 1) tipos.delete(t); } else tipos.add(t); }
+  driveSel = new Set();
+  document.querySelectorAll('[data-t]').forEach(b => { const on = tipos.has(b.dataset.t); b.classList.toggle('btn-primario', on); b.classList.toggle('btn-gris', !on); });
+  if (document.getElementById('drive-lista') && ORG_DRIVE()) driveArchivos();
+}
+const tipo_ = () => [...tipos].join(',');
+async function driveArchivos() {
+  const el = document.getElementById('drive-lista'); if (!el) return;
+  const lista = [...tipos];
+  el.innerHTML = '<p class="text-zinc-500">Buscando en Google Drive…</p>';
+  const res = await Promise.all(lista.map(t => api(PREFIJO + '/api/drive/archivos?tipo=' + t).then(d => ({ t, d })).catch(e => ({ t, e }))));
+  if (lista.join() !== [...tipos].join()) return;   // cambiaron la selección mientras buscaba
+  el.innerHTML = res.map(({ t, d, e }) => {
+    const tit = `<div class="font-bold text-violeta mt-1">${esc(NOM[t] || t)}</div>`;
+    if (e) return tit + `<p class="text-red-600">${esc(e.message)}</p>`;
+    if (!d.grupos.length) return tit + `<p class="text-zinc-500">No hay archivos de ${NOM[t]} en Drive.</p>`;
+    return tit + d.grupos.map(g => {
+      if (g.date === d.hoy) g.files.forEach(f => driveSel.add(f.id));   // los de hoy vienen marcados
+      return `<div class="rounded-xl p-3" style="background:var(--soft)"><b class="${g.date === d.hoy ? 'text-teal-600' : ''}">${g.date === d.hoy ? 'Hoy · ' : ''}${esc(g.date)}</b>
+        ${g.files.map(f => `<label class="flex items-center gap-2 py-1 cursor-pointer"><input type="checkbox" class="w-4 h-4" value="${esc(f.id)}" ${driveSel.has(f.id) ? 'checked' : ''}
+          onchange="this.checked ? driveSel.add(this.value) : driveSel.delete(this.value)"><span class="flex-1 truncate">${esc(f.name)}</span></label>`).join('')}</div>`;
+    }).join('');
+  }).join('');
+}
+function listaDespacho() {
+  try {
+    const st = JSON.parse(localStorage.getItem('parka_despacho_v2') || 'null');
+    if (!st || !st.packages) return null;
+    const pend = st.packages.filter(p => p.estado !== 'despachado');
+    return { tipo: st.dispatchType || '', archivo: st.fileName || '', total: st.packages.length,
+             paquetes: pend.map(p => ({ tracking: String(p.trackingId || ''), venta_id: String(p.ventaId || ''), comprador: p.comprador || '', producto: p.producto || '', sku: p.sku || '', cantidad: +p.cantidad || 1 })) };
+  } catch { return null; }
+}
+function infoDespacho() {
+  const l = listaDespacho(), el = document.getElementById('desp-info');
+  el.innerHTML = !l ? 'No hay una lista cargada en Despacho en este equipo.'
+    : `<b>${esc(NOM[l.tipo] || l.tipo || 'Despacho')}</b>${l.archivo ? ' · ' + esc(l.archivo) : ''} · <b>${l.paquetes.length}</b> pendientes de ${l.total}`;
+}
+async function cargar() {
+  const b = document.getElementById('btn-cargar'), nombre = document.getElementById('nombre').value;
+  b.disabled = true; b.textContent = 'Cargando…';
+  try {
+    let r;
+    if (org === 'drive') {
+      if (!driveSel.size) throw new Error('Marcá al menos un archivo');
+      r = await api('/control/api/crear/drive', { json: { ids: [...driveSel], tipo: tipo_(), nombre } });
+    } else if (org === 'despacho') {
+      const l = listaDespacho();
+      if (!l || !l.paquetes.length) throw new Error('No hay paquetes pendientes en Despacho');
+      r = await api('/control/api/crear/paquetes', { json: { paquetes: l.paquetes, tipo: l.tipo, nombre } });
+    } else {
+      const fs = document.getElementById('archivos').files;
+      if (!fs.length) throw new Error('Elegí el TXT de etiquetas (y si querés, el Excel de ventas)');
+      const fd = new FormData(); fd.append('tipo', tipo_()); fd.append('nombre', nombre);
+      [...fs].forEach(f => fd.append('archivos', f));
+      r = await api('/control/api/crear/archivo', { method: 'POST', body: fd });
+    }
+    if (r.errores && r.errores.length) toast(r.errores.join(' · '), 'warn', 8000);
+    document.getElementById('nombre').value = ''; document.getElementById('archivos').value = '';
+    abrirCp(r.control.id);
+  } catch (e) { toast(e.message, 'error', 7000); }
+  b.disabled = false; b.textContent = '🔎 Empezar control';
+}
+async function lista() {
+  const d = await api('/control/api/lista'), el = document.getElementById('lista');
+  el.innerHTML = d.controles.length ? d.controles.map(c => `<div class="flex flex-wrap items-center gap-3 py-2 border-b last:border-0" style="border-color:var(--line)">
+    <b>CP-${c.id}</b><span class="chip ${c.estado === 'abierto' ? 'chip-en_curso' : 'chip-hecha'}">${c.estado.toUpperCase()}</span>
+    <span class="flex-1 min-w-[160px] basis-40">${esc(c.nombre)} · <span class="text-zinc-500">${c.hora} · ${esc(c.usuario)}</span></span>
+    <span>${c.completo}/${c.paquetes} controlados</span>
+    ${c.faltante ? `<span class="chip chip-vencida">${c.faltante} con faltante</span>` : ''}${c.errores ? `<span class="chip chip-pendiente">${c.errores} errores</span>` : ''}
+    <button class="btn ${c.estado === 'abierto' ? 'btn-primario' : 'btn-gris'} btn-chico" onclick="abrirCp(${c.id})">${c.estado === 'abierto' ? 'Seguir' : 'Ver'}</button>
+    <a class="btn btn-gris btn-chico" href="/control/${c.id}/control.xlsx">⬇</a></div>`).join('')
+    : '<p class="text-zinc-500">Todavía no hay controles.</p>';
+}
+let tg = null;
+document.getElementById('q-global').addEventListener('input', () => { clearTimeout(tg); tg = setTimeout(buscarGlobal, 250); });
+document.getElementById('q-todos').addEventListener('change', buscarGlobal);
+async function buscarGlobal() {
+  const q = document.getElementById('q-global').value.trim(), el = document.getElementById('q-global-res');
+  if (q.length < 2) { el.innerHTML = ''; return; }
+  const d = await api(`/control/api/buscar?q=${encodeURIComponent(q)}&todos=${document.getElementById('q-todos').checked}`);
+  el.innerHTML = d.paquetes.map(p => `<div class="cp-fila" onclick="abrirCp(${p.control_id}, ${p.id})">
+      <div class="flex flex-wrap items-center gap-2"><b>${esc(p.tracking)}</b>${chipEst(p.estado)}<span class="text-zinc-500">${esc(p.comprador)}</span>
+      <span class="flex-1"></span><span class="text-xs text-zinc-500">${esc(p.control)}</span></div>
+      <div class="text-xs text-zinc-600 mt-1">${esc(p.resumen)}</div></div>`).join('') || '<p class="text-zinc-500">Sin resultados.</p>';
+}
+
+// ── control en curso ──
+async function abrirCp(id, pid) {
+  try { cp = (await api('/control/api/' + id)).control; } catch (e) { toast(e.message, 'error'); return; }
+  pk = null; location.hash = 'cp' + id;
+  document.getElementById('v-inicio').classList.add('hidden');
+  document.getElementById('v-cp').classList.remove('hidden');
+  document.getElementById('eventos').classList.add('hidden');
+  pintarCp(); pintarPk();
+  if (pid) await abrirPk(pid);
+  foco();
+}
+function volver() { if (RE_ID) { location.href = '/ecommerce#re' + RE_ID; return; } location.hash = ''; cp = null; pk = null; pararCam(); document.getElementById('v-cp').classList.add('hidden'); document.getElementById('v-inicio').classList.remove('hidden'); lista(); }
+function foco() { if (!alerta && innerWidth > 700) document.getElementById('esc').focus(); }
+function pintarCp() {
+  const abierto = cp.estado === 'abierto';
+  document.getElementById('cp-titulo').textContent = `${RE_ID ? 'RE' : 'CP'}-${cp.id} · ${cp.nombre}`;
+  document.getElementById('cp-estado').innerHTML = `<span class="chip ${abierto ? 'chip-en_curso' : 'chip-hecha'}">${abierto ? 'ABIERTO' : 'CERRADO'}</span>`
+    + (cp.sin_vincular ? ` <span class="chip chip-pendiente" title="Líneas cuyo SKU no se encontró en el catálogo">${cp.sin_vincular} sin vincular</span>` : '');
+  document.getElementById('cp-prog').textContent = `${cp.completo} / ${cp.paquetes} controlados` + (cp.faltante ? ` · ${cp.faltante} con faltante` : '');
+  document.getElementById('cp-barra').style.width = (cp.paquetes ? 100 * cp.completo / cp.paquetes : 0) + '%';
+  document.getElementById('cp-excel').href = `/control/${cp.id}/control.xlsx`;
+  document.getElementById('cp-cerrar').classList.toggle('hidden', !abierto || !!RE_ID);
+  document.getElementById('cp-reabrir').classList.toggle('hidden', abierto || !!RE_ID);
+  document.getElementById('esc').disabled = !abierto;
+  pintarLista();
+}
+function pintarLista() {
+  const q = document.getElementById('q').value.trim().toLowerCase();
+  const ok = p => (!filtroAct || (filtroAct === 'pend' ? ['pendiente', 'en_curso'].includes(p.estado) : filtroAct === 'errores' ? p.errores > 0 : p.estado === filtroAct))
+    && (!q || [p.tracking, p.venta_id, p.comprador, p.resumen].join(' ').toLowerCase().includes(q));
+  const ps = cp.lista.filter(ok);
+  document.getElementById('cp-lista').innerHTML = ps.map(p => `<div class="cp-fila ${pk && pk.id === p.id ? 'activo' : ''}" onclick="abrirPk(${p.id})">
+      <div class="flex flex-wrap items-center gap-2"><b>${esc(p.tracking)}</b>${chipEst(p.estado)}
+        ${p.errores ? `<span class="chip chip-pendiente">${p.errores} error${p.errores > 1 ? 'es' : ''}</span>` : ''}
+        ${p.sin_vincular ? '<span class="chip chip-pendiente">sin vincular</span>' : ''}${chipEtq(p.etiqueta)}${chipCanc(p)}${(p.boxes || []).length ? `<span class="box-chip">📦 BOX ${p.boxes.join(' + ')}</span>` : ''}
+        <span class="text-zinc-500 truncate">${esc(p.comprador)}</span><span class="flex-1"></span>
+        <b>${p.escaneadas}/${p.unidades}</b>${p.controlado_por ? `<span class="text-xs text-zinc-500">✔ ${esc(p.controlado_por)} ${p.controlado_at}</span>` : ''}</div>
+      <div class="text-xs text-zinc-600 mt-1">${esc(p.resumen)}</div></div>`).join('') || '<p class="text-zinc-500">No hay paquetes con ese filtro.</p>';
+}
+function filtro(f) {
+  filtroAct = f;
+  document.querySelectorAll('#filtros [data-f]').forEach(b => { b.classList.toggle('btn-primario', b.dataset.f === f); b.classList.toggle('btn-gris', b.dataset.f !== f); });
+  pintarLista();
+}
+document.getElementById('q').addEventListener('input', pintarLista);
+function aplicarResumen(r) {
+  if (r.resumen) Object.assign(cp, r.resumen);
+  if (r.paquete) {
+    pk = r.paquete;
+    const k = cp.lista.findIndex(x => x.id === pk.id), corto = { ...pk }; delete corto.items;
+    if (k >= 0) cp.lista[k] = corto; else cp.lista.unshift(corto);
+  }
+  pintarCp(); pintarPk();
+}
+async function abrirPk(pid) {
+  try { aplicarResumen(await api('/control/api/paquete/' + pid)); verPk(); }
+  catch (e) { toast(e.message, 'error'); }
+  foco();
+}
+
+// ── paquete abierto: guía de búsqueda ──
+function pintarPk() {
+  const el = document.getElementById('pk'), guiaEl = document.getElementById('cp-guia');
+  if (!pk) { el.classList.add('hidden'); guiaEl.innerHTML = '<span class="text-zinc-500">👉 Escaneá la <b>etiqueta del envío</b> para empezar un paquete.</span>'; return; }
+  el.classList.remove('hidden');
+  const abierto = cp.estado === 'abierto';
+  guiaEl.innerHTML = pk.estado === 'completo' ? '✅ <b>Paquete controlado.</b> Cerralo y escaneá la etiqueta del próximo envío.'
+    : pk.estado === 'faltante' ? '⚠️ <b>Paquete con faltante:</b> no se despacha hasta resolverlo.'
+    : `👉 Escaneá cada prenda. Faltan <b>${pk.unidades - pk.escaneadas}</b>.`;
+  el.innerHTML = `<div class="flex flex-wrap items-center gap-2 mb-1">
+      <span class="text-xs text-zinc-500">ENVÍO</span><b class="text-xl">${esc(pk.tracking)}</b>${chipEst(pk.estado)}
+      ${pk.errores ? `<span class="chip chip-pendiente">${pk.errores} error${pk.errores > 1 ? 'es' : ''}</span>` : ''}${chipEtq(pk.etiqueta)}${chipCanc(pk)}
+      <span class="flex-1"></span><b class="text-2xl ${pk.estado === 'completo' ? 'text-teal-600' : ''}">${pk.escaneadas}/${pk.unidades}</b></div>
+    <div class="text-sm text-zinc-600 mb-3">${esc(pk.comprador || 'Sin comprador')}${pk.venta_id ? ' · venta ' + esc(pk.venta_id) : ''}</div>
+    ${boxHtml(pk)}
+    ${pk.nota ? `<div class="rounded-xl p-2 mb-3 text-sm" style="background:#fef3c7;color:#92400e">⚠️ ${esc(pk.nota)}</div>` : ''}
+    <div class="flex flex-col gap-3">${pk.items.map(i => itemHtml(i, abierto)).join('')}</div>
+    ${abierto ? `<div class="flex flex-wrap gap-2 mt-3"><button class="btn btn-gris btn-chico" onclick="reiniciarPk()">↺ Vaciar y controlar de nuevo</button>
+      <button class="btn btn-gris btn-chico" onclick="pk=null;pintarPk();pintarLista();foco()">Cerrar en pantalla</button></div>` : ''}`;
+}
+function boxHtml(p) {
+  if (!RE_ID && !(p.boxes || []).length) return '';
+  if (!(p.boxes || []).length) return p.estado === 'completo' ? '' : `<div class="rounded-xl p-2 mb-3 text-sm" style="background:var(--soft)">📦 Todavía no llegó a ningún BOX: se está buscando.</div>`;
+  return `<div class="flex flex-wrap items-center gap-2 mb-3"><span class="box-badge ${p.sin_box ? 'parcial' : ''}">📦 BOX ${p.boxes.join(' + ')}</span>
+    ${p.sin_box ? `<span class="text-sm text-amber-700 font-semibold">falta${p.sin_box > 1 ? 'n' : ''} llegar ${p.sin_box} prenda${p.sin_box > 1 ? 's' : ''}</span>` : '<span class="text-sm text-zinc-500">sacá las prendas de esta venta de ese BOX</span>'}</div>`;
+}
+function itemHtml(i, abierto) {
+  const cls = i.faltante ? 'faltante' : !i.vinculado ? 'sinvinc' : i.completo ? 'completo' : i.escaneado ? 'parcial' : '';
+  const titulo = i.vinculado
+    ? `<div class="cp-nombre">${esc(i.articulo)}</div><div class="flex items-baseline gap-3 mt-1"><span class="text-base font-bold text-zinc-600">${esc(i.color)}</span><span class="cp-talle">${esc(i.talle)}</span></div>`
+    : `<div class="cp-nombre">${esc(i.producto || '(sin título)')}</div><div class="text-sm text-amber-700 font-semibold mt-1">⚠ SKU sin vincular al catálogo: no se puede verificar</div>`;
+  const ub = i.vinculado ? (i.ubicacion ? i.ubicacion.split(',').map(u => `<span class="cp-ub">📍 ${esc(u.trim())}</span>`).join(' ')
+    : '<span class="text-xs text-zinc-500">Sin ubicación cargada (<a class="underline" href="/mapeo">Mapeo</a>)</span>') : '';
+  let acc = '';
+  if (abierto && i.faltante) acc = `<button class="btn btn-gris btn-chico" onclick="quitarFaltante(${i.id})">Apareció: quitar faltante</button>`;
+  else if (abierto && !i.completo) acc = (i.vinculado ? `<button class="btn btn-gris btn-chico" onclick="donde(${i.id})">🔍 No la encuentro</button>` : '')
+    + `<button class="btn btn-gris btn-chico" onclick="faltante(${i.id})">Marcar faltante</button>`
+    + (!i.vinculado && PUEDE_VINCULAR ? `<button class="btn btn-primario btn-chico" onclick="abrirVinc(${i.id})">Vincular al catálogo</button>` : '');
+  return `<div class="cp-item ${cls}" id="it-${i.id}">
+    <div class="flex items-start gap-3"><div class="flex-1 min-w-0">${titulo}</div>
+      <div class="cp-cuenta ${i.completo ? 'text-teal-600' : ''}">${i.faltante ? '<span class="text-red-700 text-base">FALTA</span> ' : ''}${i.escaneado}<span class="text-zinc-400 text-xl">/${i.cantidad}</span></div></div>
+    <div class="flex flex-wrap gap-2 mt-2">${ub}</div>
+    <div class="text-xs text-zinc-500 mt-2">${i.variante ? 'En la venta: ' + esc(i.variante) + ' · ' : ''}${i.sku ? 'SKU ' + esc(i.sku) : 'sin SKU'}${i.codigo_barras ? ' · cód. ' + esc(i.codigo_barras) : ''}</div>
+    ${i.vinculado && i.producto ? `<div class="text-xs text-zinc-400 truncate">${esc(i.producto)}</div>` : ''}
+    <div class="flex flex-wrap gap-2 mt-2">${acc}</div><div id="extra-${i.id}"></div></div>`;
+}
+async function donde(iid) {
+  const el = document.getElementById('extra-' + iid);
+  try {
+    const d = await api(`/control/api/item/${iid}/donde`);
+    el.innerHTML = `<div class="mt-2 rounded-xl p-3 text-sm" style="background:var(--soft)"><b>Dónde puede estar</b> (sirve cualquiera de estas):
+      ${d.opciones.map(o => `<div class="mt-2"><div class="font-semibold">${esc(o.nombre)}</div><div class="text-xs text-zinc-500">cód. ${esc(o.codigo_barras || '—')} · ${esc(o.sku)}</div>
+        <div class="flex flex-wrap gap-1 mt-1">${o.ubicaciones.length ? o.ubicaciones.map(u => `<span class="cp-ub">📍 ${esc(u.codigo)}</span>`).join('') : '<span class="text-xs text-zinc-500">sin ubicación cargada</span>'}</div></div>`).join('')}
+      <div class="text-xs text-zinc-500 mt-2">Si no está en ningún lado, tocá <b>Marcar faltante</b>: queda una tarea para el depósito.</div></div>`;
+  } catch (e) { toast(e.message, 'error'); }
+}
+async function faltante(iid) {
+  const nota = prompt('¿Qué pasó? (opcional: "no hay stock", "está fallada"…)', '');
+  if (nota === null) return;
+  try { aplicarResumen(await api(`/control/api/item/${iid}/faltante`, { json: { nota } })); beepWarn(); toast('Marcado como faltante · se creó una tarea', 'warn', 4000); }
+  catch (e) { toast(e.message, 'error'); }
+}
+async function quitarFaltante(iid) {
+  try { aplicarResumen(await api(`/control/api/item/${iid}/quitar-faltante`, { method: 'POST' })); } catch (e) { toast(e.message, 'error'); }
+}
+async function reiniciarPk() {
+  if (!confirm('¿Vaciar el paquete y escanear todo de nuevo?')) return;
+  try { aplicarResumen(await api(`/control/api/paquete/${pk.id}/reiniciar`, { method: 'POST' })); foco(); } catch (e) { toast(e.message, 'error'); }
+}
+
+// ── vincular (solo supervisor) ──
+function abrirVinc(iid) {
+  vincItem = iid;
+  const it = pk.items.find(x => x.id === iid), el = document.getElementById('extra-' + iid);
+  el.innerHTML = `<div class="mt-2"><input class="input" id="vk-q" placeholder="Buscá el artículo del catálogo" autocomplete="off"><div id="vk-res" class="mt-2 flex flex-col gap-1 max-h-72 overflow-y-auto"></div></div>`;
+  const q = document.getElementById('vk-q'); let t = null;
+  q.oninput = () => { clearTimeout(t); t = setTimeout(() => buscarVinc(q.value), 250); };
+  const pista = (it.producto || '').split(/\s+/).filter(w => /\d{3,}/.test(w))[0]; if (pista) { q.value = pista; buscarVinc(pista); }
+  q.focus();
+}
+async function buscarVinc(v) {
+  const el = document.getElementById('vk-res'); if (v.trim().length < 2) { el.innerHTML = ''; return; }
+  const d = await api('/control/api/catalogo?q=' + encodeURIComponent(v));
+  el.innerHTML = d.modelos.map(m => `<div class="rounded-xl border p-2" style="border-color:var(--line)"><b class="text-sm">${esc(m.articulo)}</b><div class="flex flex-wrap gap-1 mt-1">
+    ${m.variantes.map(x => `<button class="btn btn-gris btn-chico" onclick="vincular(${x.id})">${esc(x.color)} · ${esc(x.talle)}${x.marca ? ' · ' + esc(x.marca) : ''}</button>`).join('')}</div></div>`).join('')
+    || '<p class="text-sm text-zinc-500">Sin resultados.</p>';
+}
+async function vincular(aid) {
+  try { const r = await api(`/control/api/item/${vincItem}/vincular`, { json: { articulo_id: aid } }); vincItem = null; aplicarResumen(r); toast(`Vinculado (${r.lineas} línea/s). Queda recordado.`); }
+  catch (e) { toast(e.message, 'error'); }
+}
+
+// ── escaneo: un solo campo para la etiqueta del envío y las prendas ──
+let enviando = false;
+async function procesar(v) {
+  v = String(v || '').trim(); if (!v || !cp) return;
+  if (alerta) { beepError(); return; }   // con la alerta abierta no se sigue escaneando
+  if (enviando) return;
+  enviando = true;
+  try {
+    const r = await api(`/control/api/${cp.id}/escanear`, { json: { codigo: v, paquete_id: pk ? pk.id : null } });
+    if (r.tipo === 'paquete') {
+      beepOk(); aplicarResumen(r);
+      if (r.aviso) toast(r.aviso, 'warn', 5000);
+      if ((pk.boxes || []).length && pk.estado !== 'completo')
+        okGrande(`<div style="font-size:1.4rem">ESTÁ EN</div><div style="font-size:6rem;line-height:1">📦 ${pk.boxes.join(' + ')}</div><div>BOX</div>${pk.sin_box ? `<div style="font-size:1rem">faltan llegar ${pk.sin_box}</div>` : ''}`, 2000);
+      verPk();
+      return;
+    }
+    if (r.tipo === 'guia') {
+      (r.paquetes.length ? beepWarn : beepError)();
+      document.getElementById('cp-guia').innerHTML = `<div class="rounded-xl p-3" style="background:var(--info-bg)">👕 ${esc(r.mensaje)}
+        ${r.paquetes.map(p => `<div class="cp-fila mt-1" onclick="abrirPk(${p.id})"><b>${esc(p.tracking)}</b> · ${esc(p.comprador)} <span class="text-xs text-zinc-500">${esc(p.resumen)}</span></div>`).join('')}</div>`;
+      return;
+    }
+    aplicarResumen(r);
+    if (r.ok) {
+      beepOk(); flashItem(r.item.id);
+      if (r.completo) okGrande('<div class="tilde">✔</div>PAQUETE CONTROLADO<br><span style="font-size:1rem">Escaneá la etiqueta del próximo envío</span>', 1800);
+      else okGrande(`<div class="tilde">✔</div>OK<br><span style="font-size:1.1rem">${esc(r.escaneado || '')} · faltan ${pk.unidades - pk.escaneadas}</span>`, 900);
+    } else mostrarAlerta(r);
+  } catch (e) { beepError(); toast(e.message, 'error', 5000); }
+  finally { enviando = false; }
+}
+function verPk() {
+  const el = document.getElementById('pk'), cab = document.querySelector('#v-cp section.sticky');
+  el.style.scrollMarginTop = ((cab ? cab.offsetHeight : 0) + 70) + 'px';
+  el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
+function flashItem(id) { const f = document.getElementById('it-' + id); if (f) { f.classList.add('flash'); f.scrollIntoView({ block: 'center', behavior: 'smooth' }); } }
+function okGrande(html, ms = 1600) { const o = document.getElementById('cp-ok'); o.innerHTML = `<div>${html}</div>`; o.classList.add('on'); clearTimeout(okGrande.t); okGrande.t = setTimeout(() => o.classList.remove('on'), ms); }
+function mostrarAlerta(r) {
+  alerta = true; beepError(); setTimeout(beepError, 450);
+  const tit = { equivocado: 'NO COINCIDE', sobra: 'SOBRA UNA PRENDA', desconocido: 'CÓDIGO DESCONOCIDO', cerrado: 'PAQUETE YA CONTROLADO', cancelado: 'VENTA CANCELADA' }[r.motivo] || 'ERROR';
+  document.getElementById('al-titulo').textContent = tit;
+  document.getElementById('al-boton').textContent = ['equivocado', 'sobra'].includes(r.motivo) ? 'Ya la saqué del paquete' : 'Entendido';
+  document.getElementById('al-cuerpo').innerHTML = `<p class="mb-2">${esc(r.mensaje)}</p>`
+    + (r.escaneado ? `<p class="mb-1">Escaneaste: <b class="text-red-700">${esc(r.escaneado)}</b></p>` : '')
+    + (r.esperado && r.esperado.length ? `<p>Este paquete lleva: <b class="text-teal-700">${r.esperado.map(esc).join(' / ')}</b></p>` : '');
+  document.getElementById('al-extra').innerHTML = (r.puede_vincular && r.puede_vincular.length && PUEDE_VINCULAR)
+    ? `<button class="btn btn-gris btn-chico mt-1" onclick="vincularEscaneado(${r.puede_vincular[0]}, ${r.articulo_id})">Soy supervisor: esta prenda ES la de la venta (vincular SKU)</button>` : '';
+  document.getElementById('cp-alerta').classList.add('on');
+  document.activeElement && document.activeElement.blur();
+}
+function cerrarAlerta() { alerta = false; document.getElementById('cp-alerta').classList.remove('on'); foco(); }
+async function vincularEscaneado(iid, aid) {
+  if (!confirm('Esto vincula el SKU de la venta con la prenda escaneada para siempre. ¿Seguro que es la misma prenda?')) return;
+  vincItem = iid; await vincular(aid); cerrarAlerta();
+}
+
+const inpEsc = document.getElementById('esc');
+inpEsc.addEventListener('keydown', e => { if (e.key !== 'Enter') return; e.preventDefault(); const v = inpEsc.value; inpEsc.value = ''; procesar(v); });
+
+// cámara del celular
+let scanner = null, ultimo = '', ultimoT = 0;
+async function toggleCam() {
+  if (scanner) { pararCam(); return; }
+  if (typeof Html5Qrcode === 'undefined') { toast('No se pudo cargar el lector de la cámara (¿sin internet?)', 'error'); return; }
+  document.getElementById('cam-box').classList.remove('hidden');
+  try {
+    scanner = new Html5Qrcode('qr-reader', { verbose: false, experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
+    await scanner.start({ facingMode: 'environment' }, { fps: 12, qrbox: (w, h) => ({ width: Math.round(w * .9), height: Math.max(80, Math.round(h * .35)) }) },
+      t => { const n = Date.now(); if (t === ultimo && n - ultimoT < 2500) return; ultimo = t; ultimoT = n; procesar(t); }, () => {});
+  } catch (e) { toast('No se pudo abrir la cámara: ' + e, 'error', 6000); pararCam(); }
+}
+async function pararCam() { if (scanner) { try { await scanner.stop(); } catch {} scanner = null; } document.getElementById('cam-box').classList.add('hidden'); }
+
+// ── acciones del control ──
+async function sumarArchivos(input) {
+  if (!input.files.length) return;
+  const fd = new FormData(); [...input.files].forEach(f => fd.append('archivos', f)); input.value = '';
+  try {
+    const r = await api(`/control/api/${cp.id}/agregar`, { method: 'POST', body: fd });
+    cp = r.control; pintarCp(); if (pk) abrirPk(pk.id);
+    toast(`${r.nuevos} paquetes nuevos · ${r.actualizados} completados con el archivo`, 'ok', 5000);
+    if (r.errores.length) toast(r.errores.join(' · '), 'warn', 8000);
+  } catch (e) { toast(e.message, 'error', 7000); }
+}
+async function verEventos() {
+  const el = document.getElementById('eventos'), d = await api(`/control/api/${cp.id}/eventos`);
+  const T = { equivocado: '⛔ Prenda equivocada', sobra: '➕ Sobraba', desconocido: '❓ Código desconocido', faltante: '⚠️ Faltante', reinicio: '↺ Reinicio' };
+  el.classList.remove('hidden');
+  el.innerHTML = `<h2 class="font-bold mb-2">Errores y faltantes</h2>` + (d.eventos.length ? `<div class="overflow-x-auto"><table class="tabla w-full text-sm"><tr><th>Hora</th><th>Envío</th><th>Qué pasó</th><th>Quién</th><th>Detalle</th></tr>
+    ${d.eventos.map(e => `<tr><td>${e.hora}</td><td>${esc(e.tracking)}</td><td>${T[e.tipo] || esc(e.tipo)}</td><td>${esc(e.usuario)}</td><td>${esc(e.detalle)}</td></tr>`).join('')}</table></div>`
+    : '<p class="text-zinc-500 text-sm">Sin errores. 👌</p>');
+  el.scrollIntoView({ behavior: 'smooth' });
+}
+async function cerrarCp() {
+  const sin = cp.paquetes - cp.completo;
+  if (!confirm(sin ? `Hay ${sin} paquetes sin controlar. ¿Cerrar igual?` : '¿Cerrar el control?')) return;
+  cp = (await api(`/control/api/${cp.id}/cerrar`, { method: 'POST' })).control; pk = null; pintarCp(); pintarPk();
+}
+async function reabrirCp() { cp = (await api(`/control/api/${cp.id}/reabrir`, { method: 'POST' })).control; pintarCp(); }
+async function borrarCp() {
+  if (!confirm(`¿Borrar CP-${cp.id}?`)) return;
+  try { await api('/control/api/' + cp.id, { method: 'DELETE' }); volver(); } catch (e) { toast(e.message, 'error'); }
+}
+
+origen('archivo'); tipoSel('__init__');
+if (RE_ID) abrirCp(RE_ID);
+else { lista(); const mh = location.hash.match(/^#cp(\d+)$/); if (mh) abrirCp(+mh[1]); }
+</script>
+{% endblock %}

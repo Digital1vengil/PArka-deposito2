@@ -1,0 +1,17 @@
+{% from "_iconos.html" import ico %}
+<a href="/" class="nav-link" title="Inicio"><span class="nav-ico">{{ ico('inicio') }}</span><span class="nav-txt">Inicio</span></a>
+{% if 'despacho' in acc %}<a href="/despacho" class="nav-link" title="Despacho"><span class="nav-ico">{{ ico('despacho') }}</span><span class="nav-txt">Despacho</span></a>{% endif %}
+{% if 'devoluciones' in acc %}<a href="/devoluciones" class="nav-link" title="Devoluciones"><span class="nav-ico">{{ ico('devoluciones') }}</span><span class="nav-txt">Devoluciones</span></a>{% endif %}
+{% if 'conteo' in acc %}<a href="/conteo" class="nav-link" title="Conteo"><span class="nav-ico">{{ ico('conteo') }}</span><span class="nav-txt">Conteo</span></a>{% endif %}
+{% if 'ecommerce' in acc %}<a href="/ecommerce" class="nav-link" title="Recolección Ecommerce"><span class="nav-ico">{{ ico('ecommerce') }}</span><span class="nav-txt">Recolección Ecommerce</span></a>{% endif %}
+{% if 'pick_odoo' in acc %}<a href="/recolecciones-odoo" class="nav-link" title="Recolecciones Odoo"><span class="nav-ico">{{ ico('pick_odoo') }}</span><span class="nav-txt">Recolecciones Odoo</span></a>{% endif %}
+{% if 'mapeo' in acc %}<a href="/mapeo" class="nav-link" title="Mapeo"><span class="nav-ico">{{ ico('mapeo') }}</span><span class="nav-txt">Mapeo</span></a>{% endif %}
+{% if 'tareas' in acc %}<a href="/tareas" class="nav-link" title="Tareas"><span class="nav-ico">{{ ico('tareas') }}</span><span class="nav-txt">Tareas</span></a>{% endif %}
+{% if 'articulos' in acc %}<a href="/articulos" class="nav-link" title="Artículos"><span class="nav-ico">{{ ico('articulos') }}</span><span class="nav-txt">Artículos</span></a>{% endif %}
+{% if 'supervision' in acc %}<a href="/supervision" class="nav-link" title="Supervisión"><span class="nav-ico">{{ ico('supervision') }}</span><span class="nav-txt">Supervisión</span></a>{% endif %}
+{% if 'cierre' in acc %}<a href="/admin/cierre" class="nav-link" title="Cierre"><span class="nav-ico">{{ ico('cierre') }}</span><span class="nav-txt">Cierre</span></a>{% endif %}
+{% if 'ml' in acc %}<a href="/ml" class="nav-link" title="Mercado Libre"><span class="nav-ico">{{ ico('ml') }}</span><span class="nav-txt">ML</span></a>{% endif %}
+{% if u.es_admin %}<div class="nav-sep"><span class="nav-txt">Administración</span></div>
+<a href="/admin/usuarios" class="nav-link" title="Usuarios"><span class="nav-ico">{{ ico('usuarios') }}</span><span class="nav-txt">Usuarios</span></a>
+<a href="/admin/secciones" class="nav-link" title="Secciones"><span class="nav-ico">{{ ico('secciones') }}</span><span class="nav-txt">Secciones</span></a>
+<a href="/admin/conexiones" class="nav-link" title="Conexiones"><span class="nav-ico">{{ ico('conexiones') }}</span><span class="nav-txt">Conexiones</span></a>{% endif %}

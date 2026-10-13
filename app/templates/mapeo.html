@@ -1,0 +1,281 @@
+{% extends "base.html" %}
+{% block titulo %}Mapeo del depósito · {{ APP_NOMBRE }}{% endblock %}
+{% block main_class %}max-w-[1440px] mx-auto px-4 py-6{% endblock %}
+{% block contenido %}
+<a href="/" class="text-sm text-zinc-500 hover:text-violeta">← Inicio</a>
+<h1 class="text-2xl font-bold mb-1">🗺️ Mapeo del depósito</h1>
+<p class="text-sm text-zinc-500 mb-4">Cada ubicación es <b>pasillo · módulo · nivel</b> (ej. <b>A-03-2</b>). Asignale qué artículo hay y la Recolección arma la ruta sola.</p>
+
+<div class="tabs">
+  <button class="tab activo" data-t="mapa" onclick="tab('mapa')">Mapa</button>
+  <button class="tab" data-t="asignar" onclick="tab('asignar')">Asignar escaneando</button>
+  <button class="tab" data-t="ubicaciones" onclick="tab('ubicaciones')">Ubicaciones</button>
+  <button class="tab" data-t="vinculos" onclick="tab('vinculos')">SKU vinculados</button>
+</div>
+
+<!-- MAPA -->
+<div id="t-mapa" class="grid lg:grid-cols-3 gap-5">
+  <div class="lg:col-span-2 flex flex-col gap-4">
+    <section class="card p-4">
+      <label class="lbl">¿Dónde está? Buscá un artículo o una ubicación</label>
+      <input id="q" class="input" placeholder="Ej: THOR 00114, A-03, o escaneá el código" autocomplete="off">
+      <div id="res-q" class="mt-2 flex flex-col gap-2 max-h-60 overflow-y-auto"></div>
+    </section>
+    <section class="card p-4">
+      <div class="flex items-center gap-3 mb-3 text-xs text-zinc-500">
+        <span class="celda-ub llena !inline-block !min-w-0 !px-2">con artículos</span>
+        <span class="celda-ub !inline-block !min-w-0 !px-2">vacía</span>
+        <span class="celda-ub marcada !inline-block !min-w-0 !px-2">resultado</span>
+        <span class="ml-auto">Nivel 1 abajo</span>
+      </div>
+      <div id="mapa" class="flex flex-wrap gap-6"></div>
+    </section>
+  </div>
+  <section id="panel-ub" class="card p-4 self-start lg:sticky lg:top-20">
+    <p class="text-sm text-zinc-500">Tocá una ubicación del mapa para ver qué tiene y asignarle artículos.</p>
+  </section>
+</div>
+
+<!-- ASIGNAR ESCANEANDO -->
+<div id="t-asignar" class="hidden max-w-2xl">
+  <section class="card p-4 flex flex-col gap-3">
+    <p class="text-sm text-zinc-500">1) Escaneá la <b>etiqueta de la ubicación</b> · 2) escaneá los artículos que están ahí. Cada artículo queda asignado a esa ubicación.</p>
+    <div><label class="lbl">Escanear</label>
+      <input id="esc" class="input !text-lg !py-3" placeholder="Código de ubicación o de artículo" autocomplete="off"></div>
+    <div><label class="lbl">Cada escaneo asigna</label>
+      <select id="nivel-asig" class="input">
+        <option value="color" selected>El color de ese artículo (todos los talles)</option>
+        <option value="modelo">El modelo entero (todos los colores y talles)</option>
+        <option value="variante">Solo esa variante (color + talle)</option>
+      </select></div>
+    <div id="esc-actual" class="rounded-xl p-4 bg-zinc-900 text-center text-zinc-500">Sin ubicación elegida</div>
+    <div id="esc-log" class="flex flex-col gap-1 text-sm"></div>
+  </section>
+</div>
+
+<!-- UBICACIONES -->
+<div id="t-ubicaciones" class="hidden flex flex-col gap-5">
+  <section class="card p-4">
+    <h2 class="font-bold mb-3">Crear ubicaciones</h2>
+    <div class="grid grid-cols-2 sm:grid-cols-6 gap-3 items-end">
+      <div class="col-span-2"><label class="lbl">Zona (opcional)</label><input id="n-zona" class="input" placeholder="Ej: Planta baja"></div>
+      <div><label class="lbl">Pasillo</label><input id="n-pasillo" class="input" placeholder="A" maxlength="10"></div>
+      <div><label class="lbl">Módulo desde</label><input id="n-desde" type="number" min="0" value="1" class="input"></div>
+      <div><label class="lbl">hasta</label><input id="n-hasta" type="number" min="0" value="10" class="input"></div>
+      <div><label class="lbl">Niveles</label><input id="n-niveles" type="number" min="0" max="20" value="4" class="input"></div>
+    </div>
+    <div class="flex flex-wrap items-center gap-3 mt-3">
+      <button class="btn btn-primario" onclick="crearLote()">＋ Crear</button>
+      <span id="n-ejemplo" class="text-xs text-zinc-500"></span>
+    </div>
+    <p class="text-xs text-zinc-500 mt-2">Módulo = estantería / rack dentro del pasillo. Nivel = estante (1 = abajo). Con 0 niveles se crea una sola ubicación por módulo.</p>
+  </section>
+  <section class="card p-4">
+    <div class="flex flex-wrap items-center gap-2 mb-3">
+      <h2 class="font-bold flex-1">Ubicaciones <span id="u-total" class="text-zinc-500 font-normal text-sm"></span></h2>
+      <button class="btn btn-gris btn-chico" onclick="reordenar()" title="Ida por un pasillo y vuelta por el siguiente">↯ Ordenar ruta en zigzag</button>
+      <label class="text-xs text-zinc-500">Empezar en etiqueta Nº <input id="et-desde" type="number" min="1" max="40" value="1" class="input !w-16 !py-1 inline"></label>
+      <button class="btn btn-gris btn-chico" onclick="imprimir(false)">🖨 Etiquetas (marcadas o todas)</button>
+      <button class="btn btn-gris btn-chico" onclick="imprimir(true)">Prueba de alineación</button>
+    </div>
+    <div class="overflow-x-auto"><table class="w-full text-sm">
+      <thead class="text-left text-xs text-zinc-500"><tr>
+        <th class="py-1"><input type="checkbox" onchange="document.querySelectorAll('.u-chk').forEach(c => c.checked = this.checked)"></th>
+        <th>Código</th><th>Zona</th><th>Descripción</th><th title="Orden en la ruta de recolección">Ruta</th><th>Artículos</th><th>Activa</th><th></th></tr></thead>
+      <tbody id="u-tabla"></tbody></table></div>
+  </section>
+</div>
+
+<!-- VINCULOS -->
+<div id="t-vinculos" class="hidden max-w-3xl">
+  <section class="card p-4">
+    <p class="text-sm text-zinc-500 mb-3">SKU de Mercado Libre / Tienda Nube que no coincidían con el catálogo y se vincularon a mano desde Recolección. Se usan solos la próxima vez.</p>
+    <div id="v-lista" class="flex flex-col text-sm"></div>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+let ubs = [], sel = null, marcadas = new Set(), escUb = null, tq = null;
+const ORDEN_TALLE = ['XXXS','XXS','XS','S','M','L','XL','XXL','XXXL','XXXXL','U','UNICO','ÚNICO'];
+const ordTalle = t => { const i = ORDEN_TALLE.indexOf(String(t).toUpperCase()); return i >= 0 ? i : (parseInt(t) || 100); };
+
+function tab(t) {
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('activo', b.dataset.t === t));
+  ['mapa', 'asignar', 'ubicaciones', 'vinculos'].forEach(x => document.getElementById('t-' + x).classList.toggle('hidden', x !== t));
+  if (t === 'asignar') document.getElementById('esc').focus();
+  if (t === 'vinculos') vinculos();
+  try { localStorage.setItem('mapeo_tab', t); } catch {}
+}
+
+async function cargar() {
+  ubs = (await api('/mapeo/api/ubicaciones')).ubicaciones;
+  pintarMapa(); pintarTabla();
+}
+
+function pintarMapa() {
+  const el = document.getElementById('mapa');
+  if (!ubs.length) { el.innerHTML = '<p class="text-zinc-500 text-sm">Todavía no hay ubicaciones. Creálas en la pestaña <b>Ubicaciones</b>.</p>'; return; }
+  const grupos = {};
+  ubs.forEach(u => { const k = (u.zona || '') + '|' + (u.pasillo || '—'); (grupos[k] = grupos[k] || { zona: u.zona, pasillo: u.pasillo || '—', us: [] }).us.push(u); });
+  el.innerHTML = Object.values(grupos).sort((a, b) => (a.zona || '').localeCompare(b.zona || '') || a.pasillo.localeCompare(b.pasillo, 'es', { numeric: true })).map(g => {
+    const mods = [...new Set(g.us.map(u => u.modulo))].sort((a, b) => a - b);
+    const nivs = [...new Set(g.us.map(u => u.nivel))].sort((a, b) => b - a);
+    const idx = {}; g.us.forEach(u => idx[u.modulo + '|' + u.nivel] = u);
+    const celdas = nivs.map(n => mods.map(m => {
+      const u = idx[m + '|' + n];
+      if (!u) return '<div></div>';
+      const cls = ['celda-ub', u.articulos ? 'llena' : '', marcadas.has(u.id) ? 'marcada' : '', sel === u.id ? 'sel' : '', u.activa ? '' : 'inactiva'].join(' ');
+      return `<div class="${cls}" title="${esc(u.codigo)}${u.descripcion ? ' · ' + esc(u.descripcion) : ''}" onclick="abrir(${u.id})">${esc(u.codigo.split('-').slice(-2).join('-'))}${u.articulos ? `<div class="font-normal">${u.articulos} art.</div>` : ''}</div>`;
+    }).join('')).join('');
+    return `<div class="pasillo"><div class="font-bold mb-2 text-violeta">${g.zona ? esc(g.zona) + ' · ' : ''}Pasillo ${esc(g.pasillo)}</div>
+      <div class="mapa-grilla" style="grid-template-columns: repeat(${mods.length}, minmax(44px, 1fr))">${celdas}</div>
+      <div class="mapa-grilla text-[10px] text-zinc-500 text-center mt-1" style="grid-template-columns: repeat(${mods.length}, minmax(44px, 1fr))">${mods.map(m => `<div>M${m}</div>`).join('')}</div></div>`;
+  }).join('');
+}
+
+async function abrir(id) {
+  sel = id; pintarMapa();
+  const d = await api('/mapeo/api/ubicaciones/' + id);
+  pintarPanel(d);
+}
+function pintarPanel(d) {
+  const u = d.ubicacion, p = document.getElementById('panel-ub');
+  p.innerHTML = `<div class="flex items-start gap-2"><div class="flex-1"><div class="ub-grande">${esc(u.codigo)}</div>
+      <div class="text-xs text-zinc-500">${[u.zona, u.pasillo && 'Pasillo ' + u.pasillo, u.modulo && 'Módulo ' + u.modulo, u.nivel && 'Nivel ' + u.nivel].filter(Boolean).map(esc).join(' · ')} · ruta ${u.orden}</div></div>
+      <button class="btn btn-gris btn-chico" onclick="imprimirPDF('/mapeo/etiquetas.pdf?ids=${u.id}', this)">🖨</button></div>
+    <input class="input mt-3" placeholder="Descripción (ej: camperas de invierno)" value="${esc(u.descripcion)}" onchange="editar(${u.id}, {descripcion: this.value})">
+    <h3 class="font-bold mt-4 mb-2 text-sm">Qué hay acá</h3>
+    <div class="flex flex-col gap-1 mb-4">${d.asignaciones.length ? d.asignaciones.map(a => `<div class="flex items-center gap-2 text-sm border-b border-zinc-700 py-1">
+      <b class="flex-1">${esc(a.modelo)}</b><span class="text-xs text-zinc-500">${esc(a.detalle)}</span>
+      <button class="text-red-600" title="Quitar" onclick="quitar(${a.id}, ${u.id})">✕</button></div>`).join('') : '<p class="text-sm text-zinc-500">Vacía.</p>'}</div>
+    <label class="lbl">Agregar artículo</label>
+    <input id="p-q" class="input" placeholder="Buscar modelo o escanear" autocomplete="off">
+    <div id="p-res" class="mt-2 flex flex-col gap-2 max-h-80 overflow-y-auto"></div>`;
+  const pq = document.getElementById('p-q'); let t = null;
+  pq.oninput = () => { clearTimeout(t); t = setTimeout(() => buscarParaAsignar(pq.value, u.id), 250); };
+}
+async function buscarParaAsignar(v, uid) {
+  const el = document.getElementById('p-res');
+  if (v.trim().length < 2) { el.innerHTML = ''; return; }
+  const d = await api('/mapeo/api/buscar?q=' + encodeURIComponent(v));
+  window._pm = d.modelos;
+  el.innerHTML = d.modelos.map((m, i) => {
+    const colores = [...new Set(m.variantes.map(x => x.color))].sort();
+    return `<div class="rounded-xl border border-zinc-700 p-2"><div class="flex items-center gap-2"><b class="flex-1 text-sm">${esc(m.articulo)}</b>
+      <button class="btn btn-primario btn-chico" onclick="asignar(${uid}, {modelo: _pm[${i}].articulo})">Todo el modelo</button></div>
+      <div class="flex flex-wrap gap-1 mt-2">${colores.map(c => `<button class="btn btn-gris btn-chico" onclick="asignar(${uid}, {modelo: _pm[${i}].articulo, color: ${esc(JSON.stringify(c))}})">${esc(c)}</button>`).join('')}</div></div>`;
+  }).join('') || '<p class="text-sm text-zinc-500">Sin resultados.</p>';
+}
+async function asignar(uid, datos) {
+  try {
+    const r = await api('/mapeo/api/asignar', { json: { ubicacion_id: uid, ...datos } });
+    toast(r.repetido ? 'Ya estaba asignado' : 'Asignado', r.repetido ? 'warn' : 'ok');
+    await cargar(); abrir(uid);
+  } catch (e) { toast(e.message, 'error', 5000); }
+}
+async function quitar(aid, uid) { await api('/mapeo/api/asignacion/' + aid, { method: 'DELETE' }); await cargar(); abrir(uid); }
+async function editar(id, datos) {
+  try { await api('/mapeo/api/ubicaciones/' + id, { method: 'PUT', json: datos }); toast('Guardado'); cargar(); }
+  catch (e) { toast(e.message, 'error'); }
+}
+
+// Búsqueda "¿dónde está?"
+const q = document.getElementById('q');
+q.addEventListener('input', () => { clearTimeout(tq); tq = setTimeout(dondeEsta, 250); });
+q.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); clearTimeout(tq); dondeEsta(); } });
+async function dondeEsta() {
+  const v = q.value.trim(), el = document.getElementById('res-q');
+  marcadas = new Set();
+  if (v.length < 2) { el.innerHTML = ''; pintarMapa(); return; }
+  const V = v.toUpperCase();
+  ubs.filter(u => u.codigo.startsWith(V)).forEach(u => marcadas.add(u.id));
+  const d = await api('/mapeo/api/buscar?q=' + encodeURIComponent(v));
+  const porCodigo = Object.fromEntries(ubs.map(u => [u.codigo, u]));
+  el.innerHTML = d.modelos.map(m => {
+    m.ubicaciones.forEach(a => porCodigo[a.codigo] && marcadas.add(porCodigo[a.codigo].id));
+    return `<div class="flex flex-wrap items-center gap-2 text-sm border-b border-zinc-700 py-1"><b class="flex-1">${esc(m.articulo)}</b>
+      ${m.ubicaciones.length ? m.ubicaciones.map(a => `<button class="chip chip-hecha" onclick="abrir(${a.ubicacion_id})" title="${esc(a.detalle)}">${esc(a.codigo)}${a.color ? ' · ' + esc(a.color) : ''}</button>`).join('') : '<span class="chip chip-pendiente">SIN UBICACIÓN</span>'}</div>`;
+  }).join('');
+  pintarMapa();
+}
+
+// Asignar escaneando
+const escIn = document.getElementById('esc');
+escIn.addEventListener('keydown', async e => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const v = escIn.value.trim(); escIn.value = '';
+  if (!v) return;
+  const ub = ubs.find(u => u.codigo === v.toUpperCase().replace(/\s+/g, ''));
+  if (ub) {
+    escUb = ub; beepOk();
+    document.getElementById('esc-actual').innerHTML = `<div class="text-xs">Asignando a</div><div class="ub-grande">${esc(ub.codigo)}</div>`;
+    return;
+  }
+  if (!escUb) { beepError(); toast('Primero escaneá la etiqueta de la ubicación', 'warn'); return; }
+  const d = await api('/mapeo/api/buscar?q=' + encodeURIComponent(v));
+  const m = d.modelos[0], vid = m && m.preseleccion;
+  if (!vid) { beepError(); toast('No encontré ese código en el catálogo', 'error'); return; }
+  const va = m.variantes.find(x => x.id === vid), nivel = document.getElementById('nivel-asig').value;
+  const datos = nivel === 'variante' ? { articulo_id: vid } : nivel === 'modelo' ? { modelo: m.articulo } : { modelo: m.articulo, color: va.color };
+  try {
+    const r = await api('/mapeo/api/asignar', { json: { ubicacion_id: escUb.id, ...datos } });
+    r.repetido ? beepWarn() : beepOk();
+    const txt = `${m.articulo}${nivel !== 'modelo' ? ' · ' + va.color : ''}${nivel === 'variante' ? ' · ' + va.talle : ''}`;
+    document.getElementById('esc-log').insertAdjacentHTML('afterbegin', `<div class="py-1 border-b border-zinc-700">${r.repetido ? '↺' : '✔'} ${esc(txt)} → <b>${esc(escUb.codigo)}</b></div>`);
+    cargar();
+  } catch (err) { beepError(); toast(err.message, 'error'); }
+});
+
+// Ubicaciones
+['n-zona', 'n-pasillo', 'n-desde', 'n-hasta', 'n-niveles'].forEach(id => document.getElementById(id).oninput = ejemplo);
+function ejemplo() {
+  const p = document.getElementById('n-pasillo').value.trim().toUpperCase(), d = +document.getElementById('n-desde').value || 0,
+        h = +document.getElementById('n-hasta').value || 0, n = +document.getElementById('n-niveles').value || 0;
+  const cant = (Math.abs(h - d) + 1) * Math.max(1, n);
+  document.getElementById('n-ejemplo').textContent = p ? `Se crean ${cant}: ${p}-${String(Math.min(d, h)).padStart(2, '0')}${n ? '-1' : ''} … ${p}-${String(Math.max(d, h)).padStart(2, '0')}${n ? '-' + n : ''}` : '';
+}
+async function crearLote() {
+  try {
+    const r = await api('/mapeo/api/ubicaciones/lote', { json: { zona: document.getElementById('n-zona').value,
+      pasillo: document.getElementById('n-pasillo').value, modulo_desde: +document.getElementById('n-desde').value,
+      modulo_hasta: +document.getElementById('n-hasta').value, niveles: +document.getElementById('n-niveles').value } });
+    toast(`${r.creadas} ubicaciones creadas`); cargar();
+  } catch (e) { toast(e.message, 'error', 5000); }
+}
+async function reordenar() {
+  if (!confirm('¿Ordenar la ruta de recolección en zigzag (ida por un pasillo, vuelta por el siguiente)?')) return;
+  await api('/mapeo/api/ubicaciones/reordenar', { json: { modo: 'zigzag' } }); toast('Ruta ordenada'); cargar();
+}
+function pintarTabla() {
+  document.getElementById('u-total').textContent = `(${ubs.length})`;
+  document.getElementById('u-tabla').innerHTML = ubs.map(u => `<tr class="border-t border-zinc-700">
+    <td class="py-1"><input type="checkbox" class="u-chk" value="${u.id}"></td>
+    <td><b>${esc(u.codigo)}</b></td>
+    <td><input class="input !py-1 !text-xs" value="${esc(u.zona)}" onchange="editar(${u.id}, {zona: this.value})"></td>
+    <td><input class="input !py-1 !text-xs" value="${esc(u.descripcion)}" onchange="editar(${u.id}, {descripcion: this.value})"></td>
+    <td><input class="input !py-1 !text-xs !w-20" type="number" value="${u.orden}" onchange="editar(${u.id}, {orden: +this.value})"></td>
+    <td>${u.articulos || ''}</td>
+    <td><input type="checkbox" ${u.activa ? 'checked' : ''} onchange="editar(${u.id}, {activa: this.checked})"></td>
+    <td><button class="text-red-600 text-xs" onclick="borrar(${u.id}, '${esc(u.codigo)}', ${u.articulos})">Borrar</button></td></tr>`).join('');
+}
+async function borrar(id, cod, n) {
+  if (!confirm(`¿Borrar ${cod}?${n ? ` Tiene ${n} artículo(s) asignado(s).` : ''}`)) return;
+  await api('/mapeo/api/ubicaciones/' + id, { method: 'DELETE' }); cargar();
+}
+function imprimir(guias) {
+  const ids = [...document.querySelectorAll('.u-chk:checked')].map(c => c.value).join(',');
+  imprimirPDF(`/mapeo/etiquetas.pdf?ids=${ids}&desde=${+document.getElementById('et-desde').value || 1}${guias ? '&guias=true' : ''}`, event?.currentTarget);
+}
+async function vinculos() {
+  const d = await api('/mapeo/api/vinculos'), el = document.getElementById('v-lista');
+  el.innerHTML = d.vinculos.length ? d.vinculos.map(v => `<div class="flex items-center gap-3 py-2 border-b border-zinc-700">
+    <code class="text-xs">${esc(v.sku)}</code><span class="flex-1">→ ${esc(v.articulo)}</span><span class="text-xs text-zinc-500">${v.fecha}</span>
+    <button class="text-red-600 text-xs" onclick="api('/mapeo/api/vinculos/${v.id}', {method:'DELETE'}).then(vinculos)">Quitar</button></div>`).join('')
+    : '<p class="text-zinc-500">Todavía no hay vínculos.</p>';
+}
+cargar();
+try { const t = localStorage.getItem('mapeo_tab'); if (t) tab(t); } catch {}
+</script>
+{% endblock %}

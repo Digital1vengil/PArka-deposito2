@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% from "_iconos.html" import ico %}
+{% block contenido %}
+<h1 class="text-2xl font-bold mb-1">Hola, {{ u.nombre }}</h1>
+<p class="text-zinc-400 text-sm mb-5">{{ hoy.strftime('%d/%m/%Y') }} · Elegí una sección para trabajar</p>
+
+{# Números del día (solo de las secciones a las que tiene acceso) #}
+{% set st = namespace(items=[]) %}
+{% for s, c in tarjetas %}
+  {% if c.paquetes_pendientes is defined %}{% set st.items = st.items + [('Por despachar', c.paquetes_pendientes)] %}{% endif %}
+  {% if c.ecommerce_pendientes is defined %}{% set st.items = st.items + [('Sin controlar hoy', c.ecommerce_pendientes)] %}{% endif %}
+  {% if c.devoluciones_hoy is defined %}{% set st.items = st.items + [('Devoluciones hoy', c.devoluciones_hoy)] %}{% endif %}
+  {% if s.slug == 'tareas' %}{% set st.items = st.items + [('Tareas abiertas', c.tareas)] %}{% endif %}
+{% endfor %}
+{% if st.items %}
+<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+  {% for nom, val in st.items[:4] %}<div class="card stat"><span>{{ nom }}</span><b>{{ val }}</b></div>{% endfor %}
+</div>
+{% endif %}
+
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-8">
+  {% for s, c in tarjetas %}
+  <a href="/s/{{ s.slug }}" class="card p-5  transition block {% if not s.activa %}opacity-70{% endif %}">
+    <div class="flex items-start justify-between">
+      {% if s.slug == 'asistente' %}<span class="parkia-p" style="position:static;width:2.4rem;height:2.4rem;font-size:1.05rem;box-shadow:none">P</span>{% else %}<span class="tile-ic">{% set _i = ico(s.slug) %}{% if _i|trim %}{{ _i }}{% else %}{{ s.icono }}{% endif %}</span>{% endif %}
+      {% if not s.activa %}<span class="chip chip-auto">PRÓXIMAMENTE</span>{% endif %}
+    </div>
+    <h2 class="text-base font-bold mt-3">{{ s.nombre }}</h2>
+    <p class="text-zinc-400 text-sm mt-1">{{ s.descripcion }}</p>
+    <div class="flex flex-wrap gap-2 mt-4 text-xs">
+      {% if c.paquetes_pendientes is defined %}
+      <span class="chip {{ 'chip-pendiente' if c.paquetes_pendientes else 'chip-hecha' }}">{{ c.paquetes_pendientes }} paquetes por despachar</span>
+      {% endif %}
+      {% if c.devoluciones_hoy is defined %}
+      <span class="chip chip-en_curso">{{ c.devoluciones_hoy }} devoluciones hoy</span>
+      {% elif c.conteos_hoy is defined %}
+      <span class="chip chip-en_curso">{{ c.conteos_hoy }} conteos hoy</span>
+      {% elif c.ecommerce_abiertas is defined %}
+      <span class="chip {{ 'chip-en_curso' if c.ecommerce_abiertas else 'chip-hecha' }}">{{ c.ecommerce_abiertas }} búsqueda{{ 's' if c.ecommerce_abiertas != 1 }} abierta{{ 's' if c.ecommerce_abiertas != 1 }}</span>
+      <span class="chip {{ 'chip-pendiente' if c.ecommerce_pendientes else 'chip-hecha' }}">{{ c.ecommerce_pendientes }} paquetes sin controlar hoy</span>
+      {% elif c.recolecciones_abiertas is defined %}
+      <span class="chip {{ 'chip-en_curso' if c.recolecciones_abiertas else 'chip-hecha' }}">{{ c.recolecciones_abiertas }} recolecciones abiertas</span>
+      {% elif c.control_pendientes is defined %}
+      <span class="chip {{ 'chip-en_curso' if c.control_pendientes else 'chip-hecha' }}">{{ c.control_pendientes }} paquetes sin controlar hoy</span>
+      {% elif c.ubicaciones is defined %}
+      <span class="chip chip-auto">{{ c.ubicaciones }} ubicaciones</span>
+      {% elif c.panel is defined %}
+      <span class="chip chip-auto">🔒 Solo admin</span>
+      {% elif c.articulos is defined %}
+      <span class="chip chip-auto">{{ c.articulos }} artículos</span>
+      {% else %}
+      <span class="chip {{ 'chip-en_curso' if c.tareas else 'chip-hecha' }}">{{ c.tareas }} tareas abiertas</span>
+      {% endif %}
+      {% if c.vencidas and c.articulos is not defined and c.panel is not defined and c.devoluciones_hoy is not defined and c.conteos_hoy is not defined and c.ubicaciones is not defined and c.recolecciones_abiertas is not defined and c.ecommerce_abiertas is not defined %}<span class="chip chip-vencida">{{ c.vencidas }} vencidas</span>{% endif %}
+    </div>
+  </a>
+  {% endfor %}
+</div>
+
+<div class="flex items-center justify-between mb-3">
+  <h2 class="k-tit">Mis tareas</h2>
+  <a href="/tareas" class="text-sm text-zinc-500 hover:underline">Ver todas →</a>
+</div>
+{% if mis %}
+<div class="flex flex-col gap-2">
+  {% for t in mis %}
+  <div class="card p-4 flex items-center gap-3">
+    <div class="flex-1 min-w-0">
+      <div class="font-semibold truncate">{{ t.titulo }}</div>
+      <div class="text-xs text-zinc-400 mt-1">
+        <span class="chip chip-{{ 'vencida' if t.vencida(hoy) else t.estado }}">{{ 'VENCIDA' if t.vencida(hoy) else ESTADOS_TAREA[t.estado]|upper }}</span>
+        {% if t.prioridad == 'alta' %}<span class="chip chip-alta">ALTA</span>{% endif %}
+        {% if t.vence %}· vence {{ t.vence.strftime('%d/%m') }}{% endif %}
+      </div>
+    </div>
+    <a href="/s/{{ t.seccion_slug }}" class="btn btn-gris btn-chico">Ir</a>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="text-zinc-500 text-sm card p-4">No tenés tareas asignadas.</p>
+{% endif %}
+{% endblock %}

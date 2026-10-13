@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block contenido %}
+<div class="card p-6 max-w-xl mx-auto mt-6">
+  <h1 class="text-xl font-bold mb-2">Importar base del ejecutable</h1>
+  <p class="text-zinc-400 mb-4">
+    Subí el archivo <b>parka_deposito.db</b> de la PC (carpeta <code>PARKA-Deposito-App\datos</code>).
+    Se copian usuarios y PIN, accesos, conexiones (Odoo, ML, Tienda Nube, Gemini), ubicaciones, SKU vinculados
+    e historial. <b>Reemplaza todo lo que haya en esta app.</b> Antes cerrá el ejecutable ("Detener y salir")
+    para que el archivo tenga lo último.
+  </p>
+  <input type="file" id="archivo" accept=".db" class="mb-4 block">
+  <label class="flex items-center gap-2 mb-4"><input type="checkbox" id="ok"> Entiendo que se reemplazan los datos de esta app</label>
+  <button id="btn" class="btn btn-primario">Importar</button>
+  <pre id="res" class="mt-4 text-sm whitespace-pre-wrap"></pre>
+</div>
+<script>
+document.getElementById('btn').onclick = async () => {
+  const f = document.getElementById('archivo').files[0];
+  const res = document.getElementById('res');
+  if (!f) { res.textContent = 'Elegí el archivo primero.'; return; }
+  if (!document.getElementById('ok').checked) { res.textContent = 'Marcá la casilla de confirmación.'; return; }
+  const btn = document.getElementById('btn'); btn.disabled = true; res.textContent = 'Importando… (puede tardar un minuto)';
+  const fd = new FormData(); fd.append('archivo', f);
+  try {
+    const r = await fetch('/admin/api/importar-base', {method: 'POST', body: fd, headers: {'x-requested-with': 'fetch'}});
+    const j = await r.json();
+    if (!r.ok) { res.textContent = '❌ ' + (j.error || r.status); btn.disabled = false; return; }
+    res.textContent = '✅ Listo: ' + j.total + ' registros copiados.\n\n' +
+      Object.entries(j.tablas).filter(([,n]) => n).map(([t,n]) => t + ': ' + n).join('\n') +
+      '\n\nVolvé a entrar con tu usuario y PIN de siempre.';
+    setTimeout(() => location.href = '/login', 6000);
+  } catch (e) { res.textContent = '❌ ' + e; btn.disabled = false; }
+};
+</script>
+{% endblock %}

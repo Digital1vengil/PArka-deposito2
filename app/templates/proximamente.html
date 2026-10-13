@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block contenido %}
+<a href="/" class="text-sm text-zinc-400 hover:text-violeta">← Inicio</a>
+<div class="card p-8 max-w-lg mx-auto text-center mt-6">
+  <div class="text-5xl mb-3">{{ s.icono }}</div>
+  <h1 class="text-2xl font-bold mb-2">{{ s.nombre }}</h1>
+  <p class="text-zinc-400 mb-4">{{ s.descripcion }}</p>
+  <p class="text-sm text-amber-400">Esta sección se activa en la próxima etapa.</p>
+  <p class="text-sm text-zinc-500 mt-2">Mientras tanto podés cargar tareas manuales para esta sección desde <a href="/tareas" class="text-teal-400 underline">Tareas</a>.</p>
+</div>
+{% endblock %}

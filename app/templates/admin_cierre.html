@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block titulo %}Cierre diario · {{ APP_NOMBRE }}{% endblock %}
+{% block contenido %}
+<h1 class="text-2xl font-bold mb-2">📧 Cierre diario</h1>
+{% if google %}
+<section class="card p-5 mb-6 border-teal-700">
+  <h2 class="font-bold mb-1">☁ Cierre por Google (el mismo del scanner)</h2>
+  <p class="text-sm text-zinc-400 mb-3">Google arma el archivo único del día en <b>PARKA Despacho / Cierre del día</b> y lo manda por mail.
+    Todos los días, <b>{{ gas_minutos }} min antes</b> de la hora de cierre de Google, la app le pasa los despachados y los que quedaron sin despachar{% if not gas_auto %} <span class="text-amber-400">(apagado: GAS_AUTO=0)</span>{% endif %}.</p>
+  <p class="text-sm mb-3" id="g-config">Leyendo configuración de Google…</p>
+  <div class="flex flex-wrap gap-2">
+    <button class="btn btn-gris" onclick="gInformar(this)">Pasar datos a Drive (sin mandar mail)</button>
+    <button class="btn btn-primario" onclick="gCerrar(this)">Enviar cierre del día ahora</button>
+  </div>
+  <p class="text-xs text-zinc-500 mt-3">El mail y la hora se cambian en la hoja CONFIG del Google Sheet del scanner.</p>
+</section>
+<h2 class="font-bold mb-2 text-zinc-400">Resumen propio de la app (opcional, por SMTP)</h2>
+{% endif %}
+<p class="text-sm text-zinc-400 mb-6">
+  {% if automatico %}Se envía solo a <b>{{ mail_to }}</b> a las <b>{{ hora }}</b> ({{ dias }}).{% else %}El envío automático está apagado (CIERRE_AUTOMATICO=0).{% endif %}
+</p>
+{% if not mail_ok %}
+<div class="card p-4 mb-6 border-amber-600 text-amber-300 text-sm">⚠️ Falta configurar el correo (SMTP_USER y SMTP_PASS en el archivo .env). Mientras tanto podés ver y descargar el cierre.</div>
+{% endif %}
+
+<div class="card p-5 mb-6 flex flex-wrap gap-3 items-end">
+  <div><label class="lbl">Día</label><input type="date" id="fecha" class="input" value="{{ fecha.isoformat() }}"></div>
+  <div class="flex-1 min-w-[220px]"><label class="lbl">Enviar a</label><input id="dest" class="input" value="{{ mail_to }}"></div>
+  <button class="btn btn-gris" onclick="ver()">Ver</button>
+  <button class="btn btn-gris" onclick="location.href='/admin/cierre/excel?fecha='+fecha.value">⬇ Excel</button>
+  <button class="btn btn-primario" id="btn-enviar" onclick="enviar()" {{ 'disabled' if not mail_ok }}>Enviar ahora</button>
+</div>
+
+<div class="card p-2 mb-6 bg-white"><iframe id="vista" class="w-full h-[60vh] rounded-lg bg-white" src="/admin/cierre/vista?fecha={{ fecha.isoformat() }}"></iframe></div>
+
+<h2 class="font-bold mb-3">Envíos anteriores</h2>
+<div class="card overflow-x-auto"><table class="tabla">
+  <thead><tr><th>Día</th><th>Enviado</th><th>A</th><th>Tipo</th><th>Resultado</th></tr></thead>
+  <tbody>{% for c in historial %}
+  <tr><td>{{ c.fecha.strftime('%d/%m/%Y') }}</td><td>{{ c.enviado_at.strftime('%d/%m %H:%M') }}</td><td>{{ c.destinatario }}</td>
+    <td>{{ 'Automático' if c.automatico else 'Manual' }}</td>
+    <td>{% if c.ok %}<span class="chip chip-hecha">OK</span>{% else %}<span class="chip chip-vencida">ERROR</span> <span class="text-xs text-zinc-400">{{ c.error }}</span>{% endif %}</td></tr>
+  {% else %}<tr><td colspan="5" class="text-zinc-500">Todavía no se envió ningún cierre.</td></tr>{% endfor %}</tbody>
+</table></div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function gConfig() {
+  const el = document.getElementById('g-config'); if (!el) return;
+  try { const c = await api('/admin/api/google/config');
+    el.innerHTML = `Se envía a <b>${esc(c.mail)}</b>${c.copia ? ' con copia a <b>' + esc(c.copia) + '</b>' : ''} · cierre automático a las <b>${c.hora}:00</b>`; }
+  catch (e) { el.innerHTML = `<span class="text-red-400">${esc(e.message)}</span>`; }
+}
+async function gInformar(b) {
+  b.disabled = true;
+  try { const d = await api('/admin/api/google/informar', { method: 'POST' });
+    const n = d.despachados.reduce((a, r) => a + r.cantidad, 0), p = d.pendientes.reduce((a, r) => a + r.cantidad, 0);
+    toast(`☁ Pasados a Drive: ${n} despachados, ${p} sin despachar`, 'ok', 5000); }
+  catch (e) { toast(e.message, 'error', 6000); }
+  b.disabled = false;
+}
+async function gCerrar(b) {
+  if (!confirm('¿Enviar ahora el cierre del día por mail a gerencia?')) return;
+  b.disabled = true; b.textContent = 'Enviando…';
+  try { const d = await api('/admin/api/google/cerrar', { method: 'POST' });
+    if (d.count === 0) toast('No hay despachos registrados hoy', 'info', 5000);
+    else toast(`✅ Cierre enviado a ${d.mail || 'gerencia'}: ${d.despachados} despachados / ${d.noDespachados} no despachados`, 'ok', 7000);
+    setTimeout(() => location.reload(), 1500); }
+  catch (e) { toast(e.message, 'error', 7000); b.disabled = false; b.textContent = 'Enviar cierre del día ahora'; }
+}
+gConfig();
+const fecha = document.getElementById('fecha');
+function ver() { document.getElementById('vista').src = '/admin/cierre/vista?fecha=' + fecha.value; }
+fecha.onchange = ver;
+async function enviar() {
+  const b = document.getElementById('btn-enviar'); b.disabled = true; b.textContent = 'Enviando…';
+  try { await api('/admin/api/cierre/enviar', { json: { fecha: fecha.value, destinatario: document.getElementById('dest').value } });
+        toast('✅ Cierre enviado'); setTimeout(() => location.reload(), 900); }
+  catch (e) { toast(e.message, 'error', 6000); b.disabled = false; b.textContent = 'Enviar ahora'; }
+}
+</script>
+{% endblock %}
