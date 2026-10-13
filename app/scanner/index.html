@@ -1,0 +1,3795 @@
+<!DOCTYPE html>
+<!-- deploy: botones Flex/Colecta v2 -->
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#f4f7f0">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="mobile-web-app-capable" content="yes">
+  <link rel="manifest" href="manifest.json">
+  <title>PARKA · Despacho</title>
+
+  <!-- html5-qrcode: supports QR + Code128 barcode -->
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js" defer></script>
+  <!-- SheetJS: CSV + Excel import/export -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
+  <!-- Lucide icons -->
+  <script src="https://unpkg.com/lucide@0.462.0/dist/umd/lucide.js" defer></script>
+
+  <style>
+    /* ── Base ─────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body {
+      overscroll-behavior: none;
+      -webkit-font-smoothing: antialiased;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f4f7f0;
+      color: #263524;
+    }
+    [data-lucide] { display: inline-block; }
+    .icon { width: 1em; height: 1em; stroke-width: 2; vertical-align: -0.15em; }
+
+    /* ── Screens ──────────────────────────────────── */
+    /* Android Chrome shrinks 100vh when address bar is visible.
+       --vh is set via JS to the actual visible height.           */
+    :root { --vh: 1vh; }
+    .screen { display: none; flex-direction: column;
+              height: calc(var(--vh, 1vh) * 100); }
+    .screen.active { display: flex; }
+
+    /* ── Camera / html5-qrcode cleanup ───────────── */
+    #qr-reader { width: 100% !important; border: none !important; padding: 0 !important; background: #000; }
+    #qr-reader video { width: 100% !important; height: 100% !important; object-fit: cover; display: block; }
+    /* Hide ALL injected html5-qrcode UI chrome */
+    #qr-reader > div[id$="header_message"],
+    #qr-reader > div[id$="dashboard"],
+    #qr-reader > div[id$="status_span"],
+    #qr-reader span,
+    #qr-reader select,
+    #qr-reader button { display: none !important; }
+    #qr-reader img { display: none !important; }
+
+    /* ── Scan overlay ─────────────────────────────── */
+    .scan-overlay {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      pointer-events: none; z-index: 10;
+    }
+    .scan-frame {
+      position: relative;
+      width: min(65vw, 200px); height: min(65vw, 200px);
+    }
+    .scan-frame::before, .scan-frame::after,
+    .scan-frame > span::before, .scan-frame > span::after {
+      content: ''; position: absolute;
+      width: 28px; height: 28px;
+      border-color: #6a8c47; border-style: solid;
+    }
+    .scan-frame::before  { top:0; left:0;  border-width: 4px 0 0 4px; border-radius: 6px 0 0 0; }
+    .scan-frame::after   { top:0; right:0; border-width: 4px 4px 0 0; border-radius: 0 6px 0 0; }
+    .scan-frame > span::before { bottom:0; left:0;  border-width: 0 0 4px 4px; border-radius: 0 0 0 6px; }
+    .scan-frame > span::after  { bottom:0; right:0; border-width: 0 4px 4px 0; border-radius: 0 0 6px 0; }
+
+    /* scan line animation */
+    @keyframes scanLine {
+      0%   { top: 10%; opacity: 1; }
+      90%  { top: 85%; opacity: 0.8; }
+      100% { top: 10%; opacity: 0; }
+    }
+    .scan-line {
+      position: absolute; left: 5%; right: 5%; height: 2px;
+      background: linear-gradient(90deg, transparent, #43592d 40%, #6a8c47 50%, #43592d 60%, transparent);
+      animation: scanLine 2s ease-in-out infinite;
+      box-shadow: 0 0 10px #6a8c47;
+    }
+
+    /* ── Status banner ────────────────────────────── */
+    @keyframes bannerIn { from { transform: translateY(6px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    .banner-animate { animation: bannerIn 0.18s ease-out; }
+
+    /* ── Tabs ─────────────────────────────────────── */
+    .tab-btn { flex: 1; padding: 13px 8px; font-weight: 600; font-size: 14px;
+               border-bottom: 3px solid transparent; transition: all 0.15s; color: #64748b; }
+    .tab-btn.active { border-bottom-color: #547038; color: #374a25; }
+
+    /* ── Cards ────────────────────────────────────── */
+    @keyframes cardFlash { 0%{background:#bbf7d0} 100%{background:#ffffff} }
+    .card-flash { animation: cardFlash 0.7s ease-out; }
+
+    /* ── Progress bar ─────────────────────────────── */
+    .progress-bar { transition: width 0.4s ease; }
+
+    /* ── Upload zone ──────────────────────────────── */
+
+
+    /* ── Scroll ───────────────────────────────────── */
+    .scroll-area { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+
+    /* ── Toast ────────────────────────────────────── */
+    #toast { position: fixed; top: 0; left: 0; right: 0; z-index: 300;
+             transform: translateY(-110%); transition: transform 0.25s cubic-bezier(.34,1.56,.64,1); }
+    #toast.show { transform: translateY(0); }
+
+    /* ── Manual input ─────────────────────────────── */
+    #manual-input-bar { transition: max-height 0.3s, opacity 0.3s; max-height: 0; opacity: 0; overflow: hidden; }
+    #manual-input-bar.open { max-height: 80px; opacity: 1; }
+
+    /* ── Confirm dialog ───────────────────────────── */
+    .confirm-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 200;
+                        display: flex; align-items: flex-end; justify-content: center; }
+    .confirm-sheet { background: #ffffff; border-radius: 20px 20px 0 0; width: 100%;
+                     padding: 24px 20px 32px; }
+  </style>
+
+  <!-- Tailwind CSS — precompilado en build time (styles.css), no se compila en el navegador.
+       Se carga AL FINAL para que sus utilidades (ej. "hidden") siempre ganen la cascada
+       por sobre las reglas propias de arriba (ej. .confirm-backdrop). -->
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════
+     TOAST
+══════════════════════════════════════════ -->
+<div id="toast" aria-live="polite">
+  <div id="toast-body" class="mx-3 mt-safe mt-2 rounded-xl px-4 py-3 text-white font-bold text-center text-sm shadow-2xl"></div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     SCREEN 1: SETUP
+══════════════════════════════════════════ -->
+<div id="screen-setup" class="screen active overflow-y-auto">
+  <div class="max-w-lg mx-auto w-full px-5 py-8 flex flex-col gap-5">
+
+    <!-- Logo -->
+    <div class="text-center pt-4">
+      <div class="w-16 h-16 mx-auto mb-3 rounded-2xl bg-forest-600 flex items-center justify-center shadow-lg">
+        <i data-lucide="package" class="icon text-white" style="width:32px;height:32px;"></i>
+      </div>
+      <h1 class="text-2xl font-bold text-slate-800">PARKA · Despacho</h1>
+      <p class="text-slate-500 text-sm mt-1">Control de envíos — Mercado Libre</p>
+    </div>
+
+    <!-- Install PWA button (shown only when browser supports install prompt) -->
+    <button id="btn-install" class="hidden w-full bg-forest-600 active:bg-forest-700 text-white font-bold py-3.5 rounded-2xl flex items-center justify-center gap-2 text-sm shadow-lg">
+      <i data-lucide="smartphone" class="icon"></i> Instalar app en este teléfono
+    </button>
+
+    <!-- Drive-required warning (shown on remote hosting without Drive) -->
+    <div id="drive-required-banner" class="hidden bg-orange-50 border border-orange-300 rounded-2xl p-4">
+      <p class="text-orange-700 font-bold text-sm flex items-center gap-2"><i data-lucide="cloud-off" class="icon"></i> Configurá Google Drive para sincronizar</p>
+      <p class="text-orange-700/80 text-xs mt-1 mb-0">
+        Esta app está corriendo en la nube. Para que la sesión se guarde y sincronice entre dispositivos,
+        necesitás conectar Google Drive abajo.
+      </p>
+    </div>
+
+    <!-- Session resume banner (hidden by default) -->
+    <div id="resume-banner" class="hidden bg-amber-50 border border-amber-300 rounded-2xl p-4">
+      <p class="text-amber-700 font-bold text-sm flex items-center gap-2"><i data-lucide="alert-triangle" class="icon"></i> Hay una sesión en curso</p>
+      <p id="resume-info" class="text-amber-700/80 text-xs mt-1 mb-3"></p>
+      <button id="btn-resume" class="w-full bg-amber-500 active:bg-amber-600 text-black font-bold py-3 rounded-xl text-sm mb-2">
+        ▶ Continuar esa sesión
+      </button>
+      <button id="btn-new-session" class="w-full bg-slate-100 active:bg-slate-200 text-slate-600 font-semibold py-3 rounded-xl text-sm">
+        🗑 Nueva sesión (descarta la anterior)
+      </button>
+    </div>
+
+    <!-- ── Archivos en el servidor (carga sin upload) ── -->
+    <div id="server-files-zone" class="hidden bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+      <div class="flex items-center justify-between mb-3">
+        <p class="text-slate-700 text-sm font-semibold flex items-center gap-2"><i data-lucide="server" class="icon text-forest-600"></i> Archivos en el servidor</p>
+        <button id="btn-refresh-files" class="text-forest-600 text-xs font-semibold active:opacity-60 flex items-center gap-1"><i data-lucide="refresh-cw" class="icon" style="width:14px;height:14px;"></i> Actualizar</button>
+      </div>
+      <div id="server-files-list" class="space-y-2"></div>
+      <p class="text-slate-400 text-xs mt-2 text-center">Archivos de la carpeta de la PC con el servidor</p>
+    </div>
+
+    <!-- ── Archivos en Google Drive ── -->
+    <div id="drive-files-zone" class="hidden bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center gap-2">
+          <p class="text-slate-700 text-sm font-semibold flex items-center gap-2"><i data-lucide="cloud" class="icon text-forest-600"></i> Archivos en Google Drive</p>
+        </div>
+        <button id="btn-refresh-drive-files" class="text-forest-600 text-xs font-semibold active:opacity-60 flex items-center gap-1"><i data-lucide="refresh-cw" class="icon" style="width:14px;height:14px;"></i> Actualizar</button>
+      </div>
+      <!-- Selector de tipo para dividir la carga de archivos (Flex / Colecta) -->
+      <div class="flex bg-slate-100 rounded-full p-0.5 gap-0.5 mb-3">
+        <button id="btn-drive-colecta" class="flex-1 text-xs font-bold px-3 py-1.5 rounded-full text-slate-500 flex items-center justify-center gap-1"><i data-lucide="barcode" class="icon" style="width:14px;height:14px;"></i> Colecta</button>
+        <button id="btn-drive-flex" class="flex-1 text-xs font-bold px-3 py-1.5 rounded-full text-slate-500 flex items-center justify-center gap-1"><i data-lucide="qr-code" class="icon" style="width:14px;height:14px;"></i> Flex</button>
+        <button id="btn-drive-tiendanube" class="flex-1 text-xs font-bold px-2 py-1.5 rounded-full text-slate-500 flex items-center justify-center gap-1"><i data-lucide="shopping-bag" class="icon" style="width:14px;height:14px;"></i> Tienda Nube</button>
+        <button id="btn-drive-cambios" class="flex-1 text-xs font-bold px-2 py-1.5 rounded-full text-slate-500 flex items-center justify-center gap-1"><i data-lucide="repeat" class="icon" style="width:14px;height:14px;"></i> Cambios</button>
+      </div>
+      <div class="relative mb-3">
+        <input id="drive-search" type="search" placeholder="Buscar archivo o fecha…" class="w-full bg-slate-100 text-slate-800 text-xs rounded-xl pl-8 pr-3 py-2 border border-slate-200 focus:outline-none focus:border-forest-500 placeholder-slate-500">
+        <i data-lucide="search" class="icon text-slate-400" style="width:14px;height:14px;position:absolute;left:10px;top:50%;transform:translateY(-50%);"></i>
+      </div>
+      <button id="btn-upload-pc" class="w-full mb-3 bg-forest-600 active:bg-forest-700 text-white font-semibold text-sm py-2.5 rounded-xl flex items-center justify-center gap-2">
+        <i data-lucide="upload" class="icon" style="width:16px;height:16px;"></i> Cargar archivo desde la PC
+      </button>
+      <div id="drive-files-list" class="space-y-2"></div>
+      <p class="text-slate-400 text-xs mt-2 text-center">
+        Subí tus archivos ZPL / CSV / Excel a la carpeta
+        <span class="text-slate-500 font-semibold">📁 PARKA Despacho</span> en tu Drive
+      </p>
+    </div>
+
+    <!-- file-input kept hidden for Drive-loaded file processing -->
+    <input type="file" id="file-input" accept=".csv,.xlsx,.xls,.txt" multiple class="hidden">
+
+    <!-- File preview (hidden until file selected) -->
+    <div id="file-preview" class="hidden flex flex-col gap-4">
+
+      <!-- ZPL success card (shown when ZPL detected, hides column mapping) -->
+      <div id="zpl-card" class="hidden bg-green-50 border border-green-300 rounded-2xl p-4">
+        <div class="flex items-center gap-3 mb-3">
+          <div class="w-11 h-11 rounded-xl bg-green-100 flex items-center justify-center flex-shrink-0">
+            <i data-lucide="zap" class="icon text-green-700" style="width:22px;height:22px;"></i>
+          </div>
+          <div class="flex-1 min-w-0">
+            <p id="file-name" class="text-slate-800 font-semibold text-sm truncate"></p>
+            <p id="file-rows" class="text-green-700 text-xs mt-0.5 font-semibold"></p>
+          </div>
+          <button id="btn-change-file" class="text-forest-600 text-xs font-semibold active:opacity-70 flex-shrink-0">Cambiar</button>
+        </div>
+        <p class="text-green-700 text-sm font-medium mb-2 flex items-center gap-1.5"><i data-lucide="check-circle-2" class="icon"></i> Etiquetas ZPL detectadas</p>
+        <p class="text-slate-500 text-xs">Datos extraídos automáticamente: Tracking, Venta ID, Comprador, Producto y SKU.</p>
+        <!-- ZPL preview items -->
+        <div id="zpl-preview" class="mt-3 space-y-2"></div>
+      </div>
+
+      <!-- CSV/Excel column mapping card (shown for spreadsheet files) -->
+      <div id="csv-card" class="hidden bg-white border border-slate-200 rounded-2xl p-4">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="w-11 h-11 rounded-xl bg-forest-50 flex items-center justify-center flex-shrink-0">
+            <i data-lucide="file-spreadsheet" class="icon text-forest-600" style="width:22px;height:22px;"></i>
+          </div>
+          <div class="flex-1 min-w-0">
+            <p id="csv-file-name" class="text-slate-800 font-semibold text-sm truncate"></p>
+            <p id="csv-file-rows" class="text-slate-500 text-xs mt-0.5"></p>
+          </div>
+          <button id="btn-change-file-csv" class="text-forest-600 text-xs font-semibold active:opacity-70 flex-shrink-0">Cambiar</button>
+        </div>
+
+        <p class="text-slate-500 text-xs font-semibold uppercase tracking-widest mb-3">Mapeo de columnas</p>
+        <div class="space-y-3">
+          <div>
+            <label class="text-xs text-slate-600 mb-1 block">
+              📮 N° de Envío / Tracking <span class="text-red-600">*</span>
+              <span class="text-slate-400 ml-1">(columna clave para el escaneo)</span>
+            </label>
+            <select id="col-tracking" class="w-full bg-slate-100 text-slate-800 text-sm rounded-xl p-3 border border-slate-200 focus:outline-none focus:border-forest-500"></select>
+          </div>
+          <div>
+            <label class="text-xs text-slate-600 mb-1 block">🏷 ID de Venta <span class="text-slate-400">(opcional)</span></label>
+            <select id="col-venta" class="w-full bg-slate-100 text-slate-800 text-sm rounded-xl p-3 border border-slate-200 focus:outline-none focus:border-forest-500"></select>
+          </div>
+          <div>
+            <label class="text-xs text-slate-600 mb-1 block">👤 Comprador <span class="text-slate-400">(opcional)</span></label>
+            <select id="col-comprador" class="w-full bg-slate-100 text-slate-800 text-sm rounded-xl p-3 border border-slate-200 focus:outline-none focus:border-forest-500"></select>
+          </div>
+          <div>
+            <label class="text-xs text-slate-600 mb-1 block">📦 Producto / SKU <span class="text-slate-400">(opcional)</span></label>
+            <select id="col-producto" class="w-full bg-slate-100 text-slate-800 text-sm rounded-xl p-3 border border-slate-200 focus:outline-none focus:border-forest-500"></select>
+          </div>
+        </div>
+
+        <!-- Preview table -->
+        <div class="mt-4 rounded-xl overflow-x-auto bg-forest-50 p-2">
+          <p class="text-slate-400 text-xs font-semibold uppercase tracking-widest mb-2">Vista previa (3 filas)</p>
+          <div id="preview-table" class="text-xs text-slate-600"></div>
+        </div>
+      </div>
+
+      <button id="btn-begin-day" class="w-full bg-emerald-600 active:bg-emerald-700 text-white font-bold text-lg py-3.5 rounded-2xl shadow-lg mb-2 flex items-center justify-center gap-2">
+        <i data-lucide="calendar-plus" class="icon"></i> Comenzar día
+      </button>
+      <button id="btn-start" class="w-full bg-forest-600 active:bg-forest-700 text-white font-bold text-lg py-3.5 rounded-2xl shadow-lg flex items-center justify-center gap-2">
+        <i data-lucide="rocket" class="icon"></i> Iniciar Despacho
+      </button>
+    </div>
+
+    <!-- ── Historial de sesiones (desde el servidor) ── -->
+    <div id="history-zone" class="hidden bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+      <div class="flex items-center justify-between mb-3">
+        <p class="text-slate-700 text-sm font-semibold flex items-center gap-2"><i data-lucide="history" class="icon text-forest-600"></i> Historial de sesiones</p>
+        <button id="btn-clear-history" class="text-red-600 text-xs font-semibold active:opacity-60 flex items-center gap-1"><i data-lucide="trash-2" class="icon" style="width:14px;height:14px;"></i> Borrar</button>
+      </div>
+      <div id="history-list" class="space-y-2"></div>
+    </div>
+
+    <!-- ── Historial de despachos finalizados (local, con vista previa) ── -->
+    <div id="despacho-history-zone" class="hidden bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+      <div class="flex items-center justify-between mb-3">
+        <p class="text-slate-700 text-sm font-semibold flex items-center gap-2"><i data-lucide="package-check" class="icon text-forest-600"></i> Historial de despachos</p>
+        <button id="btn-clear-despacho-log" class="text-red-600 text-xs font-semibold active:opacity-60 flex items-center gap-1"><i data-lucide="trash-2" class="icon" style="width:14px;height:14px;"></i> Borrar</button>
+      </div>
+      <div id="despacho-history-list" class="space-y-2"></div>
+    </div>
+
+    <!-- ── Google Drive Sync ── -->
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+      <div class="flex items-center gap-3 mb-3">
+        <div class="w-10 h-10 rounded-xl bg-forest-50 flex items-center justify-center flex-shrink-0">
+          <i data-lucide="cloud" class="icon text-forest-600" style="width:20px;height:20px;"></i>
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-slate-800 font-semibold text-sm">Google Drive Sync</p>
+          <p class="text-slate-500 text-xs">Guarda sesiones en la nube — acceso desde cualquier red</p>
+        </div>
+        <div id="gdrive-status-dot" class="w-2.5 h-2.5 rounded-full bg-slate-200 flex-shrink-0"></div>
+      </div>
+      <div id="gdrive-disconnected-panel">
+        <input id="gdrive-url-input" type="url"
+               placeholder="URL del Apps Script (termina en /exec)"
+               class="w-full bg-slate-100 text-slate-800 text-xs rounded-xl px-3 py-2.5 mb-2 border border-slate-200 focus:outline-none focus:border-forest-500 placeholder-slate-500">
+        <div class="flex gap-2 mb-1">
+          <button id="btn-gdrive-connect"
+                  class="flex-1 bg-forest-600 active:bg-forest-700 text-white font-bold py-2.5 rounded-xl text-sm">
+            Conectar
+          </button>
+          <button id="btn-gdrive-test"
+                  class="bg-slate-100 active:bg-slate-200 text-slate-600 font-semibold py-2.5 px-3 rounded-xl text-xs flex items-center gap-1"
+                  title="Probar script en el navegador">
+            <i data-lucide="search" class="icon" style="width:14px;height:14px;"></i> Test
+          </button>
+        </div>
+        <p class="text-slate-400 text-xs mt-1 text-center">
+          Configurá un Apps Script en Google Sheets.
+          <button id="btn-gdrive-help" class="text-forest-600 underline ml-1">¿Cómo?</button>
+        </p>
+        <p class="text-slate-400 text-xs text-center mt-0.5">El botón 🔍 Test abre el script en el navegador para verificar que funciona</p>
+      </div>
+      <div id="gdrive-connected-panel" class="hidden">
+        <div class="flex items-center gap-2 mb-3">
+          <span class="text-green-600 text-xl leading-none">●</span>
+          <div class="flex-1 min-w-0">
+            <p class="text-green-600 text-sm font-semibold">Conectado a Google Drive</p>
+            <p id="gdrive-url-display" class="text-slate-400 text-xs truncate"></p>
+          </div>
+        </div>
+        <button id="btn-gdrive-disconnect"
+                class="w-full bg-slate-100 active:bg-slate-200 text-red-600 font-semibold py-2 rounded-xl text-xs">
+          Desconectar
+        </button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     SCREEN 2: SCANNER
+══════════════════════════════════════════ -->
+<div id="screen-scanner" class="screen">
+
+  <!-- ── Top bar ── -->
+  <div class="bg-white border-b border-slate-200 px-4 py-2 flex items-center gap-3 flex-shrink-0">
+    <div class="flex-1 min-w-0">
+      <p id="hdr-filename" class="text-slate-800 font-bold text-sm truncate">Despacho</p>
+      <p id="hdr-progress" class="text-slate-500 text-xs">0 / 0 despachados</p>
+    </div>
+    <!-- Progress bar -->
+    <div class="w-24 bg-slate-100 rounded-full h-1.5 flex-shrink-0">
+      <div id="progress-bar" class="progress-bar h-1.5 rounded-full" style="width:0%; background: linear-gradient(90deg,#43592d,#6a8c47)"></div>
+    </div>
+    <div class="flex items-center gap-1.5 flex-shrink-0" title="Sincronización en tiempo real">
+      <div id="sync-dot" class="w-2 h-2 rounded-full bg-slate-200"></div>
+    </div>
+    <button id="btn-menu" class="text-slate-500 px-1 active:text-slate-800" aria-label="Menú"><i data-lucide="more-vertical" class="icon" style="width:22px;height:22px;"></i></button>
+  </div>
+
+  <!-- ── Stats bar ── -->
+  <div class="bg-white border-b border-slate-200 px-4 py-2.5 flex items-center justify-around flex-shrink-0">
+    <div class="text-center min-w-0">
+      <p class="text-2xl font-black text-slate-800 leading-none" id="stat-total">0</p>
+      <p class="text-slate-400 text-xs mt-0.5 font-semibold uppercase tracking-wider">Total</p>
+    </div>
+    <div class="w-px h-8 bg-slate-100 flex-shrink-0"></div>
+    <div class="text-center min-w-0">
+      <p class="text-2xl font-black text-amber-600 leading-none" id="stat-pending">0</p>
+      <p class="text-slate-400 text-xs mt-0.5 font-semibold uppercase tracking-wider">Pendientes</p>
+    </div>
+    <div class="w-px h-8 bg-slate-100 flex-shrink-0"></div>
+    <div class="text-center min-w-0">
+      <p class="text-2xl font-black text-emerald-600 leading-none" id="stat-dispatched">0</p>
+      <p class="text-slate-400 text-xs mt-0.5 font-semibold uppercase tracking-wider">Despachados</p>
+    </div>
+    <div class="w-px h-8 bg-slate-100 flex-shrink-0"></div>
+    <div class="text-center min-w-0">
+      <p class="text-2xl font-black text-forest-600 leading-none" id="stat-pct">0%</p>
+      <p class="text-slate-400 text-xs mt-0.5 font-semibold uppercase tracking-wider">Avance</p>
+    </div>
+  </div>
+
+  <!-- ── Scan mode toggle ── -->
+  <div class="bg-white border-b border-slate-200 px-3 py-2 flex items-center justify-center gap-3 flex-shrink-0">
+    <span class="text-slate-400 text-xs font-semibold uppercase tracking-wider">Modo escáner:</span>
+    <div class="flex bg-slate-100 rounded-full p-0.5 gap-0.5">
+      <button id="btn-mode-barcode" class="text-xs font-bold px-4 py-1.5 rounded-full bg-forest-600 text-white">
+        ▬ Barras
+      </button>
+      <button id="btn-mode-qr" class="text-xs font-bold px-4 py-1.5 rounded-full text-slate-500">
+        ▣ QR
+      </button>
+    </div>
+  </div>
+  <!-- ── Camera area ── -->
+  <div class="relative bg-black flex-shrink-0" id="camera-wrapper" style="height: 42dvh; height: 42vh;">
+    <div id="qr-reader" style="width:100%; height:100%;"></div>
+
+    <!-- Camera-idle overlay: default state — the camera only turns on from "Iniciar Despacho" -->
+    <div id="cam-activate-overlay" class="absolute inset-0 bg-slate-900/95 flex flex-col items-center justify-center z-30">
+      <div class="w-16 h-16 rounded-full bg-white/10 flex items-center justify-center mb-4">
+        <i data-lucide="camera-off" class="icon text-white" style="width:32px;height:32px;"></i>
+      </div>
+      <p class="text-white font-bold text-xl mb-2">Cámara apagada</p>
+      <p class="text-slate-300 text-sm text-center px-10">Se enciende automáticamente al presionar<br>"Iniciar Despacho"</p>
+    </div>
+
+    <!-- Corner frame overlay -->
+    <div class="scan-overlay">
+      <div class="scan-frame">
+        <span></span>
+        <div class="scan-line"></div>
+      </div>
+    </div>
+
+    <!-- Paused overlay -->
+    <div id="paused-overlay" class="hidden absolute inset-0 bg-black/85 flex flex-col items-center justify-center z-20">
+      <div class="w-14 h-14 rounded-full bg-white/10 flex items-center justify-center mb-3">
+        <i id="paused-overlay-icon" data-lucide="pause-circle" class="icon text-white" style="width:28px;height:28px;"></i>
+      </div>
+      <p class="text-white font-bold text-xl mb-1">Escáner pausado</p>
+      <p class="text-slate-500 text-sm mb-6">La cámara está detenida</p>
+      <button id="btn-resume-cam" class="bg-forest-600 active:bg-forest-700 text-white font-bold px-10 py-4 rounded-2xl text-base">
+        ▶ Reanudar cámara
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Status banner ── -->
+  <div class="bg-white px-3 py-2 flex-shrink-0" style="min-height: 72px;">
+    <div id="status-banner" class="banner-animate rounded-xl px-4 py-2.5 bg-slate-600 flex items-center gap-3">
+      <span id="banner-icon" class="text-2xl flex-shrink-0">📷</span>
+      <div class="min-w-0">
+        <p id="banner-title" class="text-white font-bold text-sm leading-tight">Apuntá la cámara a un código QR o de barras</p>
+        <p id="banner-sub1" class="text-white/70 text-xs mt-0.5 truncate hidden"></p>
+        <p id="banner-sub2" class="text-white/50 text-xs truncate hidden"></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Manual input bar ── -->
+  <div id="manual-input-bar" class="bg-white border-t border-slate-200 px-3 py-2 flex gap-2 flex-shrink-0">
+    <input id="manual-input" type="text" inputmode="numeric" placeholder="Ingresá tracking manualmente…"
+      class="flex-1 bg-slate-100 text-slate-800 text-sm rounded-xl px-3 py-2.5 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-forest-500 border border-slate-200">
+    <button id="btn-manual-send" class="bg-forest-600 active:bg-forest-700 text-white font-bold px-4 rounded-xl text-sm">OK</button>
+  </div>
+
+  <!-- ── Tabs ── -->
+  <div id="scanner-list-tabs" class="flex bg-white border-b border-slate-200 flex-shrink-0 items-center">
+    <button id="tab-pending"    class="tab-btn active"   onclick="App.switchTab('pending')">
+      Pendientes <span id="badge-pending" class="ml-1 bg-slate-200 text-slate-700 text-xs font-bold px-1.5 py-0.5 rounded-full">0</span>
+    </button>
+    <button id="tab-dispatched" class="tab-btn" onclick="App.switchTab('dispatched')">
+      Despachados <span id="badge-dispatched" class="ml-1 bg-slate-200 text-slate-700 text-xs font-bold px-1.5 py-0.5 rounded-full">0</span>
+    </button>
+    <button id="btn-list-expand" class="flex-shrink-0 px-3 py-2 text-slate-400 active:text-slate-700" aria-label="Ver en pantalla completa" title="Ver en pantalla completa">
+      <i data-lucide="maximize-2" class="icon" style="width:18px;height:18px;"></i>
+    </button>
+  </div>
+
+  <!-- ── List area ── -->
+  <div id="scanner-list-area" class="scroll-area bg-white pb-24" style="padding-bottom: calc(6rem + env(safe-area-inset-bottom));">
+    <div id="list-pending"></div>
+    <div id="list-dispatched" class="hidden"></div>
+  </div>
+
+  <!-- Hidden input for adding more files to active session -->
+  <input type="file" id="file-input-add" accept=".csv,.xlsx,.xls,.txt" multiple class="hidden">
+
+  <!-- ── Secondary actions popup (toggled by the + button) ── -->
+  <div id="fab-menu" class="hidden fixed bottom-24 left-3 z-50 flex flex-col gap-1 bg-white border border-slate-200 rounded-2xl shadow-2xl p-2 min-w-[210px]">
+    <button id="btn-add-files" class="w-full text-left px-3 py-2.5 rounded-xl text-sm font-semibold text-slate-700 active:bg-slate-100 flex items-center gap-2.5">
+      <i data-lucide="file-plus-2" class="icon text-forest-600" style="width:18px;height:18px;"></i> Agregar archivos
+    </button>
+    <button id="btn-manual-toggle" class="w-full text-left px-3 py-2.5 rounded-xl text-sm font-semibold text-slate-700 active:bg-slate-100 flex items-center gap-2.5" title="Entrada manual">
+      <i data-lucide="keyboard" class="icon text-forest-600" style="width:18px;height:18px;"></i> Entrada manual
+    </button>
+    <button id="btn-scanner-hid" class="w-full text-left px-3 py-2.5 rounded-xl text-sm font-semibold text-slate-700 active:bg-slate-100 flex items-center gap-2.5" title="Pistola láser USB activa">
+      <i data-lucide="scan-line" class="icon text-forest-600" style="width:18px;height:18px;"></i> Pistola láser USB
+    </button>
+    <button id="btn-export" class="w-full text-left px-3 py-2.5 rounded-xl text-sm font-semibold text-slate-700 active:bg-slate-100 flex items-center gap-2.5">
+      <i data-lucide="download" class="icon text-forest-600" style="width:18px;height:18px;"></i> Exportar reporte
+    </button>
+  </div>
+
+  <!-- ── Bottom action bar: primary dispatch controls + secondary menu toggle ── -->
+  <div class="fixed bottom-0 inset-x-0 z-40 bg-white border-t border-slate-200 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] px-3 py-3 flex items-center gap-2" style="padding-bottom: calc(0.75rem + env(safe-area-inset-bottom));">
+    <button id="btn-fab-toggle" class="flex-shrink-0 bg-white active:bg-slate-100 border border-slate-200 text-slate-600 w-12 h-12 rounded-full shadow-sm flex items-center justify-center" aria-label="Más acciones">
+      <i data-lucide="plus" class="icon" style="width:22px;height:22px;"></i>
+    </button>
+    <button id="btnIniciar" class="flex-1 bg-forest-600 active:bg-forest-700 text-white font-bold py-3.5 rounded-2xl shadow-lg flex items-center justify-center gap-2 text-sm">
+      <i data-lucide="rocket" class="icon"></i> Iniciar Despacho
+    </button>
+    <button id="btnFinalizar" disabled class="flex-1 bg-amber-500 active:bg-amber-600 text-black font-bold py-3.5 rounded-2xl shadow-lg flex items-center justify-center gap-2 text-sm opacity-40 cursor-not-allowed">
+      <i data-lucide="check-circle" class="icon"></i> Finalizar Despacho
+    </button>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════════
+     DROPDOWN MENU (floating)
+══════════════════════════════════════════ -->
+<div id="menu-panel" class="hidden fixed inset-0 z-100" style="z-index:150;">
+  <div id="menu-backdrop" class="absolute inset-0" onclick="App.closeMenu()"></div>
+  <div class="absolute top-14 right-3 bg-white border border-slate-200 rounded-2xl shadow-2xl min-w-[190px] overflow-hidden">
+    <button id="menu-pause" class="w-full text-left px-4 py-3.5 text-sm text-slate-700 hover:bg-slate-100 active:bg-slate-100 font-semibold border-b border-slate-200 flex items-center gap-2">
+      <i id="menu-pause-icon" data-lucide="pause" class="icon" style="width:16px;height:16px;"></i>
+      <span id="menu-pause-label">Pausar cámara</span>
+    </button>
+    <button onclick="App.confirmReset()" class="w-full text-left px-4 py-3.5 text-sm text-red-600 hover:bg-slate-100 active:bg-slate-100 font-semibold flex items-center gap-2">
+      <i data-lucide="log-out" class="icon" style="width:16px;height:16px;"></i> Cerrar sesión
+    </button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     CONFIRM DIALOG
+══════════════════════════════════════════ -->
+<div id="confirm-dialog" class="hidden confirm-backdrop">
+  <div class="confirm-sheet">
+    <p id="confirm-title" class="text-slate-800 font-bold text-lg mb-1">¿Cerrar sesión?</p>
+    <p id="confirm-body" class="text-slate-500 text-sm mb-6">Exportá el reporte antes si lo necesitás. Los datos se borrarán.</p>
+    <button id="confirm-ok" class="w-full bg-red-600 active:bg-red-700 text-white font-bold py-4 rounded-xl text-base mb-3">Cerrar sesión</button>
+    <button id="confirm-cancel" class="w-full bg-slate-100 active:bg-slate-200 text-slate-600 font-semibold py-4 rounded-xl text-base">Cancelar</button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     CONFIRM FINALIZAR CON PENDIENTES
+══════════════════════════════════════════ -->
+<div id="finalizar-pendientes-dialog" class="hidden confirm-backdrop">
+  <div class="confirm-sheet">
+    <p class="text-slate-800 font-bold text-lg mb-1">¿Finalizar con pendientes?</p>
+    <p id="finalizar-pendientes-body" class="text-slate-500 text-sm mb-6">Quedan paquetes sin despachar.</p>
+    <button id="finalizar-pendientes-ok" class="w-full bg-amber-600 active:bg-amber-700 text-white font-bold py-4 rounded-xl text-base mb-3">Finalizar de todos modos</button>
+    <button id="finalizar-pendientes-cancel" class="w-full bg-slate-100 active:bg-slate-200 text-slate-600 font-semibold py-4 rounded-xl text-base">Seguir escaneando</button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     DESPACHO PREVIEW MODAL (Historial → Ver detalles)
+══════════════════════════════════════════ -->
+<div id="despacho-preview-dialog" class="hidden confirm-backdrop">
+  <div class="confirm-sheet" style="max-height: 78vh; display: flex; flex-direction: column;">
+    <div class="flex items-center justify-between mb-1 flex-shrink-0">
+      <p id="despacho-preview-title" class="text-slate-800 font-bold text-lg truncate pr-2">Despacho</p>
+      <button id="despacho-preview-close" class="text-slate-400 active:text-slate-600 flex-shrink-0" aria-label="Cerrar">
+        <i data-lucide="x" class="icon" style="width:22px;height:22px;"></i>
+      </button>
+    </div>
+    <p id="despacho-preview-sub" class="text-slate-500 text-sm mb-3 flex-shrink-0"></p>
+    <div id="despacho-preview-list" class="flex-1 overflow-y-auto space-y-2"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     SELECCIONAR TIPO DE DESPACHO (Flex/Colecta)
+══════════════════════════════════════════ -->
+<div id="select-tipo-dialog" class="hidden confirm-backdrop">
+  <div class="confirm-sheet">
+    <p class="text-slate-800 font-bold text-lg mb-1">¿Qué tipo de despacho?</p>
+    <p class="text-slate-500 text-sm mb-6">Selecciona el tipo para cargar los archivos correspondientes</p>
+    <button id="tipo-colecta-btn" style="background-color:#2563eb" class="w-full active:opacity-80 text-white font-bold py-4 rounded-xl text-base mb-3 flex items-center justify-center gap-2">
+      <i data-lucide="barcode" class="icon"></i> Colecta (Códigos de barras)
+    </button>
+    <button id="tipo-flex-btn" style="background-color:#7c3aed" class="w-full active:opacity-80 text-white font-bold py-4 rounded-xl text-base flex items-center justify-center gap-2">
+      <i data-lucide="qr-code" class="icon"></i> Flex (Códigos QR)
+    </button>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════
+     JAVASCRIPT
+══════════════════════════════════════════ -->
+<script>
+'use strict';
+
+// ─────────────────────────────────────────────
+// CONSTANTS & STATE
+// ─────────────────────────────────────────────
+const LS_KEY = 'parka_despacho_v2';
+let state = null;
+let scanner = null;
+let scannerRunning = false;
+let scannerStarting = false;
+let scanMode = 'barcode'; // 'barcode' or 'qr'
+// Despacho session
+let currentDespacho = [];
+let despachoActive  = false;
+let dispatchType = null; // 'flex' o 'colecta'
+// Persistencia del tipo de despacho (Flex/Colecta) — sobrevive a refrescos y
+// a la restauracion de sesion, para que el reporte SIEMPRE se guarde en la
+// carpeta correcta (Flex/ o Colecta/).
+const DISPATCH_TYPE_KEY = 'parka_dispatch_type';
+function persistDispatchType(t) {
+  if (t === 'flex' || t === 'colecta' || t === 'tiendanube' || t === 'cambios') localStorage.setItem(DISPATCH_TYPE_KEY, t);
+  else localStorage.removeItem(DISPATCH_TYPE_KEY);
+}
+function restoreDispatchType() {
+  const t = localStorage.getItem(DISPATCH_TYPE_KEY);
+  if (t === 'flex' || t === 'colecta' || t === 'tiendanube' || t === 'cambios') dispatchType = t;
+  return dispatchType;
+}
+// Resuelve el tipo efectivo con fallbacks (memoria -> sesion -> storage).
+function resolveDispatchType() {
+  return dispatchType
+      || (state && state.dispatchType)
+      || restoreDispatchType()
+      || 'flex';
+}
+// Tipo seleccionado para navegar/cargar archivos en Drive (Flex vs Colecta).
+let driveTipo = (function(){ var t = localStorage.getItem(DISPATCH_TYPE_KEY); return (t === 'colecta' || t === 'tiendanube' || t === 'cambios') ? t : 'flex'; })();
+let driveSearchQuery = '';
+
+let currentTab = 'pending';
+let audioCtx = null;
+let lastScanRaw = '';
+let lastScanTime = 0;
+let parsedFile = null;   // temp while on setup screen
+let listExpanded = false; // full-screen list toggle
+
+// ─────────────────────────────────────────────
+// PERSISTENCE  (localStorage + servidor / Google Drive)
+// Prioridad: Google Drive > servidor local > localStorage
+// ─────────────────────────────────────────────
+const API_SESSION = '/api/session';
+const API_HISTORY = '/api/history';
+let serverAvailable = false;
+
+// ── Google Drive (Apps Script backend) ────────
+const GDRIVE_URL_KEY = 'parka_gdrive_url';
+// URL fija del Apps Script — así cualquier dispositivo que abra la app
+// ya guarda los despachos en Drive automáticamente, sin tener que
+// configurar "Google Drive Sync" a mano en cada celular.
+const DEFAULT_GDRIVE_URL = 'https://script.google.com/macros/s/AKfycbwP_qnW67-sO-EMCyZSVStCkRXCXtNT7mDE-l-z6vqGFbmZVumhMf7KBTxMiXfZeu-X/exec';
+
+const GDRIVE_DISABLED_SENTINEL = '__DISABLED__';
+function getGDriveUrl() {
+  const stored = localStorage.getItem(GDRIVE_URL_KEY);
+  if (stored === GDRIVE_DISABLED_SENTINEL) return ''; // explícitamente desconectado en este dispositivo
+  return stored || DEFAULT_GDRIVE_URL;
+}
+function setGDriveUrl(url) {
+  if (url) localStorage.setItem(GDRIVE_URL_KEY, url.trim());
+  else localStorage.setItem(GDRIVE_URL_KEY, GDRIVE_DISABLED_SENTINEL);
+}
+
+async function gdriveGet(action, params) {
+  const url = getGDriveUrl();
+  if (!url) return null;
+  try {
+    let qs = '?action=' + encodeURIComponent(action);
+    if (params) {
+      for (const [k, v] of Object.entries(params)) {
+        if (k === '_ts') continue; // el anti-caché se agrega siempre abajo
+        qs += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(v);
+      }
+    }
+    // Anti-caché en TODAS las consultas (Apps Script cachea las respuestas GET por URL):
+    // así 'getFile' trae siempre el contenido actualizado y 'listFiles' la lista fresca.
+    qs += '&_ts=' + Date.now();
+    const r = await fetch(url + qs, { cache: 'no-store' });
+    if (!r.ok) return null;
+    const data = await r.json();
+    if (data && data.error) { console.warn('GDrive:', data.error); return null; }
+    return data;
+  } catch (e) { console.warn('gdriveGet:', e); return null; }
+}
+
+async function gdrivePost(action, data, tipo) {
+  const url = getGDriveUrl();
+  if (!url) return false;
+  try {
+    // text/plain avoids CORS preflight — Apps Script doesn't respond to OPTIONS
+    const body = { action, data };
+    if (tipo) body.tipo = tipo;
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(body),
+      redirect: 'follow',
+    });
+    return true;
+  } catch (e) { console.warn('gdrivePost:', e); return false; }
+}
+
+async function testGDriveUrl(url) {
+  try {
+    const r = await fetch(url + '?action=ping', { cache: 'no-store', redirect: 'follow' });
+    if (!r.ok) { console.warn('GDrive ping HTTP', r.status); return { ok: false, reason: 'HTTP ' + r.status }; }
+    let d;
+    try { d = await r.json(); } catch (je) { return { ok: false, reason: 'Respuesta no JSON — verificá que el deployment es "Web app"' }; }
+    if (d && d.ok === true) return { ok: true };
+    return { ok: false, reason: 'Apps Script no respondió ok:true — revisá el código del script' };
+  } catch (e) {
+    console.warn('GDrive ping error:', e);
+    const msg = String(e);
+    if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) return { ok: false, reason: 'Sin conexión o CORS — el deployment debe ser "Anyone"' };
+    return { ok: false, reason: msg.slice(0, 100) };
+  }
+}
+
+function updateGDriveUI() {
+  const url = getGDriveUrl();
+  const $dis = document.getElementById('gdrive-disconnected-panel');
+  const $con = document.getElementById('gdrive-connected-panel');
+  const $dot = document.getElementById('gdrive-status-dot');
+  const $disp = document.getElementById('gdrive-url-display');
+  if (!$dis) return; // not on setup screen
+  if (url) {
+    $dis.classList.add('hidden');
+    $con.classList.remove('hidden');
+    const short = url.replace('https://script.google.com/macros/s/', '').slice(0, 36);
+    $disp.textContent = short + '…';
+    $dot.className = 'w-2.5 h-2.5 rounded-full bg-green-500 flex-shrink-0';
+  } else {
+    $con.classList.add('hidden');
+    $dis.classList.remove('hidden');
+    $dot.className = 'w-2.5 h-2.5 rounded-full bg-slate-200 flex-shrink-0';
+  }
+}
+
+// ── Drive file browser (agrupado por día) ─────
+const EXT_ICON = { txt:'file-text', csv:'file-spreadsheet', xlsx:'file-spreadsheet', xls:'file-spreadsheet' };
+
+function fmtSize(b) {
+  if (b < 1024)       return b + ' B';
+  if (b < 1048576)    return (b/1024).toFixed(1)    + ' KB';
+  return (b/1048576).toFixed(1) + ' MB';
+}
+
+// Selección múltiple de archivos en el browser de Drive (por carpeta/día)
+const driveSelection = new Set(); // guarda "date::fileId"
+
+// Filtra la lista de archivos de Drive por nombre o fecha, y expande las carpetas con coincidencias.
+function filterDriveFiles() {
+  const list = document.getElementById('drive-files-list');
+  if (!list) return;
+  const q = (driveSearchQuery || '').trim().toLowerCase();
+  list.querySelectorAll('.drive-folder-group').forEach(function(group) {
+    const header = group.querySelector('.drive-folder-toggle');
+    const dateText = header ? header.textContent.toLowerCase() : '';
+    const body = group.querySelector('.drive-folder-body');
+    const chevron = header ? header.querySelector('.folder-chevron') : null;
+    let anyVisible = false;
+    group.querySelectorAll('.drive-file-row').forEach(function(row) {
+      const btn = row.querySelector('.drive-file-btn');
+      const name = (btn && btn.dataset.fileName ? btn.dataset.fileName : '').toLowerCase();
+      const match = !q || name.indexOf(q) !== -1 || dateText.indexOf(q) !== -1;
+      row.style.display = match ? '' : 'none';
+      if (match) anyVisible = true;
+    });
+    if (!q) {
+      group.style.display = '';
+      if (body) body.classList.add('hidden');
+      if (chevron) chevron.setAttribute('data-lucide', 'chevron-right');
+    } else {
+      group.style.display = anyVisible ? '' : 'none';
+      if (body && anyVisible) body.classList.remove('hidden');
+      if (chevron && anyVisible) chevron.setAttribute('data-lucide', 'chevron-down');
+    }
+  });
+  if (window.lucide) lucide.createIcons();
+}
+
+function updateDriveTipoUI() {
+  const map = { colecta: ['btn-drive-colecta', '#2563eb'], flex: ['btn-drive-flex', '#7c3aed'], tiendanube: ['btn-drive-tiendanube', '#0d9488'], cambios: ['btn-drive-cambios', '#c2410c'] };
+  Object.keys(map).forEach(function(k) {
+    const id = map[k][0], color = map[k][1];
+    const b = document.getElementById(id);
+    if (!b) return;
+    if (driveTipo === k) { b.style.backgroundColor = color; b.style.color = '#fff'; b.classList.remove('text-slate-500'); }
+    else { b.style.backgroundColor = ''; b.style.color = ''; b.classList.add('text-slate-500'); }
+  });
+}
+
+// Cambia el tipo del navegador de archivos y recarga la lista de esa carpeta.
+// Mantiene el tipo de despacho en sync para que todo quede coherente.
+function setDriveTipo(tipo) {
+  driveTipo = tipo;
+  dispatchType = tipo;
+  persistDispatchType(tipo);
+  updateDriveTipoUI();
+  if (typeof despachoActive === 'undefined' || !despachoActive) setDespachoUI('idle');
+  loadDriveFiles();
+}
+
+async function loadDriveFiles() {
+  const zone = document.getElementById('drive-files-zone');
+  const list = document.getElementById('drive-files-list');
+  if (!zone) return;
+  if (!getGDriveUrl()) { zone.classList.add('hidden'); return; }
+
+  zone.classList.remove('hidden');
+  list.innerHTML = '<p class="text-slate-400 text-xs text-center py-3 animate-pulse">Buscando archivos en Drive…</p>';
+  driveSelection.clear();
+
+  const resp = await gdriveGet('listFiles', { tipo: driveTipo, _ts: Date.now() });
+  // Support both old array format and new { rootFolderUrl, groups } format
+  let groups, rootFolderUrl;
+  if (Array.isArray(resp)) {
+    groups = resp; rootFolderUrl = null;
+  } else if (resp && Array.isArray(resp.groups)) {
+    groups = resp.groups; rootFolderUrl = resp.rootFolderUrl;
+  } else {
+    list.innerHTML = '<p class="text-red-600 text-xs text-center py-3">No se pudo acceder a Drive — verificá el deployment</p>';
+    return;
+  }
+
+  // En modo Tienda Nube solo se leen CSV/Excel (no los .txt de Mercado Libre)
+  if (driveTipo === 'tiendanube') {
+    const okExt = ['csv', 'xlsx', 'xls'];
+    groups = groups.map(function(g) {
+      return Object.assign({}, g, { files: (g.files || []).filter(function(f) {
+        return okExt.indexOf((f.name.split('.').pop() || '').toLowerCase()) !== -1;
+      }) });
+    });
+  }
+
+  const today    = new Date().toISOString().slice(0, 10);
+  const hasFiles = groups.some(g => g.files && g.files.length > 0);
+
+  // Show folder link for diagnostics
+  const folderLinkHtml = rootFolderUrl
+    ? `<div class="mb-3 text-center"><a href="${rootFolderUrl}" target="_blank" class="text-forest-600 text-xs underline">📂 Ver carpeta PARKA Despacho en Drive</a></div>`
+    : '';
+
+  if (!hasFiles) {
+    list.innerHTML = folderLinkHtml + `
+      <div class="bg-slate-50 rounded-xl p-4 text-center">
+        <p class="text-slate-500 text-sm mb-1">Sin archivos todavía</p>
+        <p class="text-slate-400 text-xs">
+          ${driveTipo === 'tiendanube' ? 'Subí tu CSV de ventas de Tienda Nube a la carpeta de hoy:' : 'Subí tus archivos ZPL / CSV a la carpeta de hoy en Drive:'}<br>
+          <span class="text-forest-600 font-semibold">📁 PARKA Despacho / ${driveTipo === 'flex' ? 'Flex' : (driveTipo === 'tiendanube' ? 'TiendaNube' : 'Colecta')} / ${today}</span>
+        </p>
+      </div>`;
+    return;
+  }
+
+  // Carpetas SIEMPRE arrancan contraídas (colapsadas), sin importar si es hoy.
+  list.innerHTML = folderLinkHtml + groups.map((group, gi) => {
+    const isToday  = group.date === today;
+    const hasFiles = group.files && group.files.length > 0;
+
+    // Header del grupo — clickeable para expandir/contraer
+    const headerColor = isToday ? 'text-forest-600' : 'text-slate-500';
+    const label       = isToday
+      ? `<span class="bg-forest-100 text-forest-700 text-xs font-bold px-2 py-0.5 rounded-full border border-forest-300 mr-1">HOY</span>${group.date}`
+      : `📁 ${group.date}`;
+
+    const header = `
+      <button class="drive-folder-toggle w-full flex items-center gap-2 mb-2 text-left" data-gi="${gi}">
+        <i data-lucide="chevron-right" class="icon folder-chevron ${headerColor}" style="width:16px;height:16px;"></i>
+        <span class="text-xs font-bold ${headerColor} flex items-center gap-1">${label}</span>
+        <div class="flex-1 h-px bg-slate-100"></div>
+        <span class="text-slate-600 text-xs">${hasFiles ? group.files.length + ' archivo' + (group.files.length !== 1 ? 's' : '') : 'vacía'}</span>
+      </button>`;
+
+    if (!hasFiles) return `<div class="mb-3">${header}</div>`;
+
+    const allFileIds  = group.files.map(f => f.id).join(',');
+    const allFileNames = group.files.map(f => f.name).join(',');
+    const loadAllBtn = group.files.length > 1
+      ? `<button class="drive-load-all-btn w-full bg-forest-700 active:bg-forest-800 text-white font-bold
+                        rounded-2xl px-4 py-3 text-sm flex items-center justify-center gap-2 mb-2"
+                data-file-ids="${allFileIds}" data-file-names="${allFileNames}">
+           ➕ Cargar todos (${group.files.length} archivos)
+         </button>`
+      : '';
+
+    const loadSelectedBtn = `<button class="drive-load-selected-btn hidden w-full bg-forest-600 active:bg-forest-700 text-white font-bold
+                        rounded-2xl px-4 py-3 text-sm flex items-center justify-center gap-2 mb-2"
+                data-gi="${gi}">
+           ➕ Cargar seleccionados (<span class="sel-count">0</span>)
+         </button>`;
+
+    const filesHTML = group.files.map((f, fi) => {
+      const ext  = f.name.split('.').pop().toLowerCase();
+      const icon = EXT_ICON[ext] || 'file';
+      const time = new Date(f.modifiedAt).toLocaleTimeString('es-AR', { hour:'2-digit', minute:'2-digit' });
+      return `
+        <div class="drive-file-row w-full bg-white border border-slate-200
+                     rounded-2xl px-3 py-3 flex items-center gap-3">
+          <input type="checkbox" class="drive-file-checkbox w-5 h-5 flex-shrink-0 accent-forest-600"
+                 data-gi="${gi}" data-file-id="${f.id}" data-file-name="${f.name}">
+          <button class="drive-file-btn flex-1 min-w-0 flex items-center gap-3 text-left"
+                  data-file-id="${f.id}" data-file-name="${f.name}">
+            <div class="w-9 h-9 rounded-lg bg-forest-50 flex items-center justify-center flex-shrink-0">
+              <i data-lucide="${icon}" class="icon text-forest-600" style="width:18px;height:18px;"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-slate-800 font-semibold text-sm truncate">${f.name}</p>
+              <p class="text-slate-500 text-xs mt-0.5">${fmtSize(f.size)} · ${time}</p>
+            </div>
+          </button>
+          <button class="drive-file-load drive-lbl text-forest-600 text-sm font-bold flex-shrink-0 active:opacity-60" data-file-id="${f.id}" data-file-name="${f.name}">Cargar →</button>
+        </div>`;
+    }).join('');
+
+    return `<div class="mb-4 drive-folder-group" data-gi="${gi}">${header}
+      <div class="drive-folder-body hidden" data-gi="${gi}">
+        ${loadAllBtn}${loadSelectedBtn}<div class="space-y-2">${filesHTML}</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  // Toggle de carpetas (contraer/expandir) — arrancan todas contraídas
+  list.querySelectorAll('.drive-folder-toggle').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const gi = btn.dataset.gi;
+      const body = list.querySelector(`.drive-folder-body[data-gi="${gi}"]`);
+      const chevron = btn.querySelector('.folder-chevron');
+      if (!body) return;
+      const isHidden = body.classList.toggle('hidden');
+      if (chevron) chevron.setAttribute('data-lucide', isHidden ? 'chevron-right' : 'chevron-down');
+      if (window.lucide) lucide.createIcons();
+    });
+  });
+
+  list.querySelectorAll('.drive-file-btn').forEach(btn => {
+    btn.addEventListener('click', () =>
+      loadFileFromDrive(btn.dataset.fileId, btn.dataset.fileName, btn));
+  });
+  list.querySelectorAll('.drive-file-load').forEach(btn => {
+    btn.addEventListener('click', () =>
+      loadFileFromDrive(btn.dataset.fileId, btn.dataset.fileName, btn));
+  });
+
+  list.querySelectorAll('.drive-load-all-btn').forEach(btn => {
+    btn.addEventListener('click', () => loadAllDriveFiles(btn));
+  });
+
+  // Selección múltiple con checkboxes
+  list.querySelectorAll('.drive-file-checkbox').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const key = cb.dataset.gi + '::' + cb.dataset.fileId;
+      if (cb.checked) driveSelection.add(key); else driveSelection.delete(key);
+      const gi = cb.dataset.gi;
+      const selBtn = list.querySelector(`.drive-load-selected-btn[data-gi="${gi}"]`);
+      if (selBtn) {
+        const count = Array.from(driveSelection).filter(k => k.startsWith(gi + '::')).length;
+        selBtn.querySelector('.sel-count').textContent = count;
+        selBtn.classList.toggle('hidden', count === 0);
+      }
+    });
+  });
+
+  list.querySelectorAll('.drive-load-selected-btn').forEach(btn => {
+    btn.addEventListener('click', () => loadSelectedDriveFiles(btn, groups));
+  });
+
+  if (window.lucide) lucide.createIcons();
+  filterDriveFiles();
+}
+
+async function loadFileFromDrive(fileId, fileName, btn) {
+  const lbl = btn ? btn.closest('.drive-file-row')?.querySelector('.drive-lbl') : null;
+  if (lbl) { lbl.textContent = '⏳'; }
+  if (btn) { btn.disabled = true; }
+  toast('⏳ Descargando desde Drive…', 'info', 60000);
+
+  const fd = await gdriveGet('getFile', { fileId });
+  if (!fd || fd.error) {
+    toast('❌ No se pudo descargar el archivo', 'error');
+    if (lbl) { lbl.textContent = 'Cargar →'; }
+    if (btn) { btn.disabled = false; }
+    return;
+  }
+
+  let file;
+  if (fd.type === 'text') {
+    file = new File([new Blob([fd.content], { type: 'text/plain' })], fd.name);
+  } else {
+    const bin = atob(fd.content);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    file = new File([new Blob([arr], { type: fd.mimeType })], fd.name);
+  }
+
+  document.getElementById('toast').classList.remove('show');
+  await handleFile(file);
+  if (lbl) { lbl.textContent = 'Cargar →'; }
+  if (btn) { btn.disabled = false; }
+}
+
+async function loadAllDriveFiles(btn) {
+  const ids   = btn.dataset.fileIds.split(',');
+  const names = btn.dataset.fileNames.split(',');
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Cargando…';
+
+  // Fetch all files from Drive
+  const fileObjects = [];
+  for (let i = 0; i < ids.length; i++) {
+    toast('⏳ Descargando ' + names[i] + '…', 'info', 8000);
+    const fd = await gdriveGet('getFile', { fileId: ids[i] });
+    if (!fd || fd.error) {
+      toast('❌ No se pudo descargar ' + names[i], 'error', 3000);
+      continue;
+    }
+    let file;
+    if (fd.type === 'text') {
+      file = new File([new Blob([fd.content], { type: 'text/plain' })], fd.name);
+    } else {
+      const bin = atob(fd.content);
+      const arr = new Uint8Array(bin.length);
+      for (let j = 0; j < bin.length; j++) arr[j] = bin.charCodeAt(j);
+      file = new File([new Blob([arr], { type: fd.mimeType })], fd.name);
+    }
+    fileObjects.push(file);
+  }
+
+  document.getElementById('toast').classList.remove('show');
+
+  if (fileObjects.length === 0) {
+    btn.disabled = false;
+    btn.innerHTML = '➕ Cargar todos (' + ids.length + ' archivos)';
+    return;
+  }
+
+  if (state) {
+    // Session already active: merge all files in
+    await addFilesToSession(fileObjects);
+  } else {
+    // No active session: start with first file, merge rest
+    await handleFile(fileObjects[0]);
+    if (fileObjects.length > 1) {
+      window._pendingExtraFiles = fileObjects.slice(1);
+    }
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = '✅ Cargados';
+}
+
+async function loadSelectedDriveFiles(btn, groups) {
+  const gi = btn.dataset.gi;
+  const keys = Array.from(driveSelection).filter(k => k.startsWith(gi + '::'));
+  if (keys.length === 0) return;
+  const group = groups[parseInt(gi)];
+  const selectedIds = keys.map(k => k.split('::')[1]);
+  const selectedFiles = group.files.filter(f => selectedIds.includes(f.id));
+
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Cargando…';
+
+  const fileObjects = [];
+  for (const f of selectedFiles) {
+    toast('⏳ Descargando ' + f.name + '…', 'info', 8000);
+    const fd = await gdriveGet('getFile', { fileId: f.id });
+    if (!fd || fd.error) {
+      toast('❌ No se pudo descargar ' + f.name, 'error', 3000);
+      continue;
+    }
+    let file;
+    if (fd.type === 'text') {
+      file = new File([new Blob([fd.content], { type: 'text/plain' })], fd.name);
+    } else {
+      const bin = atob(fd.content);
+      const arr = new Uint8Array(bin.length);
+      for (let j = 0; j < bin.length; j++) arr[j] = bin.charCodeAt(j);
+      file = new File([new Blob([arr], { type: fd.mimeType })], fd.name);
+    }
+    fileObjects.push(file);
+  }
+
+  document.getElementById('toast').classList.remove('show');
+
+  if (fileObjects.length === 0) {
+    btn.disabled = false;
+    btn.innerHTML = '➕ Cargar seleccionados (<span class="sel-count">' + keys.length + '</span>)';
+    return;
+  }
+
+  if (state) {
+    await addFilesToSession(fileObjects);
+  } else {
+    await handleFile(fileObjects[0]);
+    if (fileObjects.length > 1) window._pendingExtraFiles = fileObjects.slice(1);
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = '✅ Cargados';
+}
+
+// ── localStorage ──────────────────────────────
+function loadState() {
+  try { return JSON.parse(localStorage.getItem(LS_KEY)); }
+  catch { return null; }
+}
+
+// ── save / clear / load — routed by backend ───
+function saveState() {
+  if (!state) return;
+  localStorage.setItem(LS_KEY, JSON.stringify(state));
+  if (getGDriveUrl()) {
+    gdrivePost('saveSession', state);
+  } else {
+    fetch(API_SESSION, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(state),
+    }).catch(() => {});
+  }
+}
+
+function clearState() {
+  localStorage.removeItem(LS_KEY);
+  state = null;
+  dispatchType = null;
+  persistDispatchType(null);
+  if (getGDriveUrl()) {
+    gdrivePost('clearSession', null);
+  } else {
+    fetch(API_SESSION, { method: 'DELETE' }).catch(() => {});
+  }
+}
+
+async function loadServerSession() {
+  if (getGDriveUrl()) {
+    const data = await gdriveGet('session');
+    return (data && data.packages && data.packages.length > 0) ? data : null;
+  }
+  try {
+    const r = await fetch(API_SESSION, { cache: 'no-store' });
+    if (!r.ok) return null;
+    const data = await r.json();
+    serverAvailable = true;
+    return (data && data.packages && data.packages.length > 0) ? data : null;
+  } catch { return null; }
+}
+
+async function loadHistory() {
+  if (getGDriveUrl()) return (await gdriveGet('history')) || [];
+  try {
+    const r = await fetch(API_HISTORY, { cache: 'no-store' });
+    if (!r.ok) return [];
+    return await r.json();
+  } catch { return []; }
+}
+
+async function clearHistory() {
+  if (getGDriveUrl()) {
+    await gdrivePost('clearHistory', null);
+  } else {
+    await fetch(API_HISTORY, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '[]',
+    }).catch(() => {});
+  }
+  renderHistory([]);
+}
+
+function renderHistory(list) {
+  const zone = document.getElementById('history-zone');
+  const container = document.getElementById('history-list');
+  if (!list || list.length === 0) {
+    zone.classList.add('hidden');
+    return;
+  }
+  zone.classList.remove('hidden');
+  container.innerHTML = list.map((s, i) => {
+    const done  = (s.packages || []).filter(p => p.estado === 'despachado').length;
+    const total = (s.packages || []).length;
+    const pct   = total > 0 ? Math.round(done / total * 100) : 0;
+    const date  = s._archivedAt
+      ? new Date(s._archivedAt).toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })
+      : '';
+    const allDone = done === total && total > 0;
+    return `
+      <button class="history-item w-full bg-white active:bg-slate-100 border border-slate-200
+                     rounded-2xl px-4 py-3 text-left flex items-center gap-3"
+              data-idx="${i}">
+        <div class="flex-1 min-w-0">
+          <p class="text-slate-800 text-sm font-semibold truncate">${s.fileName || 'Sesión'}</p>
+          <p class="text-slate-500 text-xs mt-0.5">${date}</p>
+          <div class="mt-1.5 flex items-center gap-2">
+            <div class="flex-1 bg-slate-100 rounded-full h-1.5">
+              <div class="bg-forest-500 h-1.5 rounded-full" style="width:${pct}%"></div>
+            </div>
+            <span class="text-xs ${allDone ? 'text-green-600' : 'text-slate-500'} font-semibold flex-shrink-0">
+              ${done}/${total}
+            </span>
+          </div>
+        </div>
+        <span class="text-slate-400 text-lg flex-shrink-0">›</span>
+      </button>`;
+  }).join('');
+
+  container.querySelectorAll('.history-item').forEach(btn => {
+    btn.addEventListener('click', () => {
+      loadHistory().then(hist => {
+        const idx = parseInt(btn.dataset.idx);
+        const s   = hist[idx];
+        if (!s) return;
+        state = { fileName: s.fileName, startedAt: s.startedAt, packages: s.packages };
+        // Save as active session
+        localStorage.setItem(LS_KEY, JSON.stringify(state));
+        if (getGDriveUrl()) {
+          gdrivePost('saveSession', state);
+        } else {
+          fetch(API_SESSION, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(state),
+          }).catch(() => {});
+        }
+        showScreen('screen-scanner');
+        refreshUI();
+        toast(`📂 Sesión restaurada — ${s.fileName || ''}`, 'ok', 3000);
+      });
+    });
+  });
+}
+
+// ─────────────────────────────────────────────
+// HISTORIAL DE DESPACHOS (finalizados con éxito)
+// Guardado 100% local (localStorage) — cada "Finalizar Despacho"
+// exitoso agrega un registro con los items realmente escaneados,
+// para poder verlos en una vista previa más adelante.
+// ─────────────────────────────────────────────
+const DESPACHO_LOG_KEY = 'parka_despacho_log';
+const DESPACHO_LOG_MAX = 50;
+
+function loadDespachoLog() {
+  try { return JSON.parse(localStorage.getItem(DESPACHO_LOG_KEY)) || []; }
+  catch { return []; }
+}
+
+function saveDespachoLog(record) {
+  const log = loadDespachoLog();
+  log.unshift(record);
+  if (log.length > DESPACHO_LOG_MAX) log.length = DESPACHO_LOG_MAX;
+  localStorage.setItem(DESPACHO_LOG_KEY, JSON.stringify(log));
+  renderDespachoHistory();
+}
+
+function renderDespachoHistory() {
+  const zone = document.getElementById('despacho-history-zone');
+  const container = document.getElementById('despacho-history-list');
+  if (!zone || !container) return;
+  const log = loadDespachoLog();
+  if (log.length === 0) {
+    zone.classList.add('hidden');
+    return;
+  }
+  zone.classList.remove('hidden');
+  container.innerHTML = log.map((d, i) => {
+    const date = d.ts ? new Date(d.ts).toLocaleString('es-AR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '';
+    const dest = d.savedTo === 'drive' ? 'Drive' : 'Local';
+    return `
+      <div class="w-full bg-white border border-slate-200 rounded-2xl px-4 py-3 flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-green-100 flex items-center justify-center flex-shrink-0">
+          <i data-lucide="package-check" class="icon text-green-700" style="width:20px;height:20px;"></i>
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-slate-800 text-sm font-semibold truncate">${d.fileName || d.savedFileName || 'Despacho'}</p>
+          <p class="text-slate-400 text-xs mt-0.5">${date} · ${d.count} paquete${d.count !== 1 ? 's' : ''} · ${dest}</p>
+        </div>
+        <button class="despacho-preview-btn text-forest-600 text-xs font-bold flex-shrink-0 flex items-center gap-1 px-2 py-1.5 rounded-lg active:bg-forest-50" data-idx="${i}">
+          <i data-lucide="eye" class="icon" style="width:14px;height:14px;"></i> Ver
+        </button>
+      </div>`;
+  }).join('');
+
+  container.querySelectorAll('.despacho-preview-btn').forEach(btn => {
+    btn.addEventListener('click', () => openDespachoPreview(parseInt(btn.dataset.idx)));
+  });
+
+  if (window.lucide) lucide.createIcons();
+}
+
+function openDespachoPreview(idx) {
+  const log = loadDespachoLog();
+  const d = log[idx];
+  if (!d) return;
+
+  const date = d.ts ? new Date(d.ts).toLocaleString('es-AR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '';
+  document.getElementById('despacho-preview-title').textContent = d.fileName || d.savedFileName || 'Despacho';
+  document.getElementById('despacho-preview-sub').textContent =
+    `${date} · ${d.count} paquete${d.count !== 1 ? 's' : ''} · guardado en ${d.savedTo === 'drive' ? 'Google Drive' : 'este dispositivo'}`;
+
+  const list = document.getElementById('despacho-preview-list');
+  const items = d.items || [];
+  list.innerHTML = items.length === 0
+    ? '<p class="text-center text-slate-400 py-8 text-sm">Sin detalle de artículos para este despacho</p>'
+    : items.map(it => `
+      <div class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5">
+        <p class="text-slate-800 text-sm font-semibold truncate">${it['Nombre de la Persona'] || '(sin comprador)'}</p>
+        <p class="text-slate-500 text-xs mt-0.5 font-mono">📮 ${it['Numero de Etiqueta'] || ''}</p>
+        <p class="text-slate-400 text-xs">${it['SKU Despachados'] || ''}${it['Cantidad de Prendas'] ? ' · x' + it['Cantidad de Prendas'] : ''}</p>
+      </div>`).join('');
+
+  document.getElementById('despacho-preview-dialog').classList.remove('hidden');
+  if (window.lucide) lucide.createIcons();
+}
+
+function closeDespachoPreview() {
+  document.getElementById('despacho-preview-dialog').classList.add('hidden');
+}
+
+// ─────────────────────────────────────────────
+// AUDIO  (Web Audio API — no files needed)
+// ─────────────────────────────────────────────
+function getAudioCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+function tone(freq, dur, type = 'sine', vol = 0.28) {
+  try {
+    const ctx = getAudioCtx();
+    const osc = ctx.createOscillator();
+    const g   = ctx.createGain();
+    osc.connect(g); g.connect(ctx.destination);
+    osc.type = type; osc.frequency.value = freq;
+    g.gain.setValueAtTime(vol, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+    osc.start(); osc.stop(ctx.currentTime + dur);
+  } catch {}
+}
+function beepOk()    { tone(880,.12); setTimeout(()=>tone(1320,.15),100); }
+function beepError() { tone(180,.45,'square',.22); }
+function beepWarn()  { tone(520,.18); setTimeout(()=>tone(390,.2),150); }
+
+// ─────────────────────────────────────────────
+// SERVER FILE LOADER
+// Fetches /api/files to list files available on the
+// server's folder — no upload from mobile needed.
+// ─────────────────────────────────────────────
+const EXT_ICONS = { '.txt':'file-text', '.csv':'file-spreadsheet', '.xlsx':'file-spreadsheet', '.xls':'file-spreadsheet' };
+
+async function loadServerFiles() {
+  const zone  = document.getElementById('server-files-zone');
+  const list  = document.getElementById('server-files-list');
+  // divider-or removed (local upload section eliminated)
+
+  list.innerHTML = '<p class="text-slate-400 text-xs text-center py-3">Buscando archivos...</p>';
+
+  try {
+    const res   = await fetch('/api/files', { cache: 'no-store' });
+    if (!res.ok) throw new Error('no api');
+    const files = await res.json();
+
+    // Filter to useful extensions, skip app files
+    const skipNames = new Set(['ejemplo_control.csv']);
+    const shown = files.filter(f => !skipNames.has(f.name));
+
+    if (shown.length === 0) {
+      list.innerHTML = `
+        <div class="bg-slate-50 rounded-xl p-4 text-center">
+          <p class="text-slate-500 text-sm">No hay archivos ZPL/CSV en la carpeta del servidor.</p>
+          <p class="text-slate-400 text-xs mt-1">Copiá tu archivo a la misma carpeta que <code class="text-forest-600">servidor_https.py</code></p>
+        </div>`;
+    } else {
+      list.innerHTML = shown.map(f => `
+        <button class="server-file-btn w-full bg-white active:bg-slate-100 border border-slate-200
+                       rounded-2xl px-4 py-4 flex items-center gap-3 text-left"
+                data-filename="${f.name}">
+          <div class="w-11 h-11 rounded-xl bg-forest-50 flex items-center justify-center flex-shrink-0">
+            <i data-lucide="${EXT_ICONS[f.ext] || 'file'}" class="icon text-forest-600" style="width:22px;height:22px;"></i>
+          </div>
+          <div class="flex-1 min-w-0">
+            <p class="text-slate-800 font-semibold text-sm truncate">${f.name}</p>
+            <p class="text-slate-500 text-xs mt-0.5">${fmtBytes(f.size)} · ${fmtDate(f.mtime)}</p>
+          </div>
+          <span class="text-forest-600 text-sm font-bold flex-shrink-0">Cargar →</span>
+        </button>`).join('');
+
+      // Wire up click handlers
+      list.querySelectorAll('.server-file-btn').forEach(btn => {
+        btn.addEventListener('click', () => loadFileFromServer(btn.dataset.filename));
+      });
+    }
+
+    zone.classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
+    // divider removed
+  } catch {
+    // Not running from our server (e.g. opened as local file) — hide the section
+    zone.classList.add('hidden');
+    // divider removed
+  }
+}
+
+async function loadFileFromServer(filename) {
+  const btn = document.querySelector(`[data-filename="${filename}"]`);
+  if (btn) { btn.textContent = '⏳ Cargando...'; btn.disabled = true; }
+
+  try {
+    const res = await fetch('/' + encodeURIComponent(filename), { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    const file = new File([blob], filename, { type: blob.type });
+    await handleFile(file);
+  } catch (err) {
+    toast('Error al cargar el archivo: ' + err.message, 'error');
+    if (btn) { btn.textContent = 'Cargar →'; btn.disabled = false; }
+  }
+}
+
+function fmtBytes(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+  return (b / 1024 / 1024).toFixed(1) + ' MB';
+}
+function fmtDate(epoch) {
+  return new Date(epoch * 1000).toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+}
+
+// ─────────────────────────────────────────────
+// ZPL PARSER
+// ─────────────────────────────────────────────
+
+/**
+ * Decode ZPL ^FH hex encoding: _2D → '-', _C3_A9 → 'é', etc.
+ * ML uses _XX where XX is the hex code of the character.
+ */
+function decodeZpl(s) {
+  if (!s) return '';
+  // Handle multi-byte UTF-8 sequences encoded as consecutive _XX pairs
+  const bytes = [];
+  let i = 0;
+  const chars = [];
+  // First pass: collect raw string with hex decoded
+  const decoded = s.replace(/_([0-9A-Fa-f]{2})/g, (_, hex) =>
+    String.fromCharCode(parseInt(hex, 16))
+  );
+  return decoded.trim();
+}
+
+/**
+ * Parse a ZPL file (one or multiple ^XA...^XZ label blocks).
+ * Returns array of package objects, or null if not ZPL.
+ * Uses 4 fallback strategies per field - works across all ML label versions.
+ */
+function parseZPL(text) {
+  // Strip UTF-8 BOM and normalize line endings
+  text = text.replace(/^﻿/, '');
+  text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+  const blocks = [];
+  const re = /\^XA([\s\S]*?)\^XZ/gi;
+  let m;
+  while ((m = re.exec(text)) !== null) blocks.push(m[1]);
+  if (blocks.length === 0) return null;
+
+  const packages = [];
+
+  blocks.forEach((block, idx) => {
+
+    // === TRACKING NUMBER — 4 fallback strategies ===
+    let trackingId = '';
+
+    // A: Code128 barcode — any orientation/height/params
+    // Matches: ^BC[letter],[any params]^FD[optional prefix]NUMBER^FS
+    if (!trackingId) {
+      const a = block.match(/\^BC[A-Z](?:,[^,\^]*){0,5}\^FD[^0-9\^]*([0-9]{6,15})\^FS/i);
+      if (a) trackingId = a[1];
+    }
+    // B: QR JSON payload — {"id":"NUMBER","t":"lm"}
+    if (!trackingId) {
+      const b = block.match(/"id"\s*:\s*"([0-9]{6,15})"/);
+      if (b) trackingId = b[1];
+    }
+    // C: AIM prefix >: or >8 in any ^FD field
+    if (!trackingId) {
+      const c = block.match(/\^FD>[:\x38]([0-9]{6,15})\^FS/);
+      if (c) trackingId = c[1];
+    }
+    // D: any ^FD with a standalone 8-15 digit number that is NOT a Venta ID
+    if (!trackingId) {
+      for (const n of block.matchAll(/\^FD([0-9]{8,15})\^FS/g)) {
+        const v = n[1];
+        if (!v.startsWith('2000')) { trackingId = v; break; }
+      }
+    }
+
+    if (!trackingId) return; // no tracking found in this label — skip
+
+    // === VENTA ID ===
+    let ventaId = '';
+    const vM = block.match(/\^FD(?:Venta:\s*)?20000\^FS[\s\S]*?\^FD([0-9]{11})\^FS/i);
+    if (vM) ventaId = '20000' + vM[1];
+
+    // === PRODUCTO ===
+    let producto = '';
+    for (const p of block.matchAll(/\^FB\d+,\d+[^)]*\^FH\^FD([^\^]{10,})\^FS/g)) {
+      const v = decodeZpl(p[1]);
+      if (!v.startsWith('Color:') && !v.startsWith('SKU:') &&
+          !v.startsWith('Remitente') && !v.startsWith('Despachar') &&
+          !v.startsWith('Recort')) {
+        producto = v; break;
+      }
+    }
+
+    // === SKU ===
+    let sku = '';
+    const skuM = block.match(/SKU:\s*([A-Za-z0-9_\-]+)/);
+    if (skuM) sku = decodeZpl(skuM[1]);
+
+    // === COMPRADOR ===
+    let comprador = '';
+    const cM = block.match(/\^FH\^FD([\w\xC0-\xFF][\w\xC0-\xFF\s]{3,50}?)\s*\([A-Z0-9_]{4,}\)\^FS/);
+    if (cM) comprador = decodeZpl(cM[1]);
+
+    packages.push({
+      idx: idx,
+      trackingId, ventaId, comprador,
+      producto: producto || sku || '',
+      sku,
+      estado: 'pendiente',
+      scannedAt: null,
+      scannedCode: null,
+    });
+  });
+
+  // ZPL structure detected but no tracking found — return diagnostic
+  if (packages.length === 0 && blocks.length > 0) {
+    return { _error: 'no_tracking', blocks: blocks.length };
+  }
+  return packages.length > 0 ? packages : null;
+}
+
+
+// ─────────────────────────────────────────────
+// FILE PARSING (CSV / Excel)
+// ─────────────────────────────────────────────
+function parseFile(file) {
+  return new Promise((res, rej) => {
+    const isCSV = /\.csv$/i.test(file.name);
+    const reader = new FileReader();
+    reader.onerror = () => rej(new Error('No se pudo leer el archivo'));
+    reader.onload = (e) => {
+      try {
+        let wb;
+        if (isCSV) {
+          wb = XLSX.read(e.target.result, { type: 'string', raw: false });
+        } else {
+          wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+        }
+        const ws   = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+        const headers = rows[0].map(h => String(h).trim());
+        const data    = rows.slice(1).filter(r => r.some(c => c !== ''));
+        if (data.length === 0) return rej(new Error('El archivo no contiene filas de datos'));
+        res({ headers, data, fileName: file.name });
+      } catch (err) {
+        rej(new Error('Error al procesar el archivo: ' + err.message));
+      }
+    };
+    isCSV ? reader.readAsText(file, 'UTF-8') : reader.readAsArrayBuffer(file);
+  });
+}
+
+function autoDetect(headers) {
+  const lc = headers.map(h => h.toLowerCase());
+  const find = (...kws) => {
+    for (const kw of kws) {
+      const i = lc.findIndex(h => h.includes(kw));
+      if (i >= 0) return headers[i];
+    }
+    return '';
+  };
+  return {
+    tracking:   find('envío','envio','tracking','seguimiento','shipment','n° envío','nro envio','ship_id'),
+    ventaId:    find('n° venta','n° de venta','venta','sale','orden','order_id','id venta'),
+    comprador:  find('comprador','buyer','nombre','cliente','customer'),
+    producto:   find('título','titulo','producto','artículo','articulo','product','item','sku','description'),
+  };
+}
+
+function readAsLatin1(file) {
+  return new Promise(function(resolve, reject) {
+    const r = new FileReader();
+    r.onload = function(e) { resolve(e.target.result); };
+    r.onerror = reject;
+    r.readAsText(file, 'ISO-8859-1');
+  });
+}
+
+function isTiendaNubeCSV(text) {
+  const firstLine = (text.split(/\r?\n/)[0] || '');
+  return firstLine.indexOf(';') !== -1 && /mero de orden/i.test(firstLine) && /tracking/i.test(firstLine);
+}
+
+function parseDelimited(text, delim) {
+  const rows = []; let row = []; let field = ''; let inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQ) {
+      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else inQ = false; }
+      else field += c;
+    } else {
+      if (c === '"') inQ = true;
+      else if (c === delim) { row.push(field); field = ''; }
+      else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+      else if (c === '\r') { /* skip */ }
+      else field += c;
+    }
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+function isTiendaNubeHeaders(headerArr) {
+  const j = (headerArr || []).map(function(c) { return String(c).trim().toLowerCase(); }).join('|');
+  return /mero de orden/.test(j) && /tracking/.test(j);
+}
+
+function parseTiendaNubeCSV(text) {
+  const rows = parseDelimited(text, ';');
+  if (rows.length < 2) return [];
+  return buildTiendaNubeFromRows(rows[0], rows.slice(1));
+}
+
+function buildTiendaNubeFromRows(headerArr, dataRows) {
+  const h = (headerArr || []).map(function(s) { return String(s).trim(); });
+  // Normaliza encabezados: ignora acentos/mojibake (Número, N�mero, Nãºmero -> nmero)
+  const normH = function(x) { return String(x).toLowerCase().replace(/[^a-z0-9]/g, ''); };
+  const idx = function(name) { return h.findIndex(function(c) { return normH(c) === normH(name); }); };
+  const iO = idx('Número de orden');
+  const iCE = idx('Nombre para el envío');
+  const iC = idx('Nombre del comprador');
+  const iSku = idx('SKU');
+  const iCant = idx('Cantidad del producto');
+  const iProd = idx('Nombre del producto');
+  const iTrk = idx('Código de tracking del envío');
+  const iMedio = idx('Medio de envío');
+  const iDir = idx('Dirección'); const iNum = idx('Número'); const iLoc = idx('Localidad'); const iCiu = idx('Ciudad'); const iCP = idx('Código postal');
+  const map = new Map();
+  for (let r = 0; r < dataRows.length; r++) {
+    const row = dataRows[r]; if (!row || row.length < 2) continue;
+    const orden = iO >= 0 ? (row[iO] || '').trim() : ''; if (!orden) continue;
+    if (!map.has(orden)) map.set(orden, { orden: orden, comprador: '', productos: [], skus: [], cantidad: 0, tnTracking: '', medioEnvio: '', direccion: '' });
+    const g = map.get(orden);
+    let compr = '';
+    if (iCE >= 0 && row[iCE] && row[iCE].trim() && row[iCE].trim().toLowerCase() !== 'no informado') compr = row[iCE].trim();
+    else if (iC >= 0) compr = (row[iC] || '').trim();
+    if (!g.comprador && compr) g.comprador = compr;
+    const sku = iSku >= 0 ? (row[iSku] || '').trim() : ''; if (sku && g.skus.indexOf(sku) === -1) g.skus.push(sku);
+    const prod = iProd >= 0 ? (row[iProd] || '').trim() : ''; if (prod && g.productos.indexOf(prod) === -1) g.productos.push(prod);
+    let cant = iCant >= 0 ? parseInt(row[iCant] || '0', 10) : 0; if (isNaN(cant)) cant = 0; g.cantidad += cant;
+    const trk = iTrk >= 0 ? (row[iTrk] || '').replace(/[="]/g, '').trim() : ''; if (trk && !g.tnTracking) g.tnTracking = trk;
+    if (iMedio >= 0 && !g.medioEnvio) g.medioEnvio = (row[iMedio] || '').trim();
+    if (iDir >= 0 && !g.direccion) {
+      const parts = [ (row[iDir] || '').trim(), (iNum >= 0 ? (row[iNum] || '').trim() : ''), (iLoc >= 0 ? (row[iLoc] || '').trim() : ''), (iCiu >= 0 ? (row[iCiu] || '').trim() : ''), (iCP >= 0 ? ('CP ' + (row[iCP] || '').trim()) : '') ];
+      g.direccion = parts.filter(function(x) { return x && x !== 'CP '; }).join(' ');
+    }
+  }
+  return Array.from(map.values()).map(function(g) {
+    return {
+      trackingId: g.orden, orderNum: parseInt(g.orden, 10) || 0, ventaId: g.orden,
+      comprador: g.comprador, producto: g.productos.join(' + '), sku: g.skus.join(', '),
+      cantidad: g.cantidad || 1, tnTracking: g.tnTracking, medioEnvio: g.medioEnvio, direccion: g.direccion,
+      estado: 'pendiente', scannedAt: null, scannedCode: null
+    };
+  }).sort(function(a, b) { return a.orderNum - b.orderNum; });
+}
+
+function findTnPackage(id) {
+  if (!state) return null;
+  const raw = String(id).trim();
+  let pkg = state.packages.find(function(p) { return String(p.trackingId).trim() === raw; });
+  if (pkg) return pkg;
+  const norm = function(x) { return String(x || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); };
+  const nid = norm(raw);
+  if (nid.length >= 6) {
+    pkg = state.packages.find(function(p) { const t = norm(p.tnTracking); return t && (t.indexOf(nid) === 0 || nid.indexOf(t) === 0); });
+    if (pkg) return pkg;
+  }
+  return null;
+}
+
+function renderTnCard(pkg) {
+  const done = pkg.estado === 'despachado';
+  const medio = pkg.medioEnvio ? ('<p class="text-slate-400 text-[11px] truncate">' + pkg.medioEnvio + '</p>') : '';
+  const skuLine = pkg.sku ? ('<p class="text-slate-500 text-xs truncate">' + pkg.sku + (pkg.cantidad > 1 ? '  ·  x' + pkg.cantidad : '') + '</p>') : '';
+  return '' +
+    '<div class="tn-card mx-3 my-2 ' + (done ? 'bg-green-50 border-green-200' : 'bg-white border-slate-200 active:bg-slate-50') + ' border rounded-2xl p-3 flex items-center gap-3" data-order="' + pkg.trackingId + '">' +
+      '<div class="w-7 h-7 rounded-lg border-2 ' + (done ? 'bg-green-600 border-green-600 text-white' : 'border-slate-300 text-transparent') + ' flex items-center justify-center flex-shrink-0 font-bold text-sm">' + (done ? '✓' : '') + '</div>' +
+      '<div class="flex-shrink-0 w-16 text-center">' +
+        '<p class="text-xl font-black ' + (done ? 'text-green-700' : 'text-slate-800') + ' leading-none">#' + pkg.trackingId + '</p>' +
+        '<p class="text-slate-400 text-[10px] mt-0.5 uppercase tracking-wider">orden</p>' +
+      '</div>' +
+      '<div class="flex-1 min-w-0">' +
+        '<p class="text-slate-800 font-semibold text-sm truncate">' + (pkg.comprador || '(sin nombre)') + '</p>' +
+        skuLine + medio +
+      '</div>' +
+      (done ? '<span class="text-green-600 text-xs font-bold flex-shrink-0">' + (pkg.manual ? '✋ MANUAL' : 'OK') + '</span>'
+            : '<button class="marcar-btn flex-shrink-0 bg-forest-600 active:bg-forest-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg" onclick="event.stopPropagation(); marcarManual(\'' + pkg.trackingId + '\')">✓ Marcar</button>') +
+    '</div>';
+}
+
+function buildPackages(headers, data, colMap) {
+  const idx = name => name ? headers.indexOf(name) : -1;
+  const iT = idx(colMap.tracking);
+  const iV = idx(colMap.ventaId);
+  const iC = idx(colMap.comprador);
+  const iP = idx(colMap.producto);
+
+  return data
+    .map((row, i) => ({
+      idx: i,
+      trackingId: iT >= 0 ? String(row[iT] ?? '').trim() : '',
+      ventaId:    iV >= 0 ? String(row[iV] ?? '').trim() : '',
+      comprador:  iC >= 0 ? String(row[iC] ?? '').trim() : '',
+      producto:   iP >= 0 ? String(row[iP] ?? '').trim() : '',
+      estado:     'pendiente',
+      scannedAt:  null,
+      scannedCode: null,
+    }))
+    .filter(p => p.trackingId);
+}
+
+// ─────────────────────────────────────────────
+// SCAN PROCESSING
+// ─────────────────────────────────────────────
+
+/**
+ * Extract the numeric tracking ID from whatever the scanner returns:
+ *   QR  → '{"id":"47383333425","t":"lm"}'  or  'LA,{"id":"47383333425","t":"lm"}'
+ *   Bar → '47383333425'  or  '>:47383333425'  or  '>847383333425'
+ */
+function extractId(raw) {
+  const s = raw.trim();
+
+  // 1. Pure JSON object  {"id":"47383333425","t":"lm"}
+  if (s.startsWith('{')) {
+    try { const j = JSON.parse(s); if (j.id) return String(j.id); } catch {}
+  }
+  // 2. ML QR prefix  "LA,{…}"  or  "LA {…}"
+  const m = s.match(/^LA[,\s]+(\{.+\})/i);
+  if (m) {
+    try { const j = JSON.parse(m[1]); if (j.id) return String(j.id); } catch {}
+  }
+  // 3. Code128 AIM prefix standard  "]C0", "]C1", "]C2"  (LCB8200 default)
+  if (/^\]C\d/.test(s)) return s.slice(3).trim();
+  // 4. Code128 AIM legacy  ">:" or ">8"
+  if (/^>[:\d]/.test(s)) return s.slice(2).trim();
+  // 5. Plain value
+  return s;
+}
+
+function processScan(raw) {
+  const now = Date.now();
+  // Debounce: same code within 2s → ignore
+  if (raw === lastScanRaw && now - lastScanTime < 2000) return;
+  lastScanRaw  = raw;
+  lastScanTime = now;
+
+  const id = extractId(raw);
+  if (!id || !state) return;
+
+  const pkg = (state.dispatchType === 'tiendanube') ? findTnPackage(id) : state.packages.find(p => p.trackingId === id);
+
+  if (!pkg) {
+    beepError();
+    showBanner('error', '❌ No encontrado',
+      `Código: ${id.length > 20 ? id.slice(0,20)+'…' : id}`,
+      'Este paquete no está en la lista de despacho');
+    return;
+  }
+
+  if (pkg.estado === 'despachado') {
+    beepWarn();
+    showBanner('warn', '⚠️ Ya fue despachado',
+      pkg.comprador || pkg.trackingId,
+      'Escaneado: ' + fmtTime(pkg.scannedAt));
+    return;
+  }
+
+  // OK SUCCESS
+  pkg.estado      = 'despachado';
+  pkg.scannedAt   = new Date().toISOString();
+  pkg.scannedCode = raw;
+  saveState();
+  beepOk();
+
+  // Track in current despacho period if active
+  if (despachoActive) {
+    currentDespacho.push({
+      'Paquetes Despachados': currentDespacho.length + 1,
+      'Numero de Etiqueta':   pkg.trackingId,
+      'Nombre de la Persona': pkg.comprador || '',
+      'Cantidad de Prendas':  pkg.cantidad  || 1,
+      'SKU Despachados':      pkg.sku || pkg.producto || '',
+    });
+  }
+
+  const done  = state.packages.filter(p => p.estado === 'despachado').length;
+  const total = state.packages.length;
+  showBanner('ok', `✅ Despachado! (${done}/${total})`,
+    pkg.comprador || pkg.trackingId,
+    pkg.producto  || pkg.ventaId    || '');
+  refreshUI();
+}
+
+// ─────────────────────────────────────────────
+// CONFIRMACIÓN MANUAL (PARKA Depósito): marcar la salida sin escanear
+// ─────────────────────────────────────────────
+function activarDespachoManual() {
+  if (despachoActive) return;
+  // Arranca el registro del despacho sin encender la cámara
+  if (state) { state.dispatchType = state.dispatchType || resolveDispatchType(); }
+  currentDespacho = [];
+  despachoActive  = true;
+  setDespachoUI('active');
+}
+
+function marcarManual(id, silencioso) {
+  if (!state) return false;
+  const pkg = (state.dispatchType === 'tiendanube') ? findTnPackage(id) : state.packages.find(p => p.trackingId === id);
+  if (!pkg || pkg.estado === 'despachado') return false;
+  activarDespachoManual();
+  pkg.estado      = 'despachado';
+  pkg.scannedAt   = new Date().toISOString();
+  pkg.scannedCode = 'MANUAL';
+  pkg.manual      = true;
+  currentDespacho.push({
+    'Paquetes Despachados': currentDespacho.length + 1,
+    'Numero de Etiqueta':   pkg.trackingId,
+    'Nombre de la Persona': pkg.comprador || '',
+    'Cantidad de Prendas':  pkg.cantidad  || 1,
+    'SKU Despachados':      pkg.sku || pkg.producto || '',
+  });
+  if (!silencioso) {
+    saveState();
+    beepOk();
+    const done = state.packages.filter(p => p.estado === 'despachado').length;
+    showBanner('ok', `✋ Salida manual (${done}/${state.packages.length})`,
+      pkg.comprador || pkg.trackingId, pkg.producto || pkg.sku || pkg.ventaId || '');
+    refreshUI();
+  }
+  return true;
+}
+
+let _confirmarTodosHasta = 0;
+function marcarTodosManual(btn) {
+  if (!state) return;
+  const pend = state.packages.filter(p => p.estado === 'pendiente');
+  if (!pend.length) return;
+  if (Date.now() > _confirmarTodosHasta) {        // primer toque: pedir confirmación
+    _confirmarTodosHasta = Date.now() + 4000;
+    btn.textContent = `¿Seguro? Tocá de nuevo para marcar ${pend.length}`;
+    btn.classList.remove("bg-slate-600"); btn.classList.add("bg-amber-500");
+    setTimeout(() => { if (Date.now() > _confirmarTodosHasta) refreshUI(); }, 4100);
+    return;
+  }
+  _confirmarTodosHasta = 0;
+  let n = 0;
+  pend.forEach(p => { if (marcarManual(p.trackingId, true)) n++; });
+  saveState();
+  beepOk();
+  showBanner('ok', `✋ ${n} salida${n !== 1 ? 's' : ''} marcada${n !== 1 ? 's' : ''} a mano`,
+    `${state.packages.filter(p => p.estado === 'despachado').length}/${state.packages.length} despachados`, '');
+  refreshUI();
+}
+
+function deshacerManual(id) {
+  if (!state) return;
+  const pkg = state.packages.find(p => p.trackingId === id);
+  if (!pkg || !pkg.manual) return;
+  pkg.estado = 'pendiente';
+  delete pkg.scannedAt; delete pkg.scannedCode; delete pkg.manual;
+  state._completionNotified = false;
+  currentDespacho = currentDespacho.filter(r => r['Numero de Etiqueta'] !== id);
+  currentDespacho.forEach((r, i) => { r['Paquetes Despachados'] = i + 1; });
+  saveState();
+  toast('Salida desmarcada', 'info', 2000);
+  refreshUI();
+}
+
+function barraManual(n) {
+  return '<div class="mx-3 mt-2 mb-1 flex items-center gap-2">' +
+    '<p class="flex-1 text-slate-500 text-xs">Sin escáner: tocá <b>✓ Marcar salida</b> en cada paquete</p>' +
+    '<button class="bg-slate-600 active:opacity-70 text-white text-xs font-bold px-3 py-2 rounded-lg" onclick="marcarTodosManual(this)">✓ Marcar todos (' + n + ')</button>' +
+  '</div>';
+}
+
+// ─────────────────────────────────────────────
+// BANNER
+// ─────────────────────────────────────────────
+const BANNER_COLORS = {
+  ok:    'bg-green-700',
+  error: 'bg-red-700',
+  warn:  'bg-amber-700',
+  idle:  'bg-slate-600',
+};
+const BANNER_ICONS = { ok:'✅', error:'❌', warn:'⚠️', idle:'📷' };
+
+function showBanner(type, title, sub1, sub2) {
+  const el = document.getElementById('status-banner');
+  el.className = `banner-animate rounded-xl px-4 py-2.5 ${BANNER_COLORS[type]||BANNER_COLORS.idle} flex items-center gap-3`;
+  // force reflow to replay animation
+  void el.offsetWidth;
+  el.className = `banner-animate rounded-xl px-4 py-2.5 ${BANNER_COLORS[type]||BANNER_COLORS.idle} flex items-center gap-3`;
+
+  const s1 = document.getElementById('banner-sub1');
+  const s2 = document.getElementById('banner-sub2');
+  document.getElementById('banner-icon').textContent  = BANNER_ICONS[type] || '📷';
+  document.getElementById('banner-title').textContent = title;
+  if (sub1) { s1.textContent = sub1; s1.classList.remove('hidden'); } else s1.classList.add('hidden');
+  if (sub2) { s2.textContent = sub2; s2.classList.remove('hidden'); } else s2.classList.add('hidden');
+}
+
+// ─────────────────────────────────────────────
+// LIST RENDERING
+// ─────────────────────────────────────────────
+function renderCard(pkg) {
+  const done  = pkg.estado === 'despachado';
+  const trk   = pkg.trackingId.length > 14 ? '···' + pkg.trackingId.slice(-12) : pkg.trackingId;
+  return `
+    <div class="mx-3 my-2 ${done ? 'bg-green-50 border-green-200' : 'bg-white border-slate-200'} border rounded-2xl p-4">
+      <div class="flex items-start justify-between gap-3">
+        <div class="flex-1 min-w-0">
+          <p class="text-slate-800 font-semibold text-sm truncate">${pkg.comprador || '(sin comprador)'}</p>
+          ${pkg.producto ? `<p class="text-slate-500 text-xs mt-0.5 truncate">${pkg.producto}</p>` : ''}
+          <p class="text-slate-400 text-xs mt-1 font-mono">📮 ${trk}</p>
+          ${pkg.ventaId   ? `<p class="text-slate-600 text-xs font-mono">🏷 ${pkg.ventaId}</p>` : ''}
+        </div>
+        <div class="flex-shrink-0 text-right">
+          ${done
+            ? `<span class="inline-block bg-green-100 text-green-700 text-xs font-bold px-2 py-1 rounded-lg">${pkg.manual ? '✋ MANUAL' : '✓ OK'}</span>
+               <p class="text-slate-400 text-xs mt-1">${fmtTime(pkg.scannedAt)}</p>
+               ${pkg.manual ? `<button class="text-xs text-red-600 underline mt-1" onclick="event.stopPropagation(); deshacerManual('${pkg.trackingId}')">Deshacer</button>` : ''}`
+            : `<span class="inline-block bg-amber-100 text-amber-700 text-xs font-bold px-2 py-1 rounded-lg">PENDIENTE</span>
+               <button class="marcar-btn block mt-2 bg-forest-600 active:bg-forest-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg" onclick="event.stopPropagation(); marcarManual('${pkg.trackingId}')">✓ Marcar salida</button>`
+          }
+        </div>
+      </div>
+    </div>`;
+}
+
+function refreshUI() {
+  if (!state) return;
+  const pending    = state.packages.filter(p => p.estado === 'pendiente');
+  const dispatched = state.packages.filter(p => p.estado === 'despachado');
+  const total      = state.packages.length;
+  const pct        = total > 0 ? (dispatched.length / total) * 100 : 0;
+  const pctRound   = Math.round(pct);
+
+  // Header
+  const srcCount = state.sourceFiles ? state.sourceFiles.length : 1;
+  const hdrName = srcCount > 1
+    ? (state.fileName || 'Despacho') + ' +' + (srcCount - 1) + ' mas'
+    : (state.fileName || 'Despacho');
+  document.getElementById('hdr-filename').textContent = hdrName;
+  document.getElementById('hdr-progress').textContent  = `${dispatched.length} / ${total} despachados`;
+  document.getElementById('progress-bar').style.width  = pct + '%';
+
+  // Stats bar
+  const $tot = document.getElementById('stat-total');
+  const $pen = document.getElementById('stat-pending');
+  const $dis = document.getElementById('stat-dispatched');
+  const $pct = document.getElementById('stat-pct');
+  if ($tot) $tot.textContent = total;
+  if ($pen) $pen.textContent = pending.length;
+  if ($dis) $dis.textContent = dispatched.length;
+  if ($pct) $pct.textContent = pctRound + '%';
+
+  // Completion notification
+  if (dispatched.length === total && total > 0 && !state._completionNotified) {
+    state._completionNotified = true;
+    saveState();
+    beepOk();
+    setTimeout(() => beepOk(), 280);
+    setTimeout(() => beepOk(), 560);
+    setTimeout(() => toast(`🎉 ¡Todos los ${total} paquetes despachados!`, 'ok', 6000), 200);
+  }
+
+  // Badges
+  document.getElementById('badge-pending').textContent    = pending.length;
+  document.getElementById('badge-dispatched').textContent = dispatched.length;
+
+  // Lists
+  const lp = document.getElementById('list-pending');
+  const ld = document.getElementById('list-dispatched');
+  const isTN = state.dispatchType === 'tiendanube';
+  const cardFn = isTN ? renderTnCard : renderCard;
+  const byOrder = (a, b) => (a.orderNum || parseInt(a.trackingId) || 0) - (b.orderNum || parseInt(b.trackingId) || 0);
+  const pendingArr    = isTN ? [...pending].sort(byOrder)    : pending;
+  const dispatchedArr = isTN ? [...dispatched].sort(byOrder) : [...dispatched].reverse();
+  lp.innerHTML = pendingArr.length
+    ? barraManual(pendingArr.length) + pendingArr.map(cardFn).join('')
+    : '<p class="text-center text-slate-400 py-14 text-base">🎉 ¡Todo despachado!</p>';
+  ld.innerHTML = dispatchedArr.length
+    ? dispatchedArr.map(cardFn).join('')
+    : '<p class="text-center text-slate-400 py-14 text-sm">Todavía no hay nada despachado</p>';
+}
+
+// ─────────────────────────────────────────────
+// TABS
+// ─────────────────────────────────────────────
+function switchTab(tab) {
+  currentTab = tab;
+  ['pending','dispatched'].forEach(t => {
+    const btn  = document.getElementById('tab-' + t);
+    const list = document.getElementById('list-' + t);
+    if (t === tab) {
+      btn.classList.add('active');
+      list.classList.remove('hidden');
+    } else {
+      btn.classList.remove('active');
+      list.classList.add('hidden');
+    }
+  });
+}
+
+// ─────────────────────────────────────────────
+// EXPAND / COLLAPSE de la lista (pantalla completa)
+// Al expandir: se oculta la cámara y todo lo demás para que la
+// lista de pendientes/despachados ocupe toda la pantalla.
+// Al contraer: vuelve a la vista normal del despacho.
+// ─────────────────────────────────────────────
+function toggleListExpand(forceValue) {
+  listExpanded = typeof forceValue === 'boolean' ? forceValue : !listExpanded;
+  const screen  = document.getElementById('screen-scanner');
+  const listArea = document.getElementById('scanner-list-area');
+  const btn     = document.getElementById('btn-list-expand');
+  const icon    = btn ? btn.querySelector('[data-lucide]') : null;
+
+  // Elementos que se ocultan cuando la lista está expandida
+  const toHide = [
+    'camera-wrapper',
+  ].map(id => document.getElementById(id))
+   .concat([screen.querySelector('.bg-white.border-b.border-slate-200.px-3.py-2.flex.items-center.justify-center')]) // scan mode toggle
+   .filter(Boolean);
+
+  const statusBannerWrap = document.querySelector('#screen-scanner > div.bg-white.px-3.py-2.flex-shrink-0');
+
+  if (listExpanded) {
+    toHide.forEach(el => el.classList.add('hidden'));
+    if (statusBannerWrap) statusBannerWrap.classList.add('hidden');
+    if (listArea) listArea.style.flex = '1 1 auto';
+    if (icon) icon.setAttribute('data-lucide', 'minimize-2');
+    if (btn) btn.title = 'Volver al despacho';
+  } else {
+    toHide.forEach(el => el.classList.remove('hidden'));
+    if (statusBannerWrap) statusBannerWrap.classList.remove('hidden');
+    if (icon) icon.setAttribute('data-lucide', 'maximize-2');
+    if (btn) btn.title = 'Ver en pantalla completa';
+  }
+  if (window.lucide) lucide.createIcons();
+}
+
+// ─────────────────────────────────────────────
+// CAMERA / SCANNER  (Android-hardened)
+// ─────────────────────────────────────────────
+async function startScanner(fromUserGesture = false) {
+  if (scannerStarting) return;
+  document.getElementById('paused-overlay').classList.add('hidden');
+
+  // Mobile: camera requires a user gesture. Without one, show tap overlay.
+  const activateOverlay = document.getElementById('cam-activate-overlay');
+  if (activateOverlay) {
+    if (!fromUserGesture) {
+      activateOverlay.classList.remove('hidden');
+      return;
+    }
+    activateOverlay.classList.add('hidden');
+  }
+
+  scannerStarting = true;
+
+  // Destruir instancia anterior y recrear el elemento DOM completamente
+  if (scanner) {
+    try { if (scannerRunning) await scanner.stop(); } catch {}
+    try { scanner.clear(); } catch {}
+    scanner = null;
+    scannerRunning = false;
+    await new Promise(r => setTimeout(r, 500));
+  }
+
+  // Recrear #qr-reader para limpiar cualquier estado interno de Html5Qrcode
+  const oldEl = document.getElementById('qr-reader');
+  if (oldEl && oldEl.parentNode) {
+    const newEl = document.createElement('div');
+    newEl.id = 'qr-reader';
+    newEl.className = oldEl.className;
+    oldEl.parentNode.replaceChild(newEl, oldEl);
+  }
+  await new Promise(r => setTimeout(r, 100));
+
+  // Crear instancia Html5Qrcode
+  try {
+    scanner = new Html5Qrcode('qr-reader', {
+      verbose: false,
+      experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+    });
+  } catch {
+    try { scanner = new Html5Qrcode('qr-reader', { verbose: false }); } catch {}
+  }
+  if (!scanner) { scannerStarting = false; showCamError('notfound', 'No se pudo inicializar el escáner'); return; }
+
+  const qrConfig = {
+    fps: 15,
+    qrbox: (w, h) => {
+      if (scanMode === 'qr') {
+        // Cuadrado centrado — ideal para QR
+        const side = Math.round(Math.min(w, h) * 0.75);
+        return { width: side, height: side };
+      } else {
+        // Rectángulo ancho y bajo — ideal para Code128/EAN/barcode
+        const bw = Math.round(w * 0.92);
+        const bh = Math.max(70, Math.round(h * 0.25));
+        return { width: bw, height: bh };
+      }
+    },
+    rememberLastUsedCamera: false,
+    aspectRatio: scanMode === 'qr' ? 1.0 : 1.7778, // 1:1 para QR, 16:9 para barras
+  };
+
+  // Probar cámaras en cascada
+  const cameraModes = [
+    { facingMode: { ideal: 'environment' } },
+    { facingMode: 'environment' },
+    {},
+  ];
+
+  let started = false;
+  let lastErr  = '';
+  for (const camConstraint of cameraModes) {
+    try {
+      await scanner.start(camConstraint, qrConfig,
+        (text) => processScan(text),
+        () => {}
+      );
+      started = true;
+      break;
+    } catch (e) {
+      lastErr = String(e);
+      if (e.name === 'NotAllowedError' || lastErr.includes('NotAllowedError') || lastErr.includes('Permission')) {
+        scannerStarting = false;
+        showCamError('permission');
+        return;
+      }
+      // "already under transition" — wait and retry once with a fresh instance
+      if (lastErr.includes('transition')) {
+        await new Promise(r => setTimeout(r, 800));
+        try {
+          const retryEl = document.getElementById('qr-reader');
+          if (retryEl && retryEl.parentNode) {
+            const fresh = document.createElement('div');
+            fresh.id = 'qr-reader';
+            fresh.className = retryEl.className;
+            retryEl.parentNode.replaceChild(fresh, retryEl);
+          }
+          scanner = new Html5Qrcode('qr-reader', { verbose: false });
+          await scanner.start(camConstraint, qrConfig, (text) => processScan(text), () => {});
+          started = true;
+          lastErr = '';
+        } catch (e2) { lastErr = String(e2); }
+        break;
+      }
+    }
+  }
+
+  scannerStarting = false;
+
+  if (!started) {
+    showCamError('notfound', lastErr);
+    return;
+  }
+
+  scannerRunning = true;
+  setMenuPauseLabel('Pausar cámara', 'pause');
+
+  // Android/iOS: add playsinline so video doesn't go fullscreen
+  setTimeout(() => {
+    const vid = document.querySelector('#qr-reader video');
+    if (vid) {
+      vid.setAttribute('playsinline', '');
+      vid.setAttribute('webkit-playsinline', '');
+      vid.muted = true;
+    }
+  }, 400);
+}
+
+function setPausedIcon(name) {
+  const icon = document.getElementById('paused-overlay-icon');
+  if (!icon) return;
+  icon.setAttribute('data-lucide', name);
+  if (window.lucide) lucide.createIcons();
+}
+
+function showCamError(type, detail = '') {
+  const overlay = document.getElementById('paused-overlay');
+  overlay.classList.remove('hidden');
+  const title = overlay.querySelector('.text-white.font-bold.text-xl');
+  const sub   = overlay.querySelector('.text-slate-500.text-sm');
+  const btn   = document.getElementById('btn-resume-cam');
+
+  if (type === 'permission') {
+    setPausedIcon('lock');
+    if (title) title.textContent = 'Sin permiso de cámara';
+    if (sub)   sub.textContent   = 'Tocá el ícono de candado en la barra de dirección → Permisos → Cámara → Permitir. Luego recargá.';
+    btn.textContent = '↺ Reintentar';
+  } else {
+    setPausedIcon('camera-off');
+    if (title) title.textContent = 'Cámara no disponible';
+    const hint = detail ? detail.replace(/^Error:\s*/i,'').slice(0,90) : 'Verificá que otra app no esté usando la cámara.';
+    if (sub)   sub.textContent   = hint + '  Podés usar entrada manual o la pistola USB.';
+    btn.textContent = '↺ Reintentar';
+  }
+}
+
+// ─────────────────────────────────────────────
+// CAMERA LIFECYCLE
+// La cámara se prende únicamente al presionar "Iniciar Despacho"
+// (ver iniciarDespacho) y se apaga/libera al presionar "Finalizar
+// Despacho" (ver finalizarDespacho) o al pausarla desde el menú.
+// ─────────────────────────────────────────────
+async function stopScannerAndRelease() {
+  if (scanner && scannerRunning) {
+    try { await scanner.stop(); } catch {}
+  }
+  scannerRunning = false;
+  document.getElementById('paused-overlay')?.classList.add('hidden');
+  document.getElementById('cam-activate-overlay')?.classList.remove('hidden');
+  setMenuPauseLabel('Pausar cámara', 'pause');
+}
+
+// ─────────────────────────────────────────────
+// TOAST
+// ─────────────────────────────────────────────
+let toastTimer = null;
+function toast(msg, type = 'info', dur = 3000) {
+  const t = document.getElementById('toast');
+  const b = document.getElementById('toast-body');
+  const colors = { info:'bg-slate-600', ok:'bg-green-700', error:'bg-red-700', warn:'bg-amber-700' };
+  b.className = `mx-3 mt-2 rounded-xl px-4 py-3 text-white font-bold text-center text-sm shadow-2xl ${colors[type] || colors.info}`;
+  b.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), dur);
+}
+
+// ─────────────────────────────────────────────
+// SCREEN NAVIGATION
+// ─────────────────────────────────────────────
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  // Start/stop real-time sync based on active screen
+  if (id === 'screen-scanner') startPolling();
+  else stopPolling();
+}
+
+// ─────────────────────────────────────────────
+// REAL-TIME SYNC  (polling cada 4s cuando está en la pantalla de escaneo)
+// Merge inteligente: si otro dispositivo despachó un paquete, se refleja aquí.
+// ─────────────────────────────────────────────
+let pollTimer    = null;
+let syncIndicator = false;
+const POLL_MS    = 4000;
+
+function startPolling() {
+  stopPolling();
+  pollTimer = setInterval(syncFromServer, POLL_MS);
+}
+function stopPolling() {
+  clearInterval(pollTimer);
+  pollTimer = null;
+}
+
+async function syncFromServer() {
+  if (!state) return;
+  try {
+    let remote;
+    if (getGDriveUrl()) {
+      remote = await gdriveGet('session');
+    } else {
+      const r = await fetch(API_SESSION, { cache: 'no-store' });
+      if (!r.ok) { setSyncDot('err'); return; }
+      remote = await r.json();
+    }
+    if (!remote || !Array.isArray(remote.packages)) return;
+
+    // Merge: un paquete despachado en cualquier dispositivo queda despachado
+    let changed = 0;
+    for (const rp of remote.packages) {
+      const lp = state.packages.find(p => p.trackingId === rp.trackingId);
+      if (!lp) continue;
+      if (lp.estado === 'pendiente' && rp.estado === 'despachado') {
+        lp.estado      = 'despachado';
+        lp.scannedAt   = rp.scannedAt;
+        lp.scannedCode = rp.scannedCode;
+        if (rp.manual) lp.manual = true;
+        changed++;
+      }
+    }
+
+    if (changed > 0) {
+      localStorage.setItem(LS_KEY, JSON.stringify(state));
+      refreshUI();
+      flashSyncDot(changed);
+    }
+    // Update sync dot to show connection is alive
+    setSyncDot('ok');
+  } catch {
+    setSyncDot('err');
+  }
+}
+
+function setSyncDot(status) {
+  const dot = document.getElementById('sync-dot');
+  if (!dot) return;
+  dot.className = status === 'ok'
+    ? 'w-2 h-2 rounded-full bg-green-400'
+    : 'w-2 h-2 rounded-full bg-red-400';
+}
+
+let flashSyncTimer = null;
+function flashSyncDot(n) {
+  const dot = document.getElementById('sync-dot');
+  if (!dot) return;
+  dot.className = 'w-2 h-2 rounded-full bg-blue-400 animate-ping';
+  clearTimeout(flashSyncTimer);
+  flashSyncTimer = setTimeout(() => setSyncDot('ok'), 800);
+  toast(`🔄 ${n} paquete${n !== 1 ? 's' : ''} actualizado${n !== 1 ? 's' : ''} desde otro dispositivo`, 'info', 2500);
+}
+
+// ─────────────────────────────────────────────
+// UTILITY
+// ─────────────────────────────────────────────
+function fmtTime(iso) {
+  if (!iso) return '';
+  try { return new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }); }
+  catch { return ''; }
+}
+
+function fixVh() {
+  document.documentElement.style.setProperty('--vh', window.innerHeight * 0.01 + 'px');
+}
+
+// ─────────────────────────────────────────────
+// FILE HANDLING  (routes ZPL .txt  vs  CSV/Excel)
+// ─────────────────────────────────────────────
+async function handleFile(file) {
+  const isZPL = /\.txt$/i.test(file.name);
+
+  if (isZPL) {
+    // ── ZPL path ──────────────────────────────
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = parseZPL(e.target.result);
+
+      // Diagnostic: ZPL structure found but no tracking numbers
+      if (result && result._error === 'no_tracking') {
+        toast(`ZPL detectado (${result.blocks} etiqueta${result.blocks !== 1 ? 's' : ''}) pero sin número de tracking. Verificá el archivo.`, 'warn', 6000);
+        return;
+      }
+
+      if (!result || result.length === 0) {
+        toast('No se encontraron etiquetas válidas en el .txt. ¿Es un archivo ZPL de ML?', 'error', 5000);
+        return;
+      }
+
+      // ✅ Valid ZPL — auto-start dispatch immediately (no preview step needed)
+      parsedFile = { type: 'zpl', packages: result, fileName: file.name };
+      toast(`✅ ${result.length} envíos cargados — iniciando despacho…`, 'ok', 2500);
+      startDispatch();
+    };
+    reader.onerror = () => toast('No se pudo leer el archivo', 'error');
+    reader.readAsText(file, 'UTF-8');
+
+  } else {
+    // ── Tienda Nube CSV? (se detecta por encabezados) ──
+    try {
+      const rawTN = await readAsLatin1(file);
+      if (isTiendaNubeCSV(rawTN)) {
+        const pkgs = parseTiendaNubeCSV(rawTN);
+        if (!pkgs.length) { toast('CSV de Tienda Nube sin órdenes válidas', 'error', 5000); return; }
+        dispatchType = 'tiendanube'; persistDispatchType('tiendanube'); driveTipo = 'tiendanube'; updateDriveTipoUI();
+        parsedFile = { type: 'tiendanube', packages: pkgs, fileName: file.name };
+        toast('✅ ' + pkgs.length + ' órdenes de Tienda Nube — iniciando…', 'ok', 2500);
+        startDispatch();
+        return;
+      }
+    } catch (e) { console.warn('TN detect:', e); }
+    // ── CSV / Excel path (Mercado Libre) ──────
+    try {
+      const { headers, data, fileName } = await parseFile(file);
+      // ¿Es un export de Tienda Nube? (CSV o XLSX) — se detecta por encabezados
+      if (isTiendaNubeHeaders(headers)) {
+        const pkgs = buildTiendaNubeFromRows(headers, data);
+        if (pkgs.length) {
+          dispatchType = 'tiendanube'; persistDispatchType('tiendanube'); driveTipo = 'tiendanube'; updateDriveTipoUI();
+          parsedFile = { type: 'tiendanube', packages: pkgs, fileName: fileName };
+          toast('✅ ' + pkgs.length + ' órdenes de Tienda Nube — iniciando…', 'ok', 2500);
+          startDispatch();
+          return;
+        }
+      }
+      const colMap = autoDetect(headers);
+
+      parsedFile = { type: 'csv', headers, data, colMap, fileName };
+
+      // Populate dropdowns
+      const NONE = '<option value="">— No usar —</option>';
+      const opts = headers.map(h => `<option value="${h}">${h}</option>`).join('');
+      ['col-tracking','col-venta','col-comprador','col-producto'].forEach(id => {
+        document.getElementById(id).innerHTML = NONE + opts;
+      });
+      // Set auto-detected values
+      document.getElementById('col-tracking').value  = colMap.tracking  || '';
+      document.getElementById('col-venta').value     = colMap.ventaId   || '';
+      document.getElementById('col-comprador').value = colMap.comprador || '';
+      document.getElementById('col-producto').value  = colMap.producto  || '';
+
+      document.getElementById('csv-file-name').textContent = fileName;
+      document.getElementById('csv-file-rows').textContent = `${data.length} filas · ${headers.length} columnas`;
+
+      // Preview table (first 3 rows)
+      updatePreviewTable(headers, data, colMap);
+
+      document.getElementById('csv-card').classList.remove('hidden');
+      document.getElementById('zpl-card').classList.add('hidden');
+      document.getElementById('file-preview').classList.remove('hidden');
+
+    } catch (err) {
+      toast('Error al leer el archivo: ' + err.message, 'error', 5000);
+    }
+  }
+}
+
+function updatePreviewTable(headers, data, colMap) {
+  const relevant = [colMap.tracking, colMap.ventaId, colMap.comprador, colMap.producto].filter(Boolean);
+  const cols = relevant.length > 0 ? relevant : headers.slice(0, 4);
+  const rows = data.slice(0, 3);
+  const tbl = document.getElementById('preview-table');
+  tbl.innerHTML = `
+    <table class="w-full text-left">
+      <thead><tr>${cols.map(c => `<th class="text-slate-400 pb-1 pr-2 truncate max-w-[80px]">${c}</th>`).join('')}</tr></thead>
+      <tbody>${rows.map(r => `<tr>${cols.map(c => {
+        const i = headers.indexOf(c);
+        return `<td class="pr-2 pb-1 truncate max-w-[80px] text-slate-600">${i >= 0 ? (r[i] ?? '') : ''}</td>`;
+      }).join('')}</tr>`).join('')}</tbody>
+    </table>`;
+}
+
+// ─────────────────────────────────────────────
+// COLUMN MAP LIVE UPDATE
+// ─────────────────────────────────────────────
+function onColChange() {
+  if (!parsedFile || parsedFile.type !== 'csv') return;
+  parsedFile.colMap = {
+    tracking:  document.getElementById('col-tracking').value,
+    ventaId:   document.getElementById('col-venta').value,
+    comprador: document.getElementById('col-comprador').value,
+    producto:  document.getElementById('col-producto').value,
+  };
+  updatePreviewTable(parsedFile.headers, parsedFile.data, parsedFile.colMap);
+}
+
+// ─────────────────────────────────────────────
+// MERGE PACKAGES (multi-file support)
+// ─────────────────────────────────────────────
+function mergePackages(newPkgs) {
+  // Adds new packages to active session, skipping duplicates by trackingId.
+  // Returns number of newly added packages.
+  const existingIds = new Set(state.packages.map(p => p.trackingId));
+  let added = 0;
+  for (const p of newPkgs) {
+    if (!existingIds.has(p.trackingId)) {
+      state.packages.push(p);
+      added++;
+    }
+  }
+  return added;
+}
+
+async function addFilesToSession(files) {
+  if (!state || !state.packages) { toast('Iniciá primero una sesión', 'error'); return; }
+  for (const file of files) {
+    const isZPL = /\.txt$/i.test(file.name);
+    if (isZPL) {
+      await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const result = parseZPL(e.target.result);
+          if (!result || result.length === 0) {
+            toast('No se encontraron etiquetas en ' + file.name, 'error', 4000);
+            resolve(); return;
+          }
+          const added = mergePackages(result);
+          const dupes = result.length - added;
+          if (!state.sourceFiles) state.sourceFiles = [];
+          state.sourceFiles.push({ name: file.name, count: result.length, added, addedAt: new Date().toISOString() });
+          state._completionNotified = false;
+          resolve();
+          const msg = dupes > 0
+            ? '+' + added + ' envios (' + dupes + ' duplicados omitidos)'
+            : '+' + added + ' envios nuevos';
+          toast('✅ ' + file.name + ': ' + msg, 'ok', 4000);
+        };
+        reader.onerror = () => { toast('No se pudo leer ' + file.name, 'error'); resolve(); };
+        reader.readAsText(file, 'UTF-8');
+      });
+    } else {
+      try {
+        const { headers, data } = await parseFile(file);
+        const colMap = autoDetect(headers);
+        if (!colMap.tracking) {
+          toast('No se detecto columna tracking en ' + file.name + ' — omitido', 'warn', 5000);
+          continue;
+        }
+        const newPkgs = buildPackages(headers, data, colMap);
+        if (newPkgs.length === 0) {
+          toast('Sin paquetes validos en ' + file.name, 'error', 4000);
+          continue;
+        }
+        const added = mergePackages(newPkgs);
+        const dupes = newPkgs.length - added;
+        if (!state.sourceFiles) state.sourceFiles = [];
+        state.sourceFiles.push({ name: file.name, count: newPkgs.length, added, addedAt: new Date().toISOString() });
+        state._completionNotified = false;
+        const msg = dupes > 0
+          ? '+' + added + ' envios (' + dupes + ' duplicados omitidos)'
+          : '+' + added + ' envios nuevos';
+        toast('✅ ' + file.name + ': ' + msg, 'ok', 4000);
+      } catch (err) {
+        toast('Error leyendo ' + file.name + ': ' + String(err), 'error', 5000);
+      }
+    }
+  }
+  saveState();
+  refreshUI();
+}
+
+// ─────────────────────────────────────────────
+// START DISPATCH SESSION
+// ─────────────────────────────────────────────
+function startDispatch() {
+  if (!parsedFile) return;
+
+  let packages;
+  if (parsedFile.type === 'zpl' || parsedFile.type === 'tiendanube') {
+    packages = parsedFile.packages;
+  } else {
+    const cm = parsedFile.colMap;
+    if (!cm.tracking) { toast('Seleccioná la columna de Tracking / N° Envío', 'warn'); return; }
+    packages = buildPackages(parsedFile.headers, parsedFile.data, cm);
+    if (packages.length === 0) { toast('No se encontraron filas con tracking válido', 'error'); return; }
+  }
+
+  state = {
+    fileName: parsedFile.fileName,
+    startedAt: new Date().toISOString(),
+    packages,
+    dispatchType: dispatchType,
+    sourceFiles: [{ name: parsedFile.fileName, count: packages.length, added: packages.length, addedAt: new Date().toISOString() }],
+    _completionNotified: false,
+  };
+  saveState();
+
+  showScreen('screen-scanner');
+  refreshUI();
+  // Camera stays OFF until the user explicitly presses "Iniciar Despacho".
+
+  // Merge any queued extra files from multi-file selection
+  if (window._pendingExtraFiles && window._pendingExtraFiles.length > 0) {
+    const pending = window._pendingExtraFiles;
+    window._pendingExtraFiles = null;
+    setTimeout(() => addFilesToSession(pending), 500);
+  }
+}
+
+// ─────────────────────────────────────────────
+// EXPORT TO XLSX
+// ─────────────────────────────────────────────
+function showSelectTipoDialog() {
+  return new Promise((resolve) => {
+    const dlg = document.getElementById('select-tipo-dialog');
+    const colectaBtn = document.getElementById('tipo-colecta-btn');
+    const flexBtn = document.getElementById('tipo-flex-btn');
+
+    const cleanup = (tipo) => {
+      dlg.classList.add('hidden');
+      colectaBtn.removeEventListener('click', onColecta);
+      flexBtn.removeEventListener('click', onFlex);
+      resolve(tipo);
+    };
+
+    const onColecta = () => cleanup('colecta');
+    const onFlex = () => cleanup('flex');
+
+    colectaBtn.addEventListener('click', onColecta);
+    flexBtn.addEventListener('click', onFlex);
+    dlg.classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
+  });
+}
+
+async function beginDay() {
+  if (!getGDriveUrl()) { toast('Conectá Google Drive primero para crear la carpeta del día', 'error', 4000); return; }
+
+  // Mostrar modal de selección de tipo
+  dispatchType = await showSelectTipoDialog();
+  if (!dispatchType) return;
+  persistDispatchType(dispatchType);
+
+  const btn = document.getElementById('btn-begin-day');
+  if (btn) { btn.textContent = '⏳ Creando carpeta…'; btn.disabled = true; }
+  const result = await gdriveGet('beginDay', { tipo: dispatchType });
+  if (btn) { btn.textContent = '📅 Comenzar día'; btn.disabled = false; }
+  if (result && result.folderName) {
+    const tipoLabel = dispatchType === 'flex' ? 'Flex (QR)' : 'Colecta (Código de barras)';
+    toast(`📁 ${tipoLabel} - ${result.folderName}`, 'ok', 4000);
+    loadDriveFiles();
+  } else {
+    toast('No se pudo crear la carpeta — verificá la conexión', 'error');
+    dispatchType = null;
+    persistDispatchType(null);
+  }
+}
+
+// INICIAR / FINALIZAR DESPACHO
+function setDespachoUI(phase) {
+  var bIni = document.getElementById('btnIniciar');
+  var bFin = document.getElementById('btnFinalizar');
+  if (!bIni || !bFin) return;
+  const ic = (name) => `<i data-lucide="${name}" class="icon"></i>`;
+  const tipoLbl = (function(){ var t = resolveDispatchType(); return t === 'flex' ? 'Flex' : (t === 'tiendanube' ? 'Tienda Nube' : (t === 'cambios' ? 'Cambios' : 'Colecta')); })();
+  if (phase === 'idle') {
+    bIni.disabled = false; bIni.classList.remove('opacity-40','cursor-not-allowed');
+    bFin.disabled = false; bFin.classList.remove('opacity-40','cursor-not-allowed');
+    bIni.innerHTML = ic('rocket') + ' Iniciar Despacho · ' + tipoLbl;
+    bFin.innerHTML = ic('check-circle') + ' Finalizar Despacho';
+  } else if (phase === 'active') {
+    bIni.disabled = true;  bIni.classList.add('opacity-40','cursor-not-allowed');
+    bFin.disabled = false; bFin.classList.remove('opacity-40','cursor-not-allowed');
+    bIni.innerHTML = ic('circle-dot') + ' ' + tipoLbl + ' activo';
+  } else if (phase === 'saving') {
+    bIni.disabled = true; bFin.disabled = true;
+    bFin.innerHTML = ic('loader-circle') + ' Guardando…';
+  } else if (phase === 'retry') {
+    // Falló el guardado en Drive. Los items quedan en currentDespacho para reintentar.
+    bIni.disabled = true;  bIni.classList.add('opacity-40','cursor-not-allowed');
+    bFin.disabled = false; bFin.classList.remove('opacity-40','cursor-not-allowed');
+    bFin.innerHTML = ic('refresh-cw') + ' Reintentar guardar en Drive';
+  }
+  if (window.lucide) lucide.createIcons();
+}
+
+function iniciarDespacho() {
+  // Usa el tipo elegido al inicio (selector Colecta/Flex). Una sola selección.
+  const tipo = resolveDispatchType();
+  dispatchType = tipo;
+  persistDispatchType(tipo);
+  if (state) { state.dispatchType = tipo; saveState(); }
+  currentDespacho = [];
+  despachoActive  = true;
+  setDespachoUI('active');
+  const tipoLabel = tipo === 'flex' ? 'Flex (QR)' : (tipo === 'tiendanube' ? 'Tienda Nube' : (tipo === 'cambios' ? 'Cambios' : 'Colecta (Código de barras)'));
+  toast(`🚀 ${tipoLabel} iniciado — escaneá los paquetes`, 'ok', 3000);
+  startScanner(true); // única puerta de encendido de la cámara
+}
+
+// Inicia el despacho con un tipo explícito (desde los botones Iniciar Flex / Iniciar Colecta).
+// Fija y persiste el tipo, arranca el tracking y enciende la cámara.
+function iniciarDespachoTipo(tipo) {
+  dispatchType = tipo;
+  persistDispatchType(tipo);
+  if (state) { state.dispatchType = tipo; saveState(); }
+  currentDespacho = [];
+  despachoActive  = true;
+  setDespachoUI('active');
+  const tipoLabel = tipo === 'flex' ? 'Flex (QR)' : (tipo === 'tiendanube' ? 'Tienda Nube' : (tipo === 'cambios' ? 'Cambios' : 'Colecta (Código de barras)'));
+  toast(`🚀 ${tipoLabel} iniciado — escaneá los paquetes`, 'ok', 3000);
+  startScanner(true); // única puerta de encendido de la cámara
+}
+
+function confirmFinalizarConPendientes(count) {
+  return new Promise((resolve) => {
+    const dlg = document.getElementById('finalizar-pendientes-dialog');
+    const okBtn = document.getElementById('finalizar-pendientes-ok');
+    const cancelBtn = document.getElementById('finalizar-pendientes-cancel');
+    document.getElementById('finalizar-pendientes-body').textContent =
+      `Quedan ${count} paquete${count !== 1 ? 's' : ''} sin despachar. ¿Querés finalizar igual?`;
+    const cleanup = (result) => {
+      dlg.classList.add('hidden');
+      okBtn.removeEventListener('click', onOk);
+      cancelBtn.removeEventListener('click', onCancel);
+      resolve(result);
+    };
+    const onOk     = () => cleanup(true);
+    const onCancel = () => cleanup(false);
+    okBtn.addEventListener('click', onOk);
+    cancelBtn.addEventListener('click', onCancel);
+    dlg.classList.remove('hidden');
+  });
+}
+
+async function finalizarDespacho() {
+  // El universo de paquetes (no solo lo escaneado en esta sesión).
+  const allPackages = (state && Array.isArray(state.packages)) ? state.packages : [];
+  if (allPackages.length === 0) {
+    toast('Cargá un archivo primero para generar el reporte', 'warn'); return;
+  }
+  // Si quedan pendientes, se confirma (igual se puede generar cuando quieras).
+  const pendings = allPackages.filter(p => p.estado !== 'despachado');
+  if (pendings.length > 0) {
+    const proceed = await confirmFinalizarConPendientes(pendings.length);
+    if (!proceed) return; // sigue escaneando, no se toca nada
+  }
+
+  despachoActive = false;
+  setDespachoUI('saving');
+
+  // Apagar y liberar la cámara de inmediato — el despacho ya terminó.
+  await stopScannerAndRelease();
+
+  const n       = currentDespacho.length;
+  const items   = currentDespacho.slice(); // snapshot para el historial local (solo lo escaneado)
+  // Reporte a Drive: UN RENGLÓN POR PERSONA/VENTA, con todos sus SKU juntos.
+  // Se agrupa por ID de Venta (si no hay, cada paquete queda en su propio renglón).
+  const groupsMap = new Map();
+  allPackages.forEach(p => {
+    const key = p.ventaId || ('__pkg_' + p.trackingId);
+    if (!groupsMap.has(key)) {
+      groupsMap.set(key, {
+        ventaId: p.ventaId || '',
+        comprador: p.comprador || '',
+        trackingIds: [],
+        skus: [],
+        cantidad: 0,
+        allDespachado: true,
+      });
+    }
+    const g = groupsMap.get(key);
+    if (p.trackingId) g.trackingIds.push(p.trackingId);
+    const skuVal = p.sku || p.producto || '';
+    if (skuVal && !g.skus.includes(skuVal)) g.skus.push(skuVal);
+    g.cantidad += (p.cantidad || 1);
+    if (p.estado !== 'despachado') g.allDespachado = false;
+    if (!g.comprador && p.comprador) g.comprador = p.comprador;
+  });
+  const reportItems = Array.from(groupsMap.values()).map((g, i) => ({
+    'Paquetes Despachados': i + 1,
+    'Numero de Etiqueta':   g.trackingIds.join(', '),
+    'ID de Venta':          g.ventaId,
+    'Nombre de la Persona': g.comprador,
+    'Cantidad de Prendas':  g.cantidad,
+    'SKU Despachados':      g.skus.join(', '),
+    'Estado':               g.allDespachado ? 'despachado' : 'pendiente',
+  }));
+  const date    = new Date().toISOString().split('T')[0];
+  // gdrivePost returns true on HTTP 200 but we need the JSON response
+  const url = getGDriveUrl();
+  let driveResult = null;
+  let savedFileName = '';
+  let savedTo = 'local';
+
+  let failReason = 'Sin conexión con el script (revisá el deployment: Acceso → Cualquier persona)';
+  if (url) {
+    try {
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'procesarExcel', data: { datos: reportItems, fecha: date }, tipo: resolveDispatchType() }),
+        redirect: 'follow',
+      });
+      if (!r.ok) {
+        failReason = 'El script respondió HTTP ' + r.status;
+      } else {
+        try {
+          driveResult = await r.json();
+          if (driveResult && driveResult.error) failReason = String(driveResult.error).slice(0, 200);
+          else if (!driveResult || !driveResult.ok) failReason = 'El script no devolvió ok:true';
+        } catch (je) {
+          failReason = 'Respuesta no-JSON del script — verificá que el deployment sea "Aplicación web"';
+        }
+      }
+    } catch (e) {
+      failReason = String(e).includes('Failed to fetch') || String(e).includes('NetworkError')
+        ? 'Sin conexión, o el deployment no es público (Acceso → Cualquier persona)'
+        : String(e).slice(0, 200);
+      driveResult = null;
+    }
+  }
+
+  if (driveResult && driveResult.ok) {
+    savedTo = 'drive';
+    savedFileName = driveResult.fileName || '';
+    toast('✅ ' + driveResult.fileName + ' guardado en Drive (' + reportItems.length + ' registros)', 'ok', 6000);
+
+    saveDespachoLog({
+      ts: new Date().toISOString(),
+      fileName: (state && state.fileName) || '',
+      count: n,
+      items,
+      savedTo,
+      savedFileName,
+    });
+
+    currentDespacho = [];
+    setDespachoUI('idle');
+  } else {
+    // No se generan descargas locales — se reintenta guardar en Drive.
+    // Los datos escaneados NO se pierden: quedan en currentDespacho para
+    // que "Finalizar Despacho" los vuelva a intentar subir.
+    console.warn('procesarExcel falló:', failReason);
+    toast('❌ No se guardó en Drive: ' + failReason, 'error', 9000);
+    setDespachoUI('retry'); // los items quedan en currentDespacho, listos para reintentar
+  }
+}
+
+async function endDay() {
+  if (!state || !state.packages || state.packages.length === 0) {
+    toast('No hay paquetes para exportar', 'error'); return;
+  }
+  // Generate XLSX in memory
+  const rows = state.packages.map(p => ({
+    'Tracking':     p.trackingId,
+    'Venta ID':     p.ventaId    || '',
+    'Comprador':    p.comprador  || '',
+    'Producto':     p.producto   || '',
+    'Estado':       p.estado === 'despachado' ? 'Despachado' : 'Pendiente',
+    'Hora escaneo': p.scannedAt ? new Date(p.scannedAt).toLocaleString('es-AR') : '',
+  }));
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = [22, 20, 28, 40, 14, 22].map(w => ({ wch: w }));
+  XLSX.utils.book_append_sheet(wb, ws, 'Despacho');
+  const dateStr = new Date().toISOString().slice(0,10);
+  const timeStr = new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}).replace(':','-');
+  const fileName = `reporte_${dateStr}_${timeStr}.xlsx`;
+
+  // Download locally
+  XLSX.writeFile(wb, fileName);
+
+  // Upload to Drive fin-del-dia folder
+  if (getGDriveUrl()) {
+    const wbBinary = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
+    const btn = document.getElementById('btn-end-day');
+    if (btn) { btn.textContent = '⏳ Guardando…'; btn.disabled = true; }
+    const ok = await gdrivePost('saveReport', { fileName, content: wbBinary, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, resolveDispatchType());
+    if (btn) { btn.textContent = '📋 Fin del día'; btn.disabled = false; }
+    if (ok) toast(`✅ Reporte guardado en Drive: ${fileName}`, 'ok', 5000);
+    else toast('⚠️ Reporte descargado localmente (Drive no disponible)', 'info', 4000);
+  } else {
+    toast('✅ Reporte exportado', 'ok');
+  }
+}
+
+function exportReport() {
+  if (!state) return;
+  const rows = state.packages.map(p => ({
+    'Tracking':     p.trackingId,
+    'Venta ID':     p.ventaId    || '',
+    'Comprador':    p.comprador  || '',
+    'Producto':     p.producto   || '',
+    'Estado':       p.estado === 'despachado' ? 'Despachado' : 'Pendiente',
+    'Hora escaneo': p.scannedAt ? new Date(p.scannedAt).toLocaleString('es-AR') : '',
+  }));
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(rows);
+  // Column widths
+  ws['!cols'] = [22, 20, 28, 40, 14, 22].map(w => ({ wch: w }));
+  XLSX.utils.book_append_sheet(wb, ws, 'Despacho');
+  const date = new Date().toISOString().slice(0,10).replace(/-/g,'');
+  XLSX.writeFile(wb, `despacho_${date}.xlsx`);
+  toast('Reporte exportado ✅', 'ok');
+}
+
+// ─────────────────────────────────────────────
+// MENU
+// ─────────────────────────────────────────────
+function openMenu()  { document.getElementById('menu-panel').classList.remove('hidden'); }
+function closeMenu() { document.getElementById('menu-panel').classList.add('hidden'); }
+
+function toggleFabMenu() { document.getElementById('fab-menu').classList.toggle('hidden'); }
+function closeFabMenu()  { document.getElementById('fab-menu').classList.add('hidden'); }
+
+function setMenuPauseLabel(label, icon) {
+  const l = document.getElementById('menu-pause-label');
+  const i = document.getElementById('menu-pause-icon');
+  if (l) l.textContent = label;
+  if (i) { i.setAttribute('data-lucide', icon); if (window.lucide) lucide.createIcons(); }
+}
+
+function toggleCamera() {
+  closeMenu();
+  if (scannerRunning) {
+    scanner.stop().then(() => {
+      scannerRunning = false;
+      document.getElementById('paused-overlay').classList.remove('hidden');
+      const po = document.getElementById('paused-overlay');
+      setPausedIcon('pause-circle');
+      po.querySelector('.text-white.font-bold.text-xl').textContent = 'Escáner pausado';
+      po.querySelector('.text-slate-500.text-sm').textContent = 'La cámara está detenida';
+      document.getElementById('btn-resume-cam').textContent = '▶ Reanudar cámara';
+      setMenuPauseLabel('Reanudar cámara', 'play');
+    }).catch(() => {});
+  } else {
+    startScanner(true);
+    setMenuPauseLabel('Pausar cámara', 'pause');
+  }
+}
+
+function confirmReset() {
+  closeMenu();
+  document.getElementById('confirm-dialog').classList.remove('hidden');
+}
+
+function doReset() {
+  stopPolling();
+  document.getElementById('confirm-dialog').classList.add('hidden');
+  if (scannerRunning && scanner) {
+    scanner.stop().catch(() => {}).finally(() => { scanner = null; scannerRunning = false; });
+  }
+  clearState();
+  parsedFile = null;
+  showScreen('screen-setup');
+  document.getElementById('file-preview').classList.add('hidden');
+  document.getElementById('zpl-card').classList.add('hidden');
+  document.getElementById('csv-card').classList.add('hidden');
+  document.getElementById('file-input').value = '';
+  loadServerFiles();
+  loadHistory().then(renderHistory);
+  renderDespachoHistory();
+}
+
+// ─────────────────────────────────────────────
+// HID / USB LASER SCANNER  (LCB8200 y compatibles)
+// ─────────────────────────────────────────────
+let hidBuffer      = '';
+let hidTimer       = null;
+let hidLastKey     = 0;
+let hidActive      = false;
+const HID_TIMEOUT  = 100;
+const HID_SPEED_MS = 50;
+
+function hidFlash() {
+  const el = document.getElementById('status-banner');
+  if (!el) return;
+  el.style.transition = 'none';
+  el.style.outline = '3px solid #60a5fa';
+  setTimeout(() => { el.style.outline = ''; el.style.transition = ''; }, 180);
+}
+
+function hidCommit() {
+  clearTimeout(hidTimer);
+  const code = hidBuffer.trim();
+  hidBuffer = '';
+  hidActive = false;
+  if (code.length >= 4) processScan(code);
+}
+
+document.addEventListener('keydown', function(e) {
+  if (!document.getElementById('screen-scanner').classList.contains('active')) return;
+  const now = Date.now();
+  const isManualFocused = document.activeElement === document.getElementById('manual-input');
+  const isFast = (now - hidLastKey) < HID_SPEED_MS;
+  if (isManualFocused && !isFast && !hidActive) return;
+
+  if (e.key === 'Enter' || e.key === 'Tab') {
+    if (hidBuffer.length >= 4) {
+      e.preventDefault();
+      hidFlash();
+      hidCommit();
+    } else {
+      hidBuffer = ''; hidActive = false;
+    }
+    hidLastKey = now;
+    return;
+  }
+
+  if (e.key.length === 1) {
+    hidBuffer += e.key;
+    hidLastKey = now;
+    hidActive  = true;
+    clearTimeout(hidTimer);
+    hidTimer = setTimeout(() => {
+      if (hidBuffer.length >= 6) hidCommit();
+      else { hidBuffer = ''; hidActive = false; }
+    }, HID_TIMEOUT);
+    if (isManualFocused && isFast) {
+      e.preventDefault();
+      document.getElementById('manual-input').blur();
+    }
+  }
+});
+
+// ─────────────────────────────────────────────
+// PWA INSTALL PROMPT
+// ─────────────────────────────────────────────
+let deferredInstallPrompt = null;
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  const btn = document.getElementById('btn-install');
+  if (btn) btn.classList.remove('hidden');
+});
+
+window.addEventListener('appinstalled', () => {
+  deferredInstallPrompt = null;
+  const btn = document.getElementById('btn-install');
+  if (btn) btn.classList.add('hidden');
+  toast('✅ App instalada correctamente', 'ok', 4000);
+});
+
+// ─────────────────────────────────────────────
+// EXPOSE to HTML onclick attributes
+// ─────────────────────────────────────────────
+const App = {
+  switchTab,
+  confirmReset,
+  closeMenu,
+};
+
+// ─────────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  if (window.lucide) lucide.createIcons();
+  fixVh();
+  window.addEventListener('resize',            fixVh);
+  window.addEventListener('orientationchange', () => setTimeout(fixVh, 200));
+
+  // ── Auto-resume: server first, localStorage fallback ──
+  (async () => {
+    let active = await loadServerSession();
+    if (!active) active = loadState();
+
+    if (active && active.packages && active.packages.length > 0) {
+      const done  = active.packages.filter(p => p.estado === 'despachado').length;
+      const total = active.packages.length;
+      state = active;
+      if (active.dispatchType === 'flex' || active.dispatchType === 'colecta') {
+        dispatchType = active.dispatchType; persistDispatchType(dispatchType);
+      } else { restoreDispatchType(); }
+      localStorage.setItem(LS_KEY, JSON.stringify(state));
+      showScreen('screen-scanner');
+      refreshUI();
+      // Cámara apagada — se enciende solo al presionar "Iniciar Despacho".
+      toast(`📦 ${active.fileName || 'Sesión'} — ${done}/${total} despachados`, 'info', 3000);
+    } else {
+      const hist = await loadHistory();
+      renderHistory(hist);
+    }
+  })();
+
+  document.getElementById('btn-resume').addEventListener('click', () => {
+    const s = loadState(); if (!s) return;
+    state = s;
+    if (s.dispatchType === 'flex' || s.dispatchType === 'colecta') {
+      dispatchType = s.dispatchType; persistDispatchType(dispatchType);
+    } else { restoreDispatchType(); }
+    showScreen('screen-scanner'); refreshUI();
+  });
+  document.getElementById('btn-new-session').addEventListener('click', () => {
+    clearState();
+    document.getElementById('resume-banner').classList.add('hidden');
+    toast('Sesión anterior descartada', 'info');
+    loadHistory().then(renderHistory);
+  });
+
+  // ── History clear button ───────────────────
+  document.getElementById('btn-clear-history').addEventListener('click', async () => {
+    await clearHistory();
+    toast('Historial borrado', 'info');
+  });
+
+  // ── Historial de despachos (local) ─────────
+  renderDespachoHistory();
+  document.getElementById('btn-clear-despacho-log')?.addEventListener('click', () => {
+    localStorage.removeItem(DESPACHO_LOG_KEY);
+    renderDespachoHistory();
+    toast('Historial de despachos borrado', 'info');
+  });
+  document.getElementById('despacho-preview-close')?.addEventListener('click', closeDespachoPreview);
+
+  // ── File upload zone (local upload removed — Drive only) ──
+  const uploadZone = document.getElementById('upload-zone'); // null when removed
+  const fileInput  = document.getElementById('file-input');
+
+  if (uploadZone) uploadZone.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', async () => {
+    if (fileInput.files.length === 0) return;
+    if (fileInput.files.length === 1) {
+      handleFile(fileInput.files[0]);
+    } else {
+      // Multiple files: process first one normally, then merge the rest
+      await new Promise(resolve => {
+        const origStartDispatch = window._origStartDispatch;
+        // Process first file — for ZPL it auto-starts dispatch, for CSV user still needs to click
+        handleFile(fileInput.files[0]);
+        resolve();
+      });
+      // For ZPL multi-select: state is set immediately; merge remaining files
+      const extraFiles = Array.from(fileInput.files).slice(1);
+      if (extraFiles.length > 0 && state) {
+        await addFilesToSession(extraFiles);
+      } else if (extraFiles.length > 0) {
+        // CSV first file — queue remaining files for after dispatch starts
+        window._pendingExtraFiles = extraFiles;
+        toast('Carga el primer archivo y luego se agregaran los ' + extraFiles.length + ' archivos adicionales automaticamente', 'info', 5000);
+      }
+    }
+  });
+
+  if (uploadZone) {
+    uploadZone.addEventListener('dragover',  (e) => { e.preventDefault(); uploadZone.classList.add('drag-over'); });
+    uploadZone.addEventListener('dragleave', ()  => uploadZone.classList.remove('drag-over'));
+    uploadZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      uploadZone.classList.remove('drag-over');
+      const file = e.dataTransfer.files[0];
+      if (file) handleFile(file);
+    });
+  }
+
+  document.getElementById('btn-change-file').addEventListener('click', () => {
+    document.getElementById('file-preview').classList.add('hidden');
+    parsedFile = null; fileInput.value = '';
+  });
+  document.getElementById('btn-change-file-csv').addEventListener('click', () => {
+    document.getElementById('file-preview').classList.add('hidden');
+    parsedFile = null; fileInput.value = '';
+  });
+
+  ['col-tracking','col-venta','col-comprador','col-producto'].forEach(id => {
+    document.getElementById(id).addEventListener('change', onColChange);
+  });
+
+  document.getElementById('btn-start').addEventListener('click', startDispatch);
+
+  // ── Drive files ────────────────────────────
+  updateDriveTipoUI();
+  document.getElementById('drive-search')?.addEventListener('input', function(e) { driveSearchQuery = e.target.value; filterDriveFiles(); });
+  document.getElementById('btn-drive-colecta')?.addEventListener('click', () => setDriveTipo('colecta'));
+  document.getElementById('btn-drive-flex')?.addEventListener('click', () => setDriveTipo('flex'));
+  document.getElementById('btn-drive-tiendanube')?.addEventListener('click', () => setDriveTipo('tiendanube'));
+  document.getElementById('btn-drive-cambios')?.addEventListener('click', () => setDriveTipo('cambios'));
+  document.getElementById('btn-upload-pc')?.addEventListener('click', () => document.getElementById('file-input').click());
+  document.getElementById('scanner-list-area')?.addEventListener('click', function(e) {
+    if (!state || state.dispatchType !== 'tiendanube') return;
+    const card = e.target.closest('.tn-card');
+    if (!card) return;
+    if (!despachoActive) { toast('Tocá "Iniciar Despacho" primero', 'warn', 2500); return; }
+    const order = card.getAttribute('data-order');
+    if (order) processScan(order);
+  });
+  loadDriveFiles();
+  document.getElementById('btn-refresh-drive-files').addEventListener('click', loadDriveFiles);
+
+  // ── Remote hosting detection ───────────────
+  // If not on localhost/LAN and Drive not configured, show warning.
+  (function detectRemote() {
+    const host = location.hostname;
+    const isLocal = host === 'localhost' || host === '127.0.0.1' || /^192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[01])\./.test(host);
+    const banner  = document.getElementById('drive-required-banner');
+    if (!isLocal && !getGDriveUrl() && banner) {
+      banner.classList.remove('hidden');
+    }
+    // Hide banner once Drive is connected
+    const obs = new MutationObserver(() => {
+      if (getGDriveUrl() && banner) banner.classList.add('hidden');
+    });
+    const dot = document.getElementById('gdrive-status-dot');
+    if (dot) obs.observe(dot, { attributes: true });
+  })();
+
+  // ── Server files ───────────────────────────
+  loadServerFiles();
+  document.getElementById('btn-refresh-files').addEventListener('click', loadServerFiles);
+
+  // ── Scanner screen ─────────────────────────
+  document.getElementById('btn-menu').addEventListener('click', openMenu);
+  document.getElementById('menu-pause').addEventListener('click', toggleCamera);
+
+  document.getElementById('btn-resume-cam').addEventListener('click', () => {
+    startScanner(true);
+  });
+
+  const manualBar   = document.getElementById('manual-input-bar');
+  const manualInput = document.getElementById('manual-input');
+  document.getElementById('btn-manual-toggle').addEventListener('click', () => {
+    const open = manualBar.classList.toggle('open');
+    if (open) manualInput.focus();
+  });
+  document.getElementById('btn-manual-send').addEventListener('click', () => {
+    const v = manualInput.value.trim();
+    if (v) { processScan(v); manualInput.value = ''; }
+  });
+  manualInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const v = manualInput.value.trim();
+      if (v) { processScan(v); manualInput.value = ''; }
+    }
+  });
+
+  document.getElementById('btn-scanner-hid').addEventListener('click', () => {
+    toast('🔫 Pistola láser activa — apuntá y disparás, el código se procesa automáticamente', 'info', 4000);
+  });
+
+  function setScanMode(mode) {
+    scanMode = mode;
+    const bBar = document.getElementById('btn-mode-barcode');
+    const bQr  = document.getElementById('btn-mode-qr');
+    if (bBar) { bBar.className = mode === 'barcode' ? 'text-xs font-bold px-4 py-1.5 rounded-full bg-forest-600 text-white' : 'text-xs font-bold px-4 py-1.5 rounded-full text-slate-500'; }
+    if (bQr)  { bQr.className  = mode === 'qr'      ? 'text-xs font-bold px-4 py-1.5 rounded-full bg-forest-600 text-white' : 'text-xs font-bold px-4 py-1.5 rounded-full text-slate-500'; }
+    if (scannerRunning) startScanner(true);
+  }
+  document.getElementById('btn-mode-barcode')?.addEventListener('click', () => setScanMode('barcode'));
+  document.getElementById('btn-mode-qr')?.addEventListener('click', () => setScanMode('qr'));
+
+  // ── Secondary actions popup ("+" button) ──
+  document.getElementById('btn-fab-toggle')?.addEventListener('click', toggleFabMenu);
+  document.addEventListener('click', (e) => {
+    const menu = document.getElementById('fab-menu');
+    const toggleBtn = document.getElementById('btn-fab-toggle');
+    if (!menu || menu.classList.contains('hidden')) return;
+    if (menu.contains(e.target) || toggleBtn.contains(e.target)) return;
+    closeFabMenu();
+  });
+  ['btn-add-files', 'btn-manual-toggle', 'btn-scanner-hid', 'btn-export'].forEach(id => {
+    document.getElementById(id)?.addEventListener('click', closeFabMenu);
+  });
+
+  // ── Add files to active session ─────────────
+  const fileInputAdd = document.getElementById('file-input-add');
+  document.getElementById('btn-add-files')?.addEventListener('click', () => fileInputAdd.click());
+  fileInputAdd?.addEventListener('change', async () => {
+    if (fileInputAdd.files.length === 0) return;
+    const files = Array.from(fileInputAdd.files);
+    fileInputAdd.value = '';
+    if (!state) { toast('No hay sesion activa', 'error'); return; }
+    await addFilesToSession(files);
+  });
+
+  document.getElementById('btn-begin-day')?.addEventListener('click', beginDay);
+  document.getElementById('btnIniciar')?.addEventListener('click', () => {
+    setScanMode(resolveDispatchType() === 'flex' ? 'qr' : 'barcode');
+    iniciarDespacho();
+  });
+  document.getElementById('btnFinalizar')?.addEventListener('click', finalizarDespacho);
+
+  // Botones del modal de selección de tipo (Flex/Colecta)
+  // Nota: estos se wrapean en showSelectTipoDialog, no necesitan listeners aquí
+  // pero agregamos validación de que existan
+  if (!document.getElementById('tipo-colecta-btn') || !document.getElementById('tipo-flex-btn')) {
+    console.warn('Modal de Flex/Colecta no encontrado en el DOM');
+  }
+
+  setDespachoUI('idle');
+
+  document.getElementById('btn-export').addEventListener('click', exportReport);
+  document.getElementById('btn-list-expand')?.addEventListener('click', () => toggleListExpand());
+
+  document.getElementById('confirm-ok').addEventListener('click', doReset);
+  document.getElementById('confirm-cancel').addEventListener('click', () => {
+    document.getElementById('confirm-dialog').classList.add('hidden');
+  });
+
+  // ── PWA install button ─────────────────────
+  document.getElementById('btn-install').addEventListener('click', () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      deferredPrompt.userChoice.then(() => { deferredPrompt = null; });
+    }
+  });
+
+  // ── Google Drive Sync UI ──────────────────────
+  updateGDriveUI();
+
+  document.getElementById('btn-gdrive-connect').addEventListener('click', async () => {
+    const url = document.getElementById('gdrive-url-input').value.trim();
+    if (!url || !url.includes('script.google.com')) {
+      toast('URL inválida — debe ser una URL de Google Apps Script', 'error');
+      return;
+    }
+    const btn = document.getElementById('btn-gdrive-connect');
+    btn.textContent = 'Verificando…';
+    btn.disabled = true;
+    const result = await testGDriveUrl(url);
+    btn.textContent = 'Conectar';
+    btn.disabled = false;
+    if (result.ok) {
+      setGDriveUrl(url);
+      updateGDriveUI();
+      const drBanner = document.getElementById('drive-required-banner');
+      if (drBanner) drBanner.classList.add('hidden');
+      toast('✅ Google Drive conectado — sesiones en la nube', 'ok', 3500);
+      loadDriveFiles();
+      loadHistory().then(renderHistory);
+    } else {
+      toast('❌ ' + (result.reason || 'No se pudo conectar'), 'error', 8000);
+    }
+  });
+
+  const testBtn = document.getElementById('btn-gdrive-test');
+  if (testBtn) testBtn.addEventListener('click', () => {
+    const url = document.getElementById('gdrive-url-input').value.trim();
+    if (!url || !url.includes('script.google.com')) { toast('Pega primero la URL del script', 'error'); return; }
+    window.open(url + '?action=ping', '_blank');
+    toast('Abri la pestana — si ves {"ok":true} el script funciona', 'ok', 6000);
+  });
+
+  document.getElementById('btn-gdrive-disconnect').addEventListener('click', () => {
+    setGDriveUrl('');
+    updateGDriveUI();
+    toast('Google Drive desconectado', 'info');
+  });
+
+  document.getElementById('btn-gdrive-help').addEventListener('click', () => {
+    document.getElementById('gdrive-help-panel').classList.toggle('hidden');
+  });
+
+  const refreshDriveBtn = document.getElementById('btn-refresh-drive-files');
+  if (refreshDriveBtn) refreshDriveBtn.addEventListener('click', loadDriveFiles);
+
+  // (listener de btn-begin-day ya registrado más arriba — no duplicar)
+  document.getElementById('btn-end-day')?.addEventListener('click', endDay);
+
+});
+</script>
+
+<!-- PARKA - cierre del dia, Tienda Nube con tilde manual y envios manuales -->
+<script>
+(function () {
+  'use strict';
+
+  // 1. Tienda Nube: nunca abrir la camara
+  var _startScanner = window.startScanner;
+  window.startScanner = function () {
+    try {
+      var t = (typeof resolveDispatchType === 'function') ? resolveDispatchType() : '';
+      if (t === 'tiendanube') return Promise.resolve();
+    } catch (e) {}
+    return _startScanner.apply(this, arguments);
+  };
+
+  var MANUALES_KEY = 'parka_envios_manuales';
+
+  function hoyStr() { return new Date().toISOString().slice(0, 10); }
+
+  function leerManuales() {
+    try {
+      var raw = localStorage.getItem(MANUALES_KEY);
+      var all = raw ? JSON.parse(raw) : [];
+      return all.filter(function (m) { return m.fecha === hoyStr(); });
+    } catch (e) { return []; }
+  }
+
+  function guardarManuales(list) {
+    try { localStorage.setItem(MANUALES_KEY, JSON.stringify(list)); } catch (e) {}
+  }
+
+  // 2. Enviar cierre del dia
+  async function enviarCierreDelDia() {
+    var url = (typeof getGDriveUrl === 'function') ? getGDriveUrl() : '';
+    if (!url) { toast('Conecta primero el Apps Script', 'warn', 3500); return; }
+    var btn = document.getElementById('btn-cierre-dia');
+    var prev = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = 'Enviando cierre...'; }
+    try {
+      var r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'cerrarDia' }),
+        redirect: 'follow'
+      });
+      var data = await r.json();
+      if (data && data.ok && data.count === 0) {
+        toast('No hay despachos registrados hoy', 'info', 4000);
+      } else if (data && data.ok) {
+        toast('Cierre enviado a ' + (data.mail || 'gerencia') + ' - ' +
+              data.despachados + ' despachados / ' + data.noDespachados + ' no despachados', 'ok', 6000);
+      } else {
+        toast('No se pudo enviar el cierre', 'error', 4000);
+      }
+    } catch (e) {
+      toast('Error al enviar el cierre', 'error', 4000);
+    }
+    if (btn) { btn.disabled = false; btn.innerHTML = prev; }
+  }
+
+  // 3. Envio manual al backend
+  async function postEnvioManual(envio) {
+    var url = (typeof getGDriveUrl === 'function') ? getGDriveUrl() : '';
+    if (!url) return false;
+    try {
+      var r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'envioManual', data: envio }),
+        redirect: 'follow'
+      });
+      var data = await r.json();
+      return !!(data && data.ok);
+    } catch (e) { return false; }
+  }
+
+  function renderManuales() {
+    var cont = document.getElementById('manuales-list');
+    if (!cont) return;
+    var list = leerManuales();
+    if (!list.length) {
+      cont.innerHTML = '<p class="text-slate-400 text-xs py-3 text-center">Todavia no cargaste envios manuales hoy</p>';
+      return;
+    }
+    cont.innerHTML = list.map(function (m) {
+      var badge = m.plataforma === 'ML'
+        ? '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">ML</span>'
+        : '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">TN</span>';
+      return '<div class="flex items-center gap-2 py-2 border-b border-slate-100 last:border-0">' +
+               badge +
+               '<div class="flex-1 min-w-0">' +
+                 '<p class="text-slate-800 text-sm font-semibold truncate">' + (m.nombre || '(sin nombre)') + '</p>' +
+                 '<p class="text-slate-500 text-xs truncate">' + (m.articulo || '') + '</p>' +
+               '</div>' +
+               '<span class="text-slate-400 text-[11px] flex-shrink-0">' + (m.hora || '') + '</span>' +
+             '</div>';
+    }).join('');
+  }
+
+  function bloqueManuales() {
+    return '' +
+    '<div id="manuales-zone" class="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">' +
+      '<p class="text-slate-700 text-sm font-semibold flex items-center gap-2 mb-3">' +
+        '<i data-lucide="package-plus" class="icon text-forest-600"></i> Envios manuales' +
+      '</p>' +
+      '<input id="manual-nombre" type="text" placeholder="Nombre de la persona" ' +
+        'class="w-full mb-2 px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:border-forest-600" />' +
+      '<input id="manual-articulo" type="text" placeholder="Articulo a enviar" ' +
+        'class="w-full mb-2 px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:border-forest-600" />' +
+      '<div class="flex gap-2 mb-3">' +
+        '<button id="manual-plat-ml" class="flex-1 text-xs font-bold py-2 rounded-xl border border-slate-200 text-slate-500">Mercado Libre</button>' +
+        '<button id="manual-plat-tn" class="flex-1 text-xs font-bold py-2 rounded-xl border border-slate-200 text-slate-500">Tienda Nube</button>' +
+      '</div>' +
+      '<button id="manual-add" class="w-full bg-forest-600 active:bg-forest-700 text-white font-semibold text-sm py-2.5 rounded-xl flex items-center justify-center gap-2">' +
+        '<i data-lucide="plus" class="icon" style="width:16px;height:16px;"></i> Agregar envio' +
+      '</button>' +
+      '<div id="manuales-list" class="mt-3"></div>' +
+    '</div>';
+  }
+
+  var platSel = 'ML';
+
+  function pintarPlat() {
+    var ml = document.getElementById('manual-plat-ml');
+    var tn = document.getElementById('manual-plat-tn');
+    if (!ml || !tn) return;
+    var on  = 'flex-1 text-xs font-bold py-2 rounded-xl border border-forest-600 bg-forest-600 text-white';
+    var off = 'flex-1 text-xs font-bold py-2 rounded-xl border border-slate-200 text-slate-500';
+    ml.className = platSel === 'ML' ? on : off;
+    tn.className = platSel === 'TN' ? on : off;
+  }
+
+  async function agregarManual() {
+    var iNom = document.getElementById('manual-nombre');
+    var iArt = document.getElementById('manual-articulo');
+    var nombre = (iNom.value || '').trim();
+    var articulo = (iArt.value || '').trim();
+    if (!nombre || !articulo) { toast('Completa nombre y articulo', 'warn', 3000); return; }
+
+    var btn = document.getElementById('manual-add');
+    if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
+
+    var envio = {
+      nombre: nombre,
+      articulo: articulo,
+      plataforma: platSel,
+      fecha: hoyStr(),
+      hora: new Date().toTimeString().slice(0, 5)
+    };
+
+    var ok = await postEnvioManual(envio);
+
+    if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+
+    if (!ok) { toast('No se pudo guardar en Drive. Revisa la conexion.', 'error', 4000); return; }
+
+    var all = [];
+    try { all = JSON.parse(localStorage.getItem(MANUALES_KEY) || '[]'); } catch (e) { all = []; }
+    all.push(envio);
+    guardarManuales(all);
+    iNom.value = '';
+    iArt.value = '';
+    renderManuales();
+    toast('Envio manual guardado (' + platSel + ')', 'ok', 3000);
+  }
+
+  // 4. Montaje
+  function montar() {
+    var btnStart = document.getElementById('btn-start');
+    if (btnStart && !document.getElementById('btn-cierre-dia')) {
+      var b = document.createElement('button');
+      b.id = 'btn-cierre-dia';
+      b.className = 'w-full mt-2 bg-slate-800 active:bg-slate-900 text-white font-bold text-base py-3.5 rounded-2xl shadow-lg flex items-center justify-center gap-2';
+      b.innerHTML = '<i data-lucide="send" class="icon"></i> Enviar cierre del dia';
+      btnStart.insertAdjacentElement('afterend', b);
+      b.addEventListener('click', enviarCierreDelDia);
+    }
+
+    var ancla = document.getElementById('despacho-history-zone');
+    if (ancla && !document.getElementById('manuales-zone')) {
+      ancla.insertAdjacentHTML('afterend', bloqueManuales());
+      document.getElementById('manual-plat-ml').addEventListener('click', function () { platSel = 'ML'; pintarPlat(); });
+      document.getElementById('manual-plat-tn').addEventListener('click', function () { platSel = 'TN'; pintarPlat(); });
+      document.getElementById('manual-add').addEventListener('click', agregarManual);
+      pintarPlat();
+      renderManuales();
+    }
+
+    var area = document.getElementById('scanner-list-area');
+    if (area && !area.dataset.pkUntoggle) {
+      area.dataset.pkUntoggle = '1';
+      area.addEventListener('click', function (e) {
+        if (!state || state.dispatchType !== 'tiendanube') return;
+        var card = e.target.closest ? e.target.closest('.tn-card') : null;
+        if (!card) return;
+        var order = card.getAttribute('data-order');
+        if (!order) return;
+        var pkg = (typeof findTnPackage === 'function') ? findTnPackage(order) : null;
+        if (!pkg || pkg.estado !== 'despachado') return;
+        e.stopPropagation();
+        pkg.estado = 'pendiente';
+        delete pkg.scannedAt;
+        delete pkg.scannedCode;
+        for (var i = currentDespacho.length - 1; i >= 0; i--) {
+          if (String(currentDespacho[i]['Numero de Etiqueta']) === String(order)) currentDespacho.splice(i, 1);
+        }
+        state._completionNotified = false;
+        saveState();
+        if (typeof refreshUI === 'function') refreshUI();
+        toast('Desmarcado #' + order, 'info', 2000);
+      }, true);
+    }
+
+    if (window.lucide && lucide.createIcons) { try { lucide.createIcons(); } catch (e) {} }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { setTimeout(montar, 0); });
+  } else {
+    setTimeout(montar, 0);
+  }
+})();
+</script>
+
+
+<!-- SmartPost: envios manuales + cierre del dia + correos (pantalla de inicio) -->
+<script>
+(function () {
+  'use strict';
+
+  var KEY = 'parka_envios_manuales';
+  var plat = 'ML';
+
+  function hoy() { return new Date().toISOString().slice(0, 10); }
+  function url() { return (typeof getGDriveUrl === 'function') ? getGDriveUrl() : ''; }
+  function aviso(m, t, ms) { try { toast(m, t || 'info', ms || 3000); } catch (e) { alert(m); } }
+
+  async function post(action, data) {
+    var u = url();
+    if (!u) return null;
+    try {
+      var r = await fetch(u, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: action, data: data }),
+        redirect: 'follow'
+      });
+      return await r.json();
+    } catch (e) { return null; }
+  }
+
+  function locales() {
+    try {
+      var all = JSON.parse(localStorage.getItem(KEY) || '[]');
+      return all.filter(function (m) { return m.fecha === hoy(); });
+    } catch (e) { return []; }
+  }
+
+  function pintarLista() {
+    var c = document.getElementById('sp-lista');
+    if (!c) return;
+    var l = locales();
+    if (!l.length) { c.innerHTML = '<p style="color:#94a3b8;font-size:12px;text-align:center;padding:12px 0;">Todavia no cargaste envios hoy</p>'; return; }
+    c.innerHTML = l.map(function (m) {
+      var col = m.plataforma === 'ML' ? '#b45309' : '#0369a1';
+      var bg  = m.plataforma === 'ML' ? '#fef3c7' : '#e0f2fe';
+      var ref = m.numero ? ((m.plataforma === 'ML' ? 'Venta ' : 'Orden ') + m.numero) : '';
+      return '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #f1f5f9;">' +
+        '<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;background:' + bg + ';color:' + col + ';">' + m.plataforma + '</span>' +
+        '<div style="flex:1;min-width:0;">' +
+          '<p style="margin:0;font-size:13px;font-weight:600;color:#1e293b;">' + (m.nombre || '') + '</p>' +
+          '<p style="margin:0;font-size:11px;color:#64748b;">' + (m.articulo || '') + (ref ? ' &middot; ' + ref : '') + '</p>' +
+        '</div>' +
+        '<span style="font-size:11px;color:#94a3b8;">' + (m.hora || '') + '</span></div>';
+    }).join('');
+  }
+
+  function pintarPlat() {
+    var a = document.getElementById('sp-ml'), b = document.getElementById('sp-tn'), n = document.getElementById('sp-numero');
+    if (!a || !b) return;
+    var on  = 'flex:1;padding:10px;border-radius:12px;border:2px solid #2f5d3a;background:#2f5d3a;color:#fff;font-weight:700;font-size:13px;';
+    var off = 'flex:1;padding:10px;border-radius:12px;border:1px solid #e2e8f0;background:#fff;color:#64748b;font-weight:700;font-size:13px;';
+    a.style.cssText = plat === 'ML' ? on : off;
+    b.style.cssText = plat === 'TN' ? on : off;
+    if (n) n.placeholder = plat === 'ML' ? 'Numero de venta (Mercado Libre)' : 'Numero de orden (Tienda Nube)';
+  }
+
+  async function cargarConfig() {
+    var d = await post('getConfig', null);
+    if (!d) return;
+    var m = document.getElementById('sp-mail'), c = document.getElementById('sp-copia'), h = document.getElementById('sp-hora');
+    if (m && !m.value) m.value = d.mail || '';
+    if (c && !c.value) c.value = d.copia || '';
+    if (h && !h.value) h.value = (d.hora === 0 || d.hora) ? d.hora : 17;
+  }
+
+  async function guardarCorreos() {
+    var m = document.getElementById('sp-mail').value.trim();
+    var c = document.getElementById('sp-copia').value.trim();
+    var h = document.getElementById('sp-hora').value.trim();
+    if (m.indexOf('@') === -1) { aviso('El correo principal no es valido', 'warn'); return; }
+    if (c && c.indexOf('@') === -1) { aviso('El correo adicional no es valido', 'warn'); return; }
+    var b = document.getElementById('sp-guardar-mails');
+    b.disabled = true; b.style.opacity = '0.6';
+    var d = await post('setConfig', { mail: m, copia: c, hora: h });
+    b.disabled = false; b.style.opacity = '1';
+    if (d && d.ok) aviso('Guardado. Cierre automatico ' + d.hora + ' hs', 'ok', 4000);
+    else aviso((d && d.error) ? d.error : 'No se pudo guardar', 'error', 4000);
+  }
+
+  async function agregar() {
+    var n = document.getElementById('sp-nombre').value.trim();
+    var a = document.getElementById('sp-articulo').value.trim();
+    var num = document.getElementById('sp-numero').value.trim();
+    if (!n || !a) { aviso('Completa nombre y articulo', 'warn'); return; }
+    if (!num) { aviso(plat === 'ML' ? 'Falta el numero de venta' : 'Falta el numero de orden', 'warn'); return; }
+    var b = document.getElementById('sp-agregar');
+    b.disabled = true; b.style.opacity = '0.6';
+    var env = { nombre: n, articulo: a, numero: num, plataforma: plat, fecha: hoy(), hora: new Date().toTimeString().slice(0,5) };
+    var d = await post('envioManual', env);
+    b.disabled = false; b.style.opacity = '1';
+    if (!d || !d.ok) { aviso('No se pudo guardar el envio', 'error', 4000); return; }
+    var all = [];
+    try { all = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) {}
+    all.push(env);
+    try { localStorage.setItem(KEY, JSON.stringify(all)); } catch (e) {}
+    document.getElementById('sp-nombre').value = '';
+    document.getElementById('sp-articulo').value = '';
+    document.getElementById('sp-numero').value = '';
+    pintarLista();
+    aviso('Envio ' + plat + ' guardado', 'ok');
+  }
+
+  async function enviarCierre() {
+    if (!url()) { aviso('Conecta primero el Apps Script', 'warn', 3500); return; }
+    var b = document.getElementById('sp-cierre');
+    var prev = b.innerHTML;
+    b.disabled = true; b.innerHTML = 'Enviando...';
+    var d = await post('cerrarDia', null);
+    b.disabled = false; b.innerHTML = prev;
+    if (d && d.ok && d.count === 0) aviso('No hay despachos registrados hoy', 'info', 4000);
+    else if (d && d.ok) aviso('Cierre enviado a ' + (d.mail || 'gerencia') + ' - ' + d.despachados + ' despachados / ' + d.noDespachados + ' no despachados', 'ok', 6000);
+    else aviso('No se pudo enviar el cierre', 'error', 4000);
+  }
+
+  function bloqueHTML() {
+    var inp = 'width:100%;box-sizing:border-box;margin-bottom:8px;padding:11px;border-radius:12px;border:1px solid #e2e8f0;font-size:14px;';
+    var lbl = 'display:block;font-size:11px;color:#64748b;margin-bottom:2px;';
+    return '' +
+    '<div id="sp-zona" style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;box-shadow:0 1px 2px rgba(0,0,0,.04);padding:16px;margin-bottom:12px;">' +
+      '<p style="margin:0 0 12px;font-size:15px;font-weight:800;color:#2f5d3a;letter-spacing:-.01em;">SmartPost</p>' +
+      '<p style="margin:0 0 8px;font-size:11px;font-weight:700;color:#334155;text-transform:uppercase;letter-spacing:.04em;">Envio manual</p>' +
+      '<div style="display:flex;gap:8px;margin-bottom:8px;">' +
+        '<button id="sp-ml">Mercado Libre</button><button id="sp-tn">Tienda Nube</button>' +
+      '</div>' +
+      '<input id="sp-nombre" type="text" placeholder="Nombre de la persona" style="' + inp + '" />' +
+      '<input id="sp-articulo" type="text" placeholder="Articulo a enviar" style="' + inp + '" />' +
+      '<input id="sp-numero" type="text" placeholder="Numero de venta (Mercado Libre)" style="' + inp + '" />' +
+      '<button id="sp-agregar" style="width:100%;padding:12px;border:0;border-radius:12px;background:#2f5d3a;color:#fff;font-weight:700;font-size:15px;">Agregar envio</button>' +
+      '<div id="sp-lista" style="margin-top:6px;"></div>' +
+      '<div style="height:1px;background:#f1f5f9;margin:14px 0;"></div>' +
+      '<button id="sp-toggle-cfg" style="width:100%;background:none;border:0;padding:0;text-align:left;font-size:11px;font-weight:700;color:#334155;text-transform:uppercase;letter-spacing:.04em;">Correos del cierre &#9662;</button>' +
+      '<div id="sp-cfg" style="display:none;margin-top:10px;">' +
+        '<label style="' + lbl + '">Correo principal</label>' +
+        '<input id="sp-mail" type="email" placeholder="gerencia@magontex.com.ar" style="' + inp + '" />' +
+        '<label style="' + lbl + '">Correo adicional (opcional)</label>' +
+        '<input id="sp-copia" type="email" placeholder="otro@magontex.com.ar" style="' + inp + '" />' +
+        '<label style="' + lbl + '">Hora del cierre automatico (0 a 23)</label>' +
+        '<input id="sp-hora" type="number" min="0" max="23" placeholder="17" style="' + inp + '" />' +
+        '<button id="sp-guardar-mails" style="width:100%;padding:11px;border:0;border-radius:12px;background:#475569;color:#fff;font-weight:700;font-size:14px;">Guardar correos</button>' +
+      '</div>' +
+    '</div>' +
+    '<button id="sp-cierre" style="width:100%;padding:16px;border:0;border-radius:16px;background:#1e293b;color:#fff;font-weight:800;font-size:16px;box-shadow:0 2px 6px rgba(0,0,0,.12);margin-bottom:12px;">Enviar cierre del dia</button>';
+  }
+
+  function montar() {
+    ['manuales-zone', 'btn-cierre-dia', 'sp-fab', 'sp-panel'].forEach(function (id) {
+      var e = document.getElementById(id);
+      if (e) e.remove();
+    });
+
+    if (!document.getElementById('sp-zona')) {
+      var ancla = document.getElementById('history-zone') || document.getElementById('despacho-history-zone');
+      if (!ancla) return;
+      ancla.insertAdjacentHTML('beforebegin', bloqueHTML());
+      document.getElementById('sp-ml').addEventListener('click', function () { plat = 'ML'; pintarPlat(); });
+      document.getElementById('sp-tn').addEventListener('click', function () { plat = 'TN'; pintarPlat(); });
+      document.getElementById('sp-agregar').addEventListener('click', agregar);
+      document.getElementById('sp-cierre').addEventListener('click', enviarCierre);
+      document.getElementById('sp-guardar-mails').addEventListener('click', guardarCorreos);
+      document.getElementById('sp-toggle-cfg').addEventListener('click', function () {
+        var c = document.getElementById('sp-cfg');
+        var abierto = c.style.display === 'block';
+        c.style.display = abierto ? 'none' : 'block';
+        if (!abierto) cargarConfig();
+      });
+      pintarPlat();
+      pintarLista();
+    }
+
+    var area = document.getElementById('scanner-list-area');
+    if (area && !area.dataset.pkUntoggle) {
+      area.dataset.pkUntoggle = '1';
+      area.addEventListener('click', function (e) {
+        if (!state || state.dispatchType !== 'tiendanube') return;
+        var card = e.target.closest ? e.target.closest('.tn-card') : null;
+        if (!card) return;
+        var order = card.getAttribute('data-order');
+        if (!order) return;
+        var pkg = (typeof findTnPackage === 'function') ? findTnPackage(order) : null;
+        if (!pkg || pkg.estado !== 'despachado') return;
+        e.stopPropagation();
+        pkg.estado = 'pendiente';
+        delete pkg.scannedAt;
+        delete pkg.scannedCode;
+        for (var i = currentDespacho.length - 1; i >= 0; i--) {
+          if (String(currentDespacho[i]['Numero de Etiqueta']) === String(order)) currentDespacho.splice(i, 1);
+        }
+        state._completionNotified = false;
+        saveState();
+        if (typeof refreshUI === 'function') refreshUI();
+        toast('Desmarcado #' + order, 'info', 2000);
+      }, true);
+    }
+  }
+
+  var _startScanner = window.startScanner;
+  window.startScanner = function () {
+    try {
+      var t = (typeof resolveDispatchType === 'function') ? resolveDispatchType() : '';
+      if (t === 'tiendanube') return Promise.resolve();
+    } catch (e) {}
+    return _startScanner.apply(this, arguments);
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { setTimeout(montar, 80); });
+  } else {
+    setTimeout(montar, 80);
+  }
+})();
+</script>
+
+</body>
+</html>
