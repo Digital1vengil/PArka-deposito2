@@ -21,6 +21,8 @@ def base_limpia():
     """Cada archivo de tests arranca con la base vacía (más el admin, secciones y catálogo)."""
     from app.db import Base, engine, SessionLocal
     from app.seed import sembrar
+    from app.services import ajustes
+    ajustes.olvidar()
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
     db = SessionLocal()
