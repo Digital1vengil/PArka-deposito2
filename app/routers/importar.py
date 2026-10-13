@@ -30,6 +30,8 @@ async def importar(archivo: UploadFile = File(...), confirmo: str = "", u: Usuar
             f.write(datos)
         try:
             resumen = copiar(f"sqlite:///{ruta}")
+            from ..services import ajustes
+            ajustes.olvidar()
         except Exception as e:  # noqa: BLE001
             return JSONResponse({"error": f"No se pudo importar: {e}"}, status_code=400)
     finally:

@@ -126,7 +126,7 @@ def editar_usuario(uid: int, body: UsuarioIn, u: Usuario = Depends(solo_admin), 
 # ─────────────── Secciones ───────────────
 @router.get("/secciones")
 def secciones_page(request: Request, u: Usuario = Depends(solo_admin), db: Session = Depends(get_db)):
-    secciones = db.scalars(select(Seccion).order_by(Seccion.orden)).all()
+    secciones = db.scalars(select(Seccion).order_by(Seccion.orden, Seccion.id)).all()
     return render(request, "admin_secciones.html", u=u, secciones=secciones)
 
 
@@ -137,6 +137,28 @@ class SeccionIn(BaseModel):
     orden: int = 0
     activa: bool = True
     roles: list[str] = []
+
+
+class OrdenIn(BaseModel):
+    ids: list[int]
+
+
+@router.post("/api/secciones/orden")
+def ordenar_secciones(body: OrdenIn, u: Usuario = Depends(solo_admin), db: Session = Depends(get_db)):
+    """Nuevo orden (arrastrando en la pantalla Secciones): la primera queda 1, la segunda 2…"""
+    secs = {s.id: s for s in db.scalars(select(Seccion)).all()}
+    n = 0
+    for sid in body.ids:
+        s = secs.pop(sid, None)
+        if s:
+            n += 1
+            s.orden = n
+    for s in sorted(secs.values(), key=lambda x: (x.orden, x.id)):  # las que no vinieron quedan al final
+        n += 1
+        s.orden = n
+    registrar(db, u, "seccion_editada", "Orden de secciones", commit=False)
+    db.commit()
+    return {"ok": True}
 
 
 @router.post("/api/secciones/{sid}")
