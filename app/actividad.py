@@ -1,0 +1,72 @@
+from sqlalchemy.orm import Session
+
+from .models import Actividad, Usuario
+
+
+def registrar(db: Session, usuario: Usuario | None, accion: str, detalle: str = "",
+              seccion: str = "", commit: bool = True) -> None:
+    db.add(Actividad(usuario_id=usuario.id if usuario else None,
+                     accion=accion, detalle=detalle, seccion_slug=seccion))
+    if commit:
+        db.commit()
+
+
+ACCIONES = {
+    "pregunta_respondida": "Respondió pregunta de ML",
+    "pregunta_auto": "Respondedor: publicó sola una respuesta en ML",
+    "respondedor_modo": "Cambió el modo del respondedor de ML",
+    "ecommerce_creada": "Creó búsqueda ecommerce",
+    "ecommerce_sumado": "Se sumó a la búsqueda",
+    "ecommerce_error": "Prenda equivocada en la búsqueda",
+    "ecommerce_faltante": "Marcó faltante (búsqueda)",
+    "ecommerce_cerrada": "Cerró búsqueda ecommerce",
+    "login": "Ingresó",
+    "logout": "Salió",
+    "login_fallido": "PIN incorrecto",
+    "lote_cargado": "Cargó lote",
+    "lote_cerrado": "Cerró lote",
+    "lote_borrado": "Borró lote",
+    "escaneo_ok": "Despachó paquete",
+    "escaneo_dup": "Escaneo repetido",
+    "escaneo_no_encontrado": "Código no encontrado",
+    "escaneo_frenado_ml": "Escaneo frenado por ML",
+    "cotejo_ml": "Cotejo con ML",
+    "despacho_manual": "Marcó despachado a mano",
+    "despacho_deshacer": "Deshizo despacho",
+    "tanda_inicio": "Inició despacho",
+    "tanda_fin": "Finalizó despacho",
+    "tarea_creada": "Creó tarea",
+    "tarea_asignada": "Asignó tarea",
+    "tarea_tomada": "Tomó tarea",
+    "tarea_hecha": "Completó tarea",
+    "tarea_reabierta": "Reabrió tarea",
+    "usuario_creado": "Creó usuario",
+    "usuario_editado": "Editó usuario",
+    "accesos_editados": "Cambió accesos",
+    "devolucion": "Cargó devolución",
+    "ubicaciones_creadas": "Creó ubicaciones",
+    "ubicacion_borrada": "Borró ubicación",
+    "ubicacion_asignada": "Asignó ubicación",
+    "recoleccion_creada": "Armó recolección",
+    "recoleccion_cerrada": "Cerró recolección",
+    "recoleccion_borrada": "Borró recolección",
+    "sku_vinculado": "Vinculó SKU",
+    "control_creado": "Cargó control de paquetes",
+    "control_completo": "Controló paquete",
+    "control_error": "Prenda equivocada",
+    "control_faltante": "Marcó faltante",
+    "control_reinicio": "Reinició paquete",
+    "seccion_editada": "Editó sección",
+    "cierre_enviado": "Envió cierre",
+    "cierre_google": "Envió cierre por Google",
+    "drive_guardado": "Guardó despacho en Drive",
+    "drive_pendientes": "Informó pendientes a Drive",
+    "drive_error": "Error con Google Drive",
+    "articulos_importados": "Importó artículos",
+    "panel_iniciado": "Inició el Panel PARKA",
+    "envio_manual": "Cargó envío SmartPost",
+    "envio_manual_borrado": "Borró envío SmartPost",
+    "correos_cierre": "Cambió correos del cierre",
+    "asistente_consulta": "Consultó al asistente",
+    "conexiones_guardadas": "Cambió conexiones",
+}
