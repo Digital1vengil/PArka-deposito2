@@ -12,6 +12,7 @@ Cada venta se devuelve como el mismo "paquete" que arman los archivos (tracking,
 """
 from __future__ import annotations
 
+import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -32,6 +33,55 @@ _lock = threading.Lock()
 _cache: dict = {"ts": 0.0, "data": None}
 _finales: set[str] = set()   # envíos que ya no van a volver a estar pendientes (salieron, cancelados, otra logística)
 _estado: dict[str, str] = {}  # envío ML → último status visto (cancelled, shipped…)
+_finales_cargados = [False]
+HILOS = 6                     # consultas a /shipments en paralelo
+
+
+def _cargar_finales() -> None:
+    """Los envíos que ya salieron se guardan en la base: después de un reinicio no se vuelven a consultar uno por uno."""
+    if _finales_cargados[0]:
+        return
+    _finales_cargados[0] = True
+    try:
+        from ..db import SessionLocal
+        from ..models import Ajuste
+        with SessionLocal() as db:
+            a = db.get(Ajuste, "ml_finales")
+            if a and a.valor:
+                _finales.update(json.loads(a.valor).get("ids") or [])
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _guardar_finales() -> None:
+    try:
+        from ..db import SessionLocal, ahora as _ahora
+        from ..models import Ajuste
+        ids = sorted(_finales, key=lambda x: (len(x), x))[-4000:]
+        txt = json.dumps({"ids": ids})
+        with SessionLocal() as db:
+            a = db.get(Ajuste, "ml_finales")
+            if a is None:
+                db.add(Ajuste(clave="ml_finales", valor=txt))
+            elif a.valor != txt:
+                a.valor = txt
+                a.actualizado_at = _ahora()
+            db.commit()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _envios(sids: list[str]) -> list[tuple[str, dict | None, Exception | None]]:
+    """GET /shipments/{id} de varios envíos a la vez."""
+    def uno(sid):
+        try:
+            return sid, (meli.get(f"/shipments/{sid}") or {}), None
+        except meli.MeliError as e:
+            return sid, None, e
+    if not sids:
+        return []
+    with ThreadPoolExecutor(min(HILOS, len(sids))) as ex:
+        return list(ex.map(uno, sids))
 
 
 # ─────────────────────────── Mercado Libre ───────────────────────────
@@ -74,6 +124,7 @@ def _dia_despacho(sh: dict, tipo: str | None):
 def ml_pendientes(dias: int = 10, max_ordenes: int = 600) -> list[dict]:
     if not meli.configurado():
         raise meli.MeliError("Mercado Libre no está conectado (Conexiones → Mercado Libre directo).")
+    _cargar_finales()
     seller = meli.seller_id()
     desde = (ahora() - timedelta(days=dias)).strftime("%Y-%m-%dT00:00:00.000-03:00")
     por_envio: dict[str, list[dict]] = {}
@@ -93,14 +144,19 @@ def ml_pendientes(dias: int = 10, max_ordenes: int = 600) -> list[dict]:
         if len(res) < 50 or offset >= total:
             break
     out = []
-    for sid, ordenes in por_envio.items():
-        try:
-            sh = meli.get(f"/shipments/{sid}") or {}
-        except meli.MeliError as e:
-            if e.status == 404:
+    envios = {}
+    antes = len(_finales)
+    for sid, sh, err in _envios(list(por_envio)):
+        if err is not None:
+            if getattr(err, "status", None) == 404:
                 _finales.add(sid)
                 continue
-            raise
+            raise err
+        envios[sid] = sh
+    for sid, ordenes in por_envio.items():
+        sh = envios.get(sid)
+        if sh is None:
+            continue
         st, sub, lg = sh.get("status"), (sh.get("substatus") or ""), sh.get("logistic_type")
         _estado[sid] = st or ""
         tipo = LOGISTICA.get(lg or "")
@@ -134,6 +190,8 @@ def ml_pendientes(dias: int = 10, max_ordenes: int = 600) -> list[dict]:
             hasta=lim.strftime("%d/%m %H:%M") if lim else "", hoy=(dia is None or dia <= hoy()),
             atrasada=bool(dia and dia < hoy()), dia=dia.isoformat() if dia else ""))
     out.sort(key=lambda p: (not p["hoy"], p["tipo"], p["etiqueta"] != "por_imprimir", p["tracking"]))
+    if len(_finales) != antes:
+        _guardar_finales()
     return out
 
 
@@ -181,12 +239,12 @@ def ml_canceladas(dias: int = 0) -> list[dict]:
             break
     out = []
     dia = hoy()
+    traidos = {sid: sh for sid, sh, err in _envios([x for x in por_envio if x not in _canceladas_info]) if err is None}
     for sid, ordenes in por_envio.items():
         info = _canceladas_info.get(sid)
         if info is None:
-            try:
-                sh = meli.get(f"/shipments/{sid}") or {}
-            except meli.MeliError:
+            sh = traidos.get(sid)
+            if sh is None:
                 continue
             hist = sh.get("status_history")
             lista = not isinstance(hist, dict) or bool(hist.get("date_ready_to_ship"))

@@ -24,7 +24,7 @@ import urllib.request
 from . import ajustes
 
 TIMEOUT = 20
-PAUSA = 0.35          # segundos mínimos entre llamadas al proxy
+PAUSA = 0.12          # segundos mínimos entre el inicio de dos llamadas al proxy (pueden ir en paralelo)
 _lock = threading.Lock()
 _ultima = [0.0]
 _yo: dict = {}        # caché de /users/me (id del vendedor)
@@ -57,11 +57,26 @@ def _esperar_turno():
 
 
 def _pedir(req: urllib.request.Request) -> dict:
+    for intento in range(4):
+        try:
+            return _pedir1(req)
+        except _Reintentar:
+            time.sleep(1.0 + intento)
+    return _pedir1(req, reintentar=False)
+
+
+class _Reintentar(Exception):
+    pass
+
+
+def _pedir1(req: urllib.request.Request, reintentar: bool = True) -> dict:
     _esperar_turno()
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
             txt = r.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
+        if e.code == 429 and reintentar:
+            raise _Reintentar() from None
         cuerpo = e.read().decode("utf-8", "replace")
         try:
             j = json.loads(cuerpo)

@@ -1,5 +1,6 @@
 """Ajustes guardados en la base (los carga el admin desde Conexiones). Si no hay, se usa el .env."""
 import os
+import time
 
 from sqlalchemy.orm import Session
 
@@ -63,7 +64,30 @@ CLAVES = {
 }
 
 
+# Caché en memoria: cada lectura iba a la base (en la nube, un viaje a Neon por cada llamada a ML).
+# Se invalida al guardar desde Conexiones; los "*_estado" no se cachean (cambian solos).
+CACHE_SEG = 30
+_cache: dict[str, tuple[float, str]] = {}
+
+
+def olvidar(clave: str | None = None) -> None:
+    if clave is None:
+        _cache.clear()
+    else:
+        _cache.pop(clave, None)
+
+
 def leer(clave: str, db: Session | None = None) -> str:
+    c = _cache.get(clave)
+    if c and time.monotonic() - c[0] < CACHE_SEG:
+        return c[1]
+    v = _leer(clave, db)
+    if not clave.endswith("_estado"):
+        _cache[clave] = (time.monotonic(), v)
+    return v
+
+
+def _leer(clave: str, db: Session | None = None) -> str:
     env, defecto, _ = CLAVES[clave]
     propia = db is None
     db = db or SessionLocal()
@@ -88,6 +112,7 @@ def guardar(db: Session, clave: str, valor: str) -> None:
     else:
         a.valor = valor
     db.commit()
+    olvidar(clave)
 
 
 def enmascarar(v: str) -> str:
