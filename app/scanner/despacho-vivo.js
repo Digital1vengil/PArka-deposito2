@@ -344,20 +344,36 @@
   var interno = processScan;
   var ultimoFuera = '', ultimoFueraT = 0;
 
-  async function explicar(id, tipo) {
+  // noVisto = todavía no se mostró "No encontrado" (Tienda Nube: primero se consulta la guía de SmartPost)
+  function noEncontrado(id, detalle) {
+    beepError();
+    showBanner('error', '❌ No encontrado', 'Código: ' + (id.length > 20 ? id.slice(0, 20) + '…' : id),
+      detalle || 'Este paquete no está en la lista de despacho');
+  }
+  async function explicar(id, tipo, noVisto) {
     try {
       var r = await getJSON('/despacho/api/vivo/envio?tipo=' + tipo + '&codigo=' + encodeURIComponent(id));
-      if (!r.ok || !state || state.dispatchType !== tipo) return;
+      if (!state || state.dispatchType !== tipo) return;
+      if (!r.ok) { if (noVisto) noEncontrado(id, r.error || ''); return; }
       if (r.motivo === 'agregar' && r.paquete) {
         var cancel = buscar(state.canceladas || [], r.paquete.trackingId);
-        if (cancel) return;
-        r.paquete.nueva = true;
-        mergePackages([r.paquete]);
-        state._completionNotified = false;
+        if (cancel) {
+          beepError();
+          showBanner('error', '⛔ VENTA CANCELADA — NO DESPACHAR', cancel.comprador || cancel.trackingId, 'Venta ' + (cancel.ventaId || cancel.trackingId));
+          return;
+        }
+        var yaEstaba = !!buscar(state.packages, r.paquete.trackingId);
+        if (r.guia) { state.spGuias = state.spGuias || {}; state.spGuias[norm(id)] = String(r.paquete.trackingId); }
+        if (!yaEstaba) {
+          r.paquete.nueva = true;
+          mergePackages([r.paquete]);
+          state._completionNotified = false;
+        }
         saveState(); refreshUI();
         lastScanRaw = ''; lastScanTime = 0;
         interno(String(r.paquete.trackingId));
-        toast('➕ Entró recién en ML: se sumó a la lista', 'info', 3500);
+        if (r.guia) toast('📦 Guía SmartPost ' + r.guia + ' → orden #' + r.paquete.trackingId + (r.guia_via === 'nombre' ? ' (por nombre)' : '') + (yaEstaba ? '' : ' · se sumó a la lista'), 'info', 3500);
+        else toast(tipo === 'tiendanube' ? '➕ Orden por enviar: se sumó a la lista' : '➕ Entró recién en ML: se sumó a la lista', 'info', 3500);
         return;
       }
       if (r.motivo === 'ya_escaneada') {
@@ -371,7 +387,7 @@
       }
       beepError();
       showBanner('error', '❌ No va en este despacho', 'Código: ' + (id.length > 20 ? id.slice(0, 20) + '…' : id), r.mensaje || '');
-    } catch (e) { /* sin conexión: queda el "No encontrado" */ }
+    } catch (e) { if (noVisto) noEncontrado(id, 'Sin conexión para consultar la guía'); }
   }
 
   processScan = function (raw) {
@@ -392,8 +408,18 @@
     var p = buscar(state.packages, id);
     if (p) return interno(norm(p.trackingId) === norm(id) ? raw : String(p.trackingId));
     if (state.dispatchType === 'tiendanube' && typeof findTnPackage === 'function' && findTnPackage(id)) return interno(raw);
-    interno(raw); // muestra "No encontrado"
     var ahora = Date.now();
+    if (state.dispatchType === 'tiendanube') {
+      // Etiqueta de SmartPost: el nº de guía no es el nº de orden → se consulta la guía y se busca la orden
+      var g = state.spGuias && state.spGuias[norm(id)];
+      if (g && buscar(state.packages, g)) return interno(String(g));
+      if (id === ultimoFuera && ahora - ultimoFueraT < 4000) return;
+      ultimoFuera = id; ultimoFueraT = ahora;
+      showBanner('idle', '🔎 Buscando la guía…', 'Código: ' + (id.length > 20 ? id.slice(0, 20) + '…' : id), 'Consultando SmartPost y Tienda Nube');
+      explicar(id, 'tiendanube', true);
+      return;
+    }
+    interno(raw); // muestra "No encontrado"
     if (id === ultimoFuera && ahora - ultimoFueraT < 4000) return;
     ultimoFuera = id; ultimoFueraT = ahora;
     explicar(id, state.dispatchType);
