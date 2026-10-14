@@ -66,6 +66,7 @@
     original(raw);
     const tipo = tipoActual();
     if (conectado === false || !estabaPendiente || (tipo !== 'flex' && tipo !== 'colecta')) return;
+    if (pkgAntes.tn) return;   // orden de Tienda Nube (SmartPost) dentro de Flex: no es un envío de ML
     if (pkgAntes.estado === 'despachado') validar(id);
   };
   window.processScan = processScan;

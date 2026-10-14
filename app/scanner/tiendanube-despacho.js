@@ -6,7 +6,13 @@
   if (typeof processScan !== 'function') return;
 
   function esTN() { return !!(state && state.dispatchType === 'tiendanube'); }
-  function pkgDe(id) { return esTN() && typeof findTnPackage === 'function' ? findTnPackage(id) : null; }
+  function pkgDe(id) {
+    if (!state) return null;
+    if (esTN()) return typeof findTnPackage === 'function' ? findTnPackage(id) : null;
+    // Flex lleva también las órdenes de Tienda Nube que salen por SmartPost (paquetes con tn)
+    const n = String(id || '').trim();
+    return state.packages.find(p => p.tn && (String(p.trackingId) === n || (p.ordenes || []).indexOf(n) !== -1)) || null;
+  }
 
   async function avisar(pkg) {
     const numero = String(pkg.ventaId || pkg.trackingId || '').replace(/^#/, '').trim();
