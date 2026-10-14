@@ -279,8 +279,14 @@ window.pdAvisos = (function () {
     } catch (e) { /* sin conexión: se reintenta */ }
   }
   window.pdNovedadesYa = revisar;
+  // Con la pestaña oculta no se consulta (ahorra pedidos al servidor); al volver se revisa enseguida.
   setTimeout(revisar, 1500);
-  setInterval(revisar, 30000);
-  setInterval(cargar, 120000);     // el aviso "Búsqueda del día" se actualiza con el total
+  setInterval(() => { if (!document.hidden) revisar(); }, 30000);
+  setInterval(() => { if (!document.hidden) cargar(); }, 120000);     // el aviso "Búsqueda del día" se actualiza con el total
+  let ocultaDesde = 0;
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { ocultaDesde = Date.now(); return; }
+    if (Date.now() - ocultaDesde > 20000) revisar();
+  });
   return { toggle, cerrar, leerTodo, permiso, cargar };
 })();
