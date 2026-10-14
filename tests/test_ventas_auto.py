@@ -139,8 +139,8 @@ def test_supervision_ve_avisos_que_el_operario_no(monkeypatch):
 
 
 def test_busqueda_individual_por_dia_sin_arrastre(monkeypatch):
-    """Lo pendiente de ayer NO pasa a la de hoy: la de ayer se cierra como está y la venta no se vuelve a sumar
-    aunque ML la siga mostrando lista para despachar."""
+    """La de ayer se cierra. Lo que ML sigue mostrando para despachar hoy (555) pasa a la de hoy;
+    lo pendiente de ayer que ML ya no muestra (556) se queda en la de ayer."""
     _mocks(monkeypatch)
     from datetime import timedelta
     from app.db import SessionLocal, hoy
@@ -155,28 +155,38 @@ def test_busqueda_individual_por_dia_sin_arrastre(monkeypatch):
         db.add(vieja)
         db.flush()
         from app.services import control as csvc
-        csvc.agregar_paquetes(db, vieja, [{"tracking": "555", "tipo": "flex", "items": [{"sku": "X", "producto": "Vieja", "cantidad": 1}]}])
+        csvc.agregar_paquetes(db, vieja, [{"tracking": "555", "tipo": "flex", "items": [{"sku": "X", "producto": "Vieja", "cantidad": 1}]},
+                                          {"tracking": "556", "tipo": "flex", "items": [{"sku": "X", "producto": "Ya salió", "cantidad": 1}]}])
         db.commit()
         vid = vieja.id
-        T.SH["555"] = {"status": "ready_to_ship", "substatus": "printed", "logistic_type": "self_service"}
-        try:
-            va.sincronizar(db, forzar=True)
-        finally:
-            T.SH.pop("555", None)
+        extra = [dict(clave="ml:555", tracking="555", tipo="flex", etiqueta="lista", hoy=True, dia="",
+                      items=[{"sku": "X", "cantidad": 1}])]
+        orig = ventas_api.todas
+
+        def todas(refrescar=False):
+            d = orig(refrescar)
+            d["ml"]["paquetes"] = list(d["ml"]["paquetes"]) + extra
+            return d
+        monkeypatch.setattr(ventas_api, "todas", todas)
+        va.sincronizar(db, forzar=True)
         hoyc = va.busqueda_del_dia(db)
-        trks = {p.tracking for p in hoyc.paquetes}
-        assert "101" in trks and "555" not in trks
+        trks = [p.tracking for p in hoyc.paquetes]
+        assert "101" in trks and "555" in trks and "556" not in trks
+        assert trks.count("555") == 1
         v = db.get(Control, vid)
-        assert v.estado == "cerrado" and {p.tracking for p in v.paquetes} == {"555"}
+        assert v.estado == "cerrado" and {p.tracking for p in v.paquetes} == {"556"}
+        # otra vuelta no la duplica
+        va.sincronizar(db, forzar=True)
+        assert [p.tracking for p in va.busqueda_del_dia(db).paquetes].count("555") <= 1
     finally:
         db.close()
 
 
-def test_atrasada_de_otro_dia_no_entra():
-    assert not ventas_auto._es_del_dia({"tracking": "1", "hoy": True, "atrasada": True}, set())
-    assert ventas_auto._es_del_dia({"tracking": "1", "hoy": True, "atrasada": False}, set())
-    assert not ventas_auto._es_del_dia({"tracking": "1", "venta_id": "9", "hoy": True}, {"9"})
-    assert not ventas_auto._es_del_dia({"tracking": "1", "hoy": False}, set())
+def test_todo_lo_de_envios_de_hoy_entra():
+    """Todo lo que ML muestra en "Envíos de hoy" entra (también las demoradas); "Próximos días" no."""
+    assert ventas_auto._es_del_dia({"tracking": "1", "hoy": True, "atrasada": True})
+    assert ventas_auto._es_del_dia({"tracking": "1", "hoy": True, "atrasada": False})
+    assert not ventas_auto._es_del_dia({"tracking": "1", "hoy": False})
 
 
 def test_reparar_arrastre_devuelve_lo_de_ayer(monkeypatch):
@@ -288,7 +298,8 @@ def test_recolectores_entran_solos_a_cada_busqueda_nueva(monkeypatch):
 
 def test_venta_de_ayer_que_ml_pide_hoy_pasa_a_la_busqueda_de_hoy(monkeypatch):
     """Flex vendida ayer después del corte quedó en la búsqueda de ayer (cerrada) sin terminar: como ML la pide
-    hoy, pasa a la de hoy con su etiqueta actualizada. Lo atrasado (ML lo pedía ayer) no se trae."""
+    hoy, pasa a la de hoy con su etiqueta actualizada. La demorada (ML la pedía ayer y sigue sin salir) también.
+    Lo que ML ya no muestra pendiente se queda en la de ayer."""
     _mocks(monkeypatch)
     from datetime import timedelta
     from app.db import SessionLocal, hoy
@@ -305,6 +316,7 @@ def test_venta_de_ayer_que_ml_pide_hoy_pasa_a_la_busqueda_de_hoy(monkeypatch):
         db.flush()
         ayer.paquetes.append(ControlPaquete(tracking="482", tipo="flex", etiqueta="por_imprimir"))
         ayer.paquetes.append(ControlPaquete(tracking="483", tipo="flex", etiqueta="lista"))
+        ayer.paquetes.append(ControlPaquete(tracking="484", tipo="flex", etiqueta="lista"))
         db.commit()
         H = hoy().isoformat()
         extra = [dict(clave="ml:482", tracking="482", tipo="flex", etiqueta="lista", hoy=True, atrasada=False, dia=H,
@@ -322,8 +334,8 @@ def test_venta_de_ayer_que_ml_pide_hoy_pasa_a_la_busqueda_de_hoy(monkeypatch):
         c = ventas_auto.busqueda_del_dia(db)
         por = {p.tracking: p for p in c.paquetes}
         assert "482" in por and por["482"].etiqueta == "lista"
-        assert "483" not in por
-        assert {p.tracking for p in ayer.paquetes} == {"483"}
+        assert "483" in por
+        assert {p.tracking for p in ayer.paquetes} == {"484"}
     finally:
         db.close()
 
@@ -340,3 +352,6 @@ def test_dia_de_despacho_en_hora_argentina():
     sh = {"shipping_option": {"estimated_delivery_time": {"date": M + "T00:00:00.000-03:00"}}}
     assert ventas_api._dia_despacho(sh, "flex").isoformat() == M
     assert ventas_api._dia_despacho(sh, "colecta") is None
+    # Colecta sin fecha límite: "buffering" (00:00 UTC) es el día de despacho, sin pasarlo a hora argentina
+    sh = {"shipping_option": {"buffering": {"date": M + "T00:00:00.000Z"}}}
+    assert ventas_api._dia_despacho(sh, "colecta").isoformat() == M
