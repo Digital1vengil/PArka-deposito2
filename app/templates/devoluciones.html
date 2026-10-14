@@ -15,7 +15,7 @@
       <div class="flex flex-wrap items-center gap-3 mb-3">
         <label class="lbl !mb-0">📷 Escanear</label>
         <span class="text-sm text-zinc-500">Cada escaneo suma como:</span>
-        <div class="flex gap-2">
+        <div id="estado-scan-box" class="flex gap-2 rounded-lg transition-colors">
           <button class="btn btn-chico estado-scan" data-e="OPTIMO" onclick="setEstadoScan('OPTIMO')">Óptimo</button>
           <button class="btn btn-chico estado-scan" data-e="FALLA" onclick="setEstadoScan('FALLA')">Falla</button>
         </div>
@@ -58,7 +58,7 @@
         </div>
         <div>
           <label class="lbl">Estado</label>
-          <div class="flex gap-2">
+          <div id="estado-box" class="flex gap-2 rounded-lg transition-colors">
             <button class="btn estado" data-e="OPTIMO" onclick="setEstado('OPTIMO')">Óptimo</button>
             <button class="btn estado" data-e="FALLA" onclick="setEstado('FALLA')">Falla</button>
           </div>
@@ -122,7 +122,7 @@
 {% endblock %}
 {% block scripts %}
 <script>
-let modelos = [], modelo = null, color = null, variante = null, cant = 1, estado = 'OPTIMO';
+let modelos = [], modelo = null, color = null, variante = null, cant = 1, estado = '';   // Óptimo / Falla: sin valor por defecto, hay que elegirlo
 let items = [];   // {id, articulo, color, talle, sku, cantidad, estado, plataforma}
 // Plataforma por prenda (ML / TN), igual que Óptimo / Falla. Sin elegir no deja agregar ni escanear.
 let plataforma = '', platScan = '';
@@ -154,9 +154,9 @@ q.addEventListener('keydown', e => {
 });
 
 // ── Escáner: lee el lector USB/Bluetooth aunque el cursor no esté en el buscador ──
-let estadoScan = 'OPTIMO', _buf = '', _bufT = 0, ultimoScan = null, _ocupado = Promise.resolve();
+let estadoScan = '', _buf = '', _bufT = 0, ultimoScan = null, _ocupado = Promise.resolve();
 function setEstadoScan(e) {
-  estadoScan = e;
+  estadoScan = e; _marcarFalta('estado-scan-box', false);
   document.querySelectorAll('.estado-scan').forEach(b => {
     const on = b.dataset.e === e;
     b.className = 'btn btn-chico estado-scan ' + (on ? (e === 'FALLA' ? 'btn-rojo' : 'btn-turq') : 'btn-gris');
@@ -189,6 +189,7 @@ function escanear(cod) {   // en fila: si pasan dos prendas seguidas, se procesa
 async function _escanear(cod) {
   if (!cod) return;
   if (!document.getElementById('modal-resumen').classList.contains('hidden')) { beepError(); toast('Cerrá el resumen para seguir escaneando', 'warn'); return; }
+  if (!estadoScan) { beepError(); _marcarFalta('estado-scan-box', true); pintarScan(false, 'Elegí Óptimo o Falla antes de escanear', cod); return; }
   if (!platScan) { beepError(); _marcarFalta('plat-scan-box', true); pintarScan(false, 'Elegí ML o TN antes de escanear', cod); return; }
   let r;
   try { r = await api('/devoluciones/api/codigo?c=' + encodeURIComponent(cod)); }
@@ -297,7 +298,7 @@ function elegirVariante(id) {
 }
 function cambiarCant(n) { cant = Math.max(1, Math.min(999, cant + n)); document.getElementById('e-cant').textContent = cant; }
 function setEstado(e) {
-  estado = e;
+  estado = e; _marcarFalta('estado-box', false);
   document.querySelectorAll('.estado').forEach(b => {
     const on = b.dataset.e === e;
     b.className = 'btn estado ' + (on ? (e === 'FALLA' ? 'btn-rojo' : 'btn-turq') : 'btn-gris');
@@ -309,6 +310,7 @@ function pintarSel() {
 }
 function agregar() {
   if (!variante) return;
+  if (!estado) { beepError(); toast('Elegí el estado de la prenda: Óptimo o Falla', 'warn', 4000); _marcarFalta('estado-box', true); return; }
   if (!plataforma) { beepError(); toast('Elegí la plataforma de la prenda: ML o TN', 'warn', 4000); _marcarFalta('plat-box', true); return; }
   const k = { id: variante.id, estado, plataforma };
   const ya = items.find(x => clave(x) === clave(k));
@@ -321,7 +323,7 @@ function agregar() {
 // Después de agregar queda todo limpio para cargar el artículo siguiente.
 function limpiarBusqueda() {
   clearTimeout(tBus);
-  cerrarElegir(); color = null; variante = null; cant = 1; setEstado('OPTIMO'); setPlataforma('');
+  cerrarElegir(); color = null; variante = null; cant = 1; setEstado(''); setPlataforma('');
   document.getElementById('e-cant').textContent = 1;
   document.getElementById('e-colores').innerHTML = '';
   document.getElementById('e-talles').innerHTML = '<span class="text-sm text-zinc-500">Elegí un color</span>';
@@ -437,6 +439,6 @@ function _avisarNuevos(xs) {
 }
 function _chipNuevo(x) { return _nuevos.has(x.id) ? `<span id="nuevo-PD-${x.id}" class="chip chip-alta">NUEVO</span>` : ''; }
 setInterval(() => { if (!document.hidden) historial().catch(() => {}); }, 20000);
-setEstado('OPTIMO'); setEstadoScan('OPTIMO'); setPlataforma(''); setPlatScan(''); pintarLista(); historial();
+setEstado(''); setEstadoScan(''); setPlataforma(''); setPlatScan(''); pintarLista(); historial();
 </script>
 {% endblock %}
