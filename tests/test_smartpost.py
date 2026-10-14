@@ -27,6 +27,8 @@ def _sp(monkeypatch, llamadas=None):
         return GUIAS.get((body or {}).get("nro_guia") or (body or {}).get("remito"), {"guia": None})
     monkeypatch.setattr(smartpost, "llamar", llamar)
     monkeypatch.setattr(smartpost, "activo", lambda *a: True)
+    monkeypatch.setattr(smartpost, "configurado", lambda *a: True)
+    monkeypatch.setattr(smartpost, "panel_configurado", lambda *a: False)
     smartpost.olvidar()
 
 
@@ -38,7 +40,9 @@ def test_leer_guia_y_numero_de_orden(monkeypatch):
     assert not smartpost.leer_guia("NOEXISTE")["encontrada"]
 
 
-def test_match_por_nombre():
+def test_match_por_nombre(monkeypatch):
+    monkeypatch.setattr(smartpost, "configurado", lambda *a: True)
+    monkeypatch.setattr(smartpost, "panel_configurado", lambda *a: False)
     por_enviar = [{"tracking": "7004", "comprador": "Ana María Gómez"}, {"tracking": "7005", "comprador": "Otro"}]
     import app.services.smartpost as sp
     orig = sp.leer_guia
@@ -84,3 +88,64 @@ def test_conexiones_smartpost(monkeypatch):
         assert g["ok"] and g["orden"] == "7004" and g["via"] == "remito"
         assert c.get("/admin/api/conexiones/smartpost/guia?codigo=NOEXISTE").json()["encontrada"] is False
     ajustes.olvidar()
+
+
+# ─────────────── Panel web (Mis Pedidos + guías del día) ───────────────
+PEDIDOS = {"total": 3, "rows": [
+    {"tnb_order_number": 7001, "retiro_id": 6000001, "estadoNombre": "SOLICITUD CONFIRMADA", "cancelado": 0, "empaquetado": 0},
+    {"tnb_order_number": 7004, "retiro_id": 6000004, "estadoNombre": "ENTREGADA", "cancelado": 0, "empaquetado": 0},
+    {"tnb_order_number": 7003, "retiro_id": 6000003, "estadoNombre": "SOLICITUD CONFIRMADA", "cancelado": 0, "empaquetado": 0},
+]}
+GUIAS_HOY = {"total": 3, "rows": [
+    {"id": 6000001, "remito": "01M4X7ED0ZAV", "canal": "TN", "estado": "PEND-SOLICITUD CONFIRMADA", "comprador_apellido_nombre": "Cliente Uno"},
+    {"id": 6000009, "remito": "R-55", "canal": "API", "estado": "PEND-SOLICITUD CONFIRMADA", "comprador_apellido_nombre": "Juan Pérez"},
+    {"id": 6000010, "remito": "CAM-0003", "canal": "API", "estado": "PEND-SOLICITUD CONFIRMADA", "comprador_apellido_nombre": "Cambio"},
+]}
+
+
+def _panel(monkeypatch, llamadas=None):
+    def panel_json(ruta, datos):
+        if llamadas is not None:
+            llamadas.append((ruta, datos))
+        return PEDIDOS if "pedidos" in ruta else GUIAS_HOY
+    monkeypatch.setattr(smartpost, "_panel_json", panel_json)
+    monkeypatch.setattr(smartpost, "panel_configurado", lambda *a: True)
+    monkeypatch.setattr(smartpost, "configurado", lambda *a: False)
+    smartpost.olvidar()
+    from app.services import ventas_api
+    ventas_api._tn_ab.update(ts=0.0, data=None)
+
+
+def test_csrf_del_login():
+    assert smartpost._csrf_de('<meta name="csrf-token" content="abc123">') == "abc123"
+    assert smartpost._csrf_de('<input type="hidden" name="_token" value="zzz">') == "zzz"
+    assert smartpost.pendiente("PEND-SOLICITUD CONFIRMADA") and not smartpost.pendiente("ENTREGADA")
+
+
+def test_despacho_tn_desde_panel(monkeypatch):
+    _mocks(monkeypatch)
+    llamadas = []
+    _panel(monkeypatch, llamadas)
+    with TestClient(app) as c:
+        _login(c)
+        d = c.get("/despacho/api/vivo?tipo=tiendanube&refrescar=1").json()
+        assert d["ok"] and d["fuente"] == "smartpost"
+        ids = [p["trackingId"] for p in d["paquetes"]]
+        assert ids == ["7001", "SP-6000009"]          # 7004 entregada, 7003 cancelada en TN, CAM va por Cambios
+        p = d["paquetes"][0]
+        assert p["tnTracking"] == "6000001" and p["ordenes"] == ["6000001"] and p["orderNum"] == 7001
+        assert d["paquetes"][1]["comprador"] == "Juan Pérez" and d["paquetes"][1]["orderNum"] == 0
+        fecha = [x for x in llamadas if x[0] == "/guias/filter"][0][1]["fecha_remito"]
+        assert " - " in fecha and fecha.count("/") == 4
+        q = lambda cod: c.get(f"/despacho/api/vivo/envio?tipo=tiendanube&codigo={cod}").json()
+        r = q("6000001")
+        assert r["motivo"] == "agregar" and r["paquete"]["trackingId"] == "7001" and r["guia_via"] == "panel"
+        r = q("6000009")
+        assert r["motivo"] == "agregar" and r["paquete"]["trackingId"] == "SP-6000009"
+        assert q("6000004")["motivo"] == "no_lista"     # la guía ya figura entregada
+        assert q("6000003")["motivo"] == "cancelada"
+        assert q("7001")["motivo"] == "agregar"          # el nº de orden también sirve
+        g = c.get("/admin/api/conexiones/smartpost/guia?codigo=6000001").json()
+        assert g["orden"] == "7001" and g["via"] == "panel"
+        p = c.post("/admin/api/conexiones/probar/smartpost").json()
+        assert p["ok"] and "Panel ✓" in p["mensaje"]
