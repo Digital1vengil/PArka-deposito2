@@ -56,6 +56,19 @@
   #re-box.on { display: flex; }
   #re-box .grande { font-size: 7rem; font-weight: 900; line-height: 1; }
   #re-box .bx { border: 2px solid rgba(255,255,255,.35); border-radius: 18px; padding: 1rem; margin-top: .8rem; text-align: left; }
+  /* Escáner: solo el botón acompaña el scroll (encima de ParkIA); la cámara se abre flotando arriba */
+  #scan-fab { position: fixed; right: 1.25rem; bottom: calc(1.25rem + 3.5rem + .75rem + env(safe-area-inset-bottom)); z-index: 44;
+              width: 3.5rem; height: 3.5rem; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center;
+              background: #fff; color: #111; border: 2px solid #111; box-shadow: 0 6px 18px rgba(0,0,0,.22); cursor: pointer; }
+  #scan-fab.hidden { display: none; }
+  #scan-fab.on { background: #111; color: #fff; }
+  #cam-box { position: fixed; z-index: 43; top: calc(3.5rem + .5rem); left: 50%; transform: translateX(-50%);
+             width: min(28rem, calc(100% - 1.5rem)); background: #000; border-radius: 14px; overflow: hidden; box-shadow: 0 14px 40px rgba(0,0,0,.35); }
+  #cam-box.hidden { display: none; }
+  .cam-cab { display: flex; align-items: center; justify-content: space-between; padding: .45rem .75rem; color: #fff; font-size: .85rem; font-weight: 600; }
+  .cam-cab button { color: #fff; background: transparent; border: 0; font-size: 1.1rem; cursor: pointer; padding: 0 .25rem; }
+  @media (max-width: 640px) { #scan-fab { right: 1rem; bottom: calc(1rem + 3.25rem + .75rem + env(safe-area-inset-bottom)); width: 3.25rem; height: 3.25rem; } }
+  body.parkia-on #scan-fab { display: none; }
 </style>{% endblock %}
 {% block contenido %}
 <a href="/" class="text-sm text-zinc-500 hover:text-violeta">← Inicio</a>
@@ -160,17 +173,22 @@
 
   <!-- Mi búsqueda -->
   <section id="t-mia" class="flex flex-col gap-3">
-    <div class="card p-4 sticky top-14 z-20">
+    <div class="card p-4">
       <div class="flex gap-2">
         <input id="esc" class="input flex-1 !text-lg !py-3" placeholder="Escaneá la prenda que encontraste" autocomplete="off">
         <button class="btn btn-gris" onclick="toggleCam()" title="Usar la cámara del celular">📷</button>
       </div>
-      <div id="cam-box" class="hidden mt-2"><div id="qr-reader" class="w-full min-h-[200px] bg-black rounded-xl overflow-hidden"></div></div>
+      <div id="cam-box" class="hidden"><div class="cam-cab"><span>📷 Apuntá al código de barras</span><button type="button" onclick="pararCam()" aria-label="Cerrar cámara">✕</button></div>
+        <div id="qr-reader" class="w-full min-h-[200px] bg-black overflow-hidden"></div></div>
       <div id="mia-info" class="text-sm mt-2"></div>
       <div id="box-bar" class="mt-2"></div>
     </div>
     <div id="mia-lista" class="flex flex-col gap-3"></div>
   </section>
+  <button id="scan-fab" type="button" class="hidden" onclick="toggleCam()" title="Escanear con la cámara" aria-label="Escanear con la cámara">
+    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+      <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8v8M10 8v8M13 8v8M16 8v8"/></svg>
+  </button>
 
   <!-- Equipo -->
   <section id="t-equipo" class="card p-4 hidden">
@@ -482,13 +500,14 @@ function pintarCabecera() {
     document.getElementById('re-reabrir').classList.toggle('hidden', abierta);
   }
   document.getElementById('esc').disabled = !abierta || !re.me_sume;
+  fabScan();
 }
 function tab(t) {
   tabAct = t;
   document.querySelectorAll('#tabs [data-tab]').forEach(b => b.classList.toggle('activo', b.dataset.tab === t));
   ['mia', 'equipo', 'todo', 'box', 'mesa'].forEach(x => { const el = document.getElementById('t-' + x); if (el) el.classList.toggle('hidden', x !== t); });
   if (t !== 'mia') pararCam();
-  cargarTab(); foco();
+  fabScan(); cargarTab(); foco();
 }
 function cargarTab() { if (tabAct === 'mia') cargarMia(); else if (tabAct === 'equipo') pintarEquipo(); else if (tabAct === 'todo') cargarTodo(); else if (tabAct === 'box') cargarBoxes(); }
 async function sumarme() {
@@ -791,17 +810,22 @@ const inpEsc = document.getElementById('esc');
 inpEsc.addEventListener('keydown', e => { if (e.key !== 'Enter') return; e.preventDefault(); const v = inpEsc.value; inpEsc.value = ''; procesar(v); });
 
 let scanner = null, ultimo = '', ultimoT = 0;
+function fabScan() {
+  const f = document.getElementById('scan-fab'); if (!f) return;
+  f.classList.toggle('hidden', tabAct !== 'mia' || document.getElementById('esc').disabled);
+  f.classList.toggle('on', !document.getElementById('cam-box').classList.contains('hidden'));
+}
 async function toggleCam() {
   if (scanner) { pararCam(); return; }
   if (typeof Html5Qrcode === 'undefined') { toast('No se pudo cargar el lector de la cámara (¿sin internet?)', 'error'); return; }
-  document.getElementById('cam-box').classList.remove('hidden');
+  document.getElementById('cam-box').classList.remove('hidden'); document.getElementById('scan-fab')?.classList.add('on');
   try {
     scanner = new Html5Qrcode('qr-reader', { verbose: false, experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
     await scanner.start({ facingMode: 'environment' }, { fps: 12, qrbox: (w, h) => ({ width: Math.round(w * .9), height: Math.max(80, Math.round(h * .35)) }) },
       t => { const n = Date.now(); if (t === ultimo && n - ultimoT < 2500) return; ultimo = t; ultimoT = n; procesar(t); }, () => {});
   } catch (e) { toast('No se pudo abrir la cámara: ' + e, 'error', 6000); pararCam(); }
 }
-async function pararCam() { if (scanner) { try { await scanner.stop(); } catch {} scanner = null; } const b = document.getElementById('cam-box'); if (b) b.classList.add('hidden'); }
+async function pararCam() { if (scanner) { try { await scanner.stop(); } catch {} scanner = null; } const b = document.getElementById('cam-box'); if (b) b.classList.add('hidden'); document.getElementById('scan-fab')?.classList.remove('on'); }
 
 // ───────── acciones de quien organiza ─────────
 async function sumarArchivos(input) {
