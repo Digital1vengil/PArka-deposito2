@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse, RedirectResponse
 from openpyxl import Workbook
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from ..actividad import registrar
@@ -210,8 +210,10 @@ def estado(u: Usuario = Depends(acceso), db: Session = Depends(get_db), lote: in
     # también mostrar lotes cerrados hoy
     cerrados_hoy = db.scalars(select(Lote).where(Lote.fecha == hoy(), Lote.cerrado.is_(True))).all()
     lj = []
-    for l in list(lotes) + list(cerrados_hoy):
-        h, t = svc.progreso_lote(db, l.id)
+    todos = list(lotes) + list(cerrados_hoy)
+    prog = svc.progreso_lotes(db, [l.id for l in todos])
+    for l in todos:
+        h, t = prog.get(l.id, (0, 0))
         lj.append({"id": l.id, "tipo": l.tipo, "tipo_nombre": TIPOS_LOTE.get(l.tipo, l.tipo), "nombre": l.nombre,
                    "fecha": l.fecha.strftime("%d/%m"), "hoy": l.fecha == hoy(), "cerrado": l.cerrado,
                    "hechos": h, "total": t,
@@ -226,9 +228,10 @@ def estado(u: Usuario = Depends(acceso), db: Session = Depends(get_db), lote: in
     t = svc.tanda_activa(db, u)
     tanda = None
     if t:
-        tanda = {"id": t.id, "inicio": t.inicio.strftime("%H:%M"), "cantidad": len(t.paquetes)}
+        tanda = {"id": t.id, "inicio": t.inicio.strftime("%H:%M"),
+                 "cantidad": db.scalar(select(func.count()).where(Paquete.tanda_id == t.id)) or 0}
     tareas = [tarea_json(x) for x in tareas_de_seccion(db, "despacho")]
-    sin_drive = sum(1 for p in _paquetes_abiertos_y_hoy(db) if p.estado == "despachado" and not p.drive_enviado)
+    sin_drive = svc.sin_drive(db)
     return {"lotes": lj, "paquetes": paquetes, "tanda": tanda, "tareas": tareas, "usuario": u.nombre,
             "es_admin": u.es_admin, "drive": drive.configurado(), "sin_drive": sin_drive}
 

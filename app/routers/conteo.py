@@ -1,4 +1,5 @@
 """Sección Conteo: se fija un artículo, se cargan cantidades por color y talle, y sale un Excel (y etiquetas opcionales)."""
+from sqlalchemy.orm import selectinload
 import io
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -80,7 +81,7 @@ def confirmar(body: ConfirmarIn, u: Usuario = Depends(acceso), db: Session = Dep
 
 @router.get("/api/historial")
 def historial(u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
-    cs = db.scalars(select(Conteo).order_by(Conteo.id.desc()).limit(25)).all()
+    cs = db.scalars(select(Conteo).options(selectinload(Conteo.items)).order_by(Conteo.id.desc()).limit(25)).all()
     return {"conteos": [conteo_json(c) for c in cs]}
 
 

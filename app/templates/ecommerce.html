@@ -316,7 +316,7 @@ async function autoAhora(b) {
 }
 async function novCargar() { if (window.pdAvisos && pdAvisos.cargar) pdAvisos.cargar(); }   // los avisos están en la campana de arriba
 window.addEventListener('pd-novedad', () => { novCargar(); autoCargar(); if (!document.getElementById('v-inicio').classList.contains('hidden')) lista(); else if (re) refrescar(); });
-autoPintar(AUTO); setInterval(autoCargar, 60000);
+autoPintar(AUTO); setInterval(() => { if (!document.hidden) autoCargar(); }, 60000);
 
 // ───────── ventas por API ─────────
 const ETQ = { por_imprimir: ['🖨 Etiqueta por imprimir', '#fef3c7', '#92400e'], lista: ['✅ Lista para despachar', '#ccfbf1', '#115e59'] };
@@ -461,7 +461,7 @@ async function abrir(id, t) {
   document.getElementById('v-re').classList.remove('hidden');
   pintarCabecera();
   tab(t || (re.me_sume ? 'mia' : 'equipo'));
-  clearInterval(poll); poll = setInterval(refrescar, 15000);
+  clearInterval(poll); poll = setInterval(() => { if (!document.hidden) refrescar(); }, 15000);
 }
 function volver() {
   location.hash = ''; re = null; clearInterval(poll); pararCam();
@@ -866,5 +866,6 @@ async function borrar() {
 if (ORGANIZA) origen(org);
 lista();
 const mh = location.hash.match(/^#re(\d+)$/); if (mh) abrir(+mh[1]);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && re) refrescar(); });
 </script>
 {% endblock %}

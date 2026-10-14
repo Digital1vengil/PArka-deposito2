@@ -78,6 +78,6 @@ async function despachar(codigo) {
   inp.focus();
 }
 document.getElementById('esc').addEventListener('keydown', e => { if (e.key === 'Enter') despachar(); });
-cargar(false); setInterval(() => cargar(false), 60000);
+cargar(false); setInterval(() => { if (!document.hidden) cargar(false); }, 60000);
 </script>
 {% endblock %}

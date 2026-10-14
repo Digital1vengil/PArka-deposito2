@@ -7,6 +7,21 @@ from ..db import hoy
 from ..models import Tarea, Usuario
 
 
+def tareas_de_secciones(db: Session, slugs: list[str]) -> dict[str, list[Tarea]]:
+    """Como tareas_de_seccion pero para varias secciones en una sola consulta."""
+    from datetime import datetime, time
+    inicio = datetime.combine(hoy(), time.min)
+    r: dict[str, list[Tarea]] = {s: [] for s in slugs}
+    if slugs:
+        for t in db.scalars(select(Tarea).where(Tarea.seccion_slug.in_(slugs),
+                                                or_(Tarea.estado != "hecha", Tarea.hecha_at >= inicio))).all():
+            r[t.seccion_slug].append(t)
+    orden_estado = {"en_curso": 0, "pendiente": 1, "hecha": 2}
+    for lst in r.values():
+        lst.sort(key=lambda t: (orden_estado.get(t.estado, 9), t.prioridad != "alta", t.vence or hoy(), t.creada_at))
+    return r
+
+
 def tareas_de_seccion(db: Session, slug: str, incluir_hechas_hoy: bool = True) -> list[Tarea]:
     q = select(Tarea).where(Tarea.seccion_slug == slug)
     if incluir_hechas_hoy:

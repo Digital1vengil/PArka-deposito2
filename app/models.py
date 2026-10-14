@@ -430,7 +430,7 @@ class ControlPaquete(Base):
     control: Mapped[Control] = relationship(back_populates="paquetes")
     controlado_por: Mapped[Optional[Usuario]] = relationship()
     items: Mapped[list["ControlItem"]] = relationship(back_populates="paquete", cascade="all, delete-orphan",
-                                                      order_by="ControlItem.id")
+                                                      order_by="ControlItem.id", lazy="selectin")
 
 
 class ControlItem(Base):
@@ -461,7 +461,7 @@ class ControlItem(Base):
     asignado: Mapped[Optional[Usuario]] = relationship(foreign_keys=[asignado_id])
     buscado_por: Mapped[Optional[Usuario]] = relationship(foreign_keys=[buscado_por_id])
     box_items: Mapped[list["ControlBoxItem"]] = relationship(back_populates="item", cascade="all, delete-orphan",
-                                                             order_by="ControlBoxItem.id")
+                                                             order_by="ControlBoxItem.id", lazy="selectin")
 
 
 class ControlParticipante(Base):
@@ -492,7 +492,7 @@ class ControlBox(Base):
     control: Mapped[Control] = relationship(back_populates="boxes")
     usuario: Mapped[Optional[Usuario]] = relationship()
     items: Mapped[list["ControlBoxItem"]] = relationship(back_populates="box", cascade="all, delete-orphan",
-                                                         order_by="ControlBoxItem.id")
+                                                         order_by="ControlBoxItem.id", lazy="selectin")
 
 
 class ControlBoxItem(Base):
