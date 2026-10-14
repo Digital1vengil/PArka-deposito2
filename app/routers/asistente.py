@@ -115,6 +115,19 @@ def smartpost_guia(codigo: str, u: Usuario = Depends(solo_admin)):
     codigo = (codigo or "").strip()
     if not codigo:
         raise HTTPException(400, "Escribí o escaneá un nº de guía")
+    if smartpost.panel_configurado():
+        try:
+            pg = smartpost.guia_en_panel(codigo)
+        except smartpost.SPError as e:
+            return {"ok": False, "mensaje": str(e)}
+        if not pg:
+            return {"ok": True, "encontrada": False,
+                    "mensaje": f"La guía {codigo} no está en Mis Pedidos ni en las guías de hoy del panel de SmartPost"}
+        return {"ok": True, "encontrada": True, "guia": pg["guia"], "estado": pg["estado"],
+                "nombre": pg.get("destinatario", ""), "remitos": [pg["remito"]] if pg.get("remito") else [],
+                "textos": [], "orden": pg.get("orden", ""), "via": "panel" if pg.get("orden") else "",
+                "aviso_tn": "" if pg.get("orden") else "Guía sin orden de Tienda Nube (entra igual en Despacho si es de hoy)",
+                "crudo": pg}
     try:
         g = smartpost.leer_guia(codigo)
     except smartpost.SPError as e:
@@ -160,11 +173,24 @@ def probar(que: str, u: Usuario = Depends(solo_admin), db: Session = Depends(get
         return {"ok": True, "mensaje": f"Conectado a la app de cambios · {r['total']} cambios · {r['a_preparar']} para preparar / despachar"}
     if que == "smartpost":
         from ..services import smartpost
-        try:
-            r = smartpost.probar()
-        except smartpost.SPError as e:
-            return {"ok": False, "mensaje": str(e)}
-        return {"ok": True, "mensaje": "Conectado a SmartPost" + (f" · cliente {r['cliente']}" if r["cliente"] else "")}
+        partes, ok = [], True
+        if smartpost.configurado():
+            try:
+                r = smartpost.probar()
+                partes.append("API ✓" + (f" (cliente {r['cliente']})" if r["cliente"] else ""))
+            except smartpost.SPError as e:
+                ok = False
+                partes.append(f"API: {e}")
+        if smartpost.panel_configurado():
+            try:
+                r = smartpost.probar_panel()
+                partes.append(f"Panel ✓ ({r['pedidos']} pedidos de Tienda Nube leídos, último #{r['ultimo'] or '-'})")
+            except smartpost.SPError as e:
+                ok = False
+                partes.append(f"Panel: {e}")
+        else:
+            partes.append("Panel: falta usuario y contraseña")
+        return {"ok": ok, "mensaje": " · ".join(partes)}
     if que == "tiendanube":
         from ..services import tiendanube as tn
         try:
