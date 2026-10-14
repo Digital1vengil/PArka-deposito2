@@ -215,45 +215,58 @@ def _de_dias_anteriores(db: Session) -> set[str]:
     return {str(x) for f in filas for x in f if x}
 
 
+def _claves(p: dict) -> list[str]:
+    return [str(k) for k in [p.get("tracking"), p.get("venta_id"), *(p.get("ordenes") or [])] if k]
+
+
 def _traer_de_dias_anteriores(db: Session, c: Control, pendientes: list[dict]) -> list[dict]:
-    """Venta de ML que quedó en la búsqueda de un día anterior (ya cerrada) sin completarse, pero que ML pide
-    despachar HOY (ej. Flex vendida ayer después del corte, o etiqueta impresa después): pasa a la búsqueda de hoy
-    con lo ya buscado. Lo pendiente de ayer que ML pedía para ayer (atrasado) NO se trae."""
-    dia = hoy().isoformat()
-    candidatas = {str(p["tracking"]): p for p in pendientes
-                  if p.get("tipo") in ("flex", "colecta") and p.get("dia") == dia and not p.get("atrasada")}
-    if not candidatas:
+    """Toda venta que ML / TN siguen mostrando para despachar HOY ("Envíos de hoy": etiquetas por imprimir,
+    listas, demoradas; TN por empaquetar) va a la búsqueda de hoy, aunque haya estado en la búsqueda de un día
+    anterior (ej. vendida ayer después del corte, o demorada). Pasa con lo ya buscado / controlado.
+    Lo de días anteriores que ML / TN ya no muestran pendiente se queda donde estaba."""
+    idx: dict[str, dict] = {}
+    for p in pendientes:
+        if p.get("hoy"):
+            for k in _claves(p):
+                idx.setdefault(k, p)
+    if not idx:
         return []
     filas = db.scalars(select(ControlPaquete).join(Control, ControlPaquete.control_id == Control.id)
-                       .where(Control.modo == svc.MODO, Control.fecha < hoy(), Control.estado == "cerrado",
-                              ControlPaquete.tracking.in_(list(candidatas)))).all()
+                       .where(Control.modo == svc.MODO, Control.fecha < hoy())
+                       .order_by(ControlPaquete.id.desc())).all()
     ya = {cp.tracking for cp in c.paquetes}
     movidas = []
     for cp in filas:
-        if cp.cancelado or cp.estado == "completo" or cp.tracking in ya:
+        if cp.cancelado:
             continue
-        p = candidatas[cp.tracking]
-        vieja = db.get(Control, cp.control_id)
+        p = idx.get(cp.tracking) or idx.get(cp.tracking_alt or "") or idx.get(cp.venta_id or "")
+        if not p:
+            continue
+        trk = str(p["tracking"])
+        if trk in ya:
+            continue          # ya está en la de hoy (o vino de otra búsqueda vieja más nueva)
+        if cp.tracking != trk:
+            cp.tracking_alt = cp.tracking_alt or cp.tracking
+            cp.tracking = trk[:60]
         if p.get("etiqueta"):
             cp.etiqueta = str(p["etiqueta"])[:20]
+        vieja = db.get(Control, cp.control_id)
         if vieja is not None:
             vieja.paquetes.remove(cp)
         c.paquetes.append(cp)
-        ya.add(cp.tracking)
+        ya.add(trk)
         movidas.append(p)
     if movidas:
         db.flush()
-        log.info("Ventas de días anteriores que ML pide despachar hoy → búsqueda del día: %s",
+        log.info("Ventas que estaban en búsquedas de días anteriores y se despachan hoy → búsqueda del día: %s",
                  [p["tracking"] for p in movidas])
     return movidas
 
 
-def _es_del_dia(p: dict, previas: set[str]) -> bool:
-    """Venta que va a la búsqueda de HOY: ML pide despacharla hoy (no atrasada de otro día) y no estuvo
-    en la búsqueda de un día anterior."""
-    if not p.get("hoy") or p.get("atrasada"):
-        return False
-    return not any(str(k) in previas for k in [p.get("tracking"), p.get("venta_id"), *(p.get("ordenes") or [])] if k)
+def _es_del_dia(p: dict, previas: set[str] | None = None) -> bool:
+    """Venta que va a la búsqueda de HOY: todo lo que ML / TN muestran para despachar hoy (etiquetas por imprimir,
+    listas y demoradas; TN por empaquetar). Lo de "Próximos días" no entra."""
+    return bool(p.get("hoy"))
 
 
 def reparar_arrastre(db: Session) -> int:
@@ -424,8 +437,7 @@ def sincronizar(db: Session, forzar: bool = False) -> dict:
             c, creada = _crear_busqueda(db), True
         # ventas que quedaron en la búsqueda de ayer pero ML las pide hoy → pasan a la de hoy
         traidas = _traer_de_dias_anteriores(db, c, pendientes) if c is not None else []
-        previas = _de_dias_anteriores(db)
-        del_dia = [p for p in pendientes if _es_del_dia(p, previas)]
+        del_dia = [p for p in pendientes if _es_del_dia(p)]
         # 0) todas las ventas de hoy van a LA búsqueda del día: las que estaban en otra búsqueda abierta
         #    (armada a mano, de archivo…) pasan con lo que ya se buscó / controló
         if c is not None:
@@ -434,11 +446,14 @@ def sincronizar(db: Session, forzar: bool = False) -> dict:
             juntadas = 0
         abiertas = _abiertas(db)
         en_busqueda: dict[str, ControlPaquete] = {}
+        de_hoy: set[str] = set()
         for cc in abiertas:
             for cp in cc.paquetes:
                 en_busqueda.setdefault(cp.tracking, cp)
-        # 1) ventas nuevas de hoy
-        nuevas = [p for p in del_dia if p["tracking"] not in en_busqueda]
+                if cc.fecha == hoy():
+                    de_hoy.update(x for x in (cp.tracking, cp.tracking_alt, cp.venta_id) if x)
+        # 1) ventas nuevas de hoy (una búsqueda vieja que quedó abierta no las frena)
+        nuevas = [p for p in del_dia if not any(k in de_hoy for k in _claves(p))]
         if c is None:
             nuevas = []          # antes de las 8, fin de semana o feriado: esperan a que se abra la del día
         if nuevas:
@@ -450,13 +465,13 @@ def sincronizar(db: Session, forzar: bool = False) -> dict:
             total = len(c.paquetes)
             avisar(db, "nueva", f"🛍️ Se abrió la búsqueda del día ({hoy().strftime('%d/%m')}): {total} venta(s) en total"
                    + (f" · {_por_canal(c)}" if total else ""),
-                   "\n".join(_desc(p) for p in nuevas) if nuevas else
+                   "\n".join(_desc(p) for p in traidas + nuevas) if (nuevas or traidas) else
                    ("" if total else "Todavía no hay ventas: van a ir entrando solas."),
                    c.id, clave=f"apertura:{hoy().isoformat()}:{c.id}")
         if traidas and not creada:
             total = len(c.paquetes)
             for p in traidas:
-                avisar(db, "nueva", f"🛍️ Pasó a hoy (ML la pide hoy): {_desc(p)}",
+                avisar(db, "nueva", f"🛍️ Pasó a hoy (sale hoy): {_desc(p)}",
                        f"Estaba en la búsqueda de un día anterior sin terminar. La búsqueda del día ahora tiene {total} ventas.",
                        c.id, clave=f"traida:{hoy().isoformat()}:{p['clave']}")
         if nuevas and not creada:
