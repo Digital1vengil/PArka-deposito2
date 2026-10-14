@@ -184,11 +184,14 @@
     };
     if (!d.ok) { falla(d.conectado === false ? 'Sin conexión con ' + (FUENTE[tipo] || 'Mercado Libre') : 'No se pudo leer ' + TIPOS[tipo], d.error, true); return; }
     marcarEscaneadosLocales(tipo, d.paquetes);
+    if (d.aviso) toast(d.aviso, 'warn', 6000);
     var nuevas = d.paquetes.filter(function (p) { return !p.escaneado; }).length;
     if (!nuevas) {
-      var nada = tipo === 'tiendanube' ? 'órdenes por enviar' : tipo === 'cambios' ? 'cambios para despachar' : 'envíos listos para despachar';
+      var nada = tipo === 'tiendanube' ? (d.fuente === 'smartpost' ? 'guías de SmartPost pendientes de salir' : 'órdenes por enviar')
+        : tipo === 'cambios' ? 'cambios para despachar' : 'envíos listos para despachar';
       falla(TIPOS[tipo] + ': nada para cargar', d.paquetes.length ? 'Todo lo de hoy ya se despachó.' :
-        'No hay ' + nada + ' hoy' + (d.por_imprimir ? ' (' + d.por_imprimir + ' con etiqueta por imprimir: entran solas cuando se impriman).' : '.'), false);
+        'No hay ' + nada + ' hoy' + (d.por_imprimir ? ' (' + d.por_imprimir + ' con etiqueta por imprimir: entran solas cuando se impriman).' : '.')
+        + (d.aviso ? ' ' + d.aviso : ''), false);
       return;
     }
     empezar(tipo, d);
