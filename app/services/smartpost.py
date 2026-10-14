@@ -46,9 +46,18 @@ def activo(db=None) -> bool:
     return configurado(db) and (ajustes.leer("sp_despacho", db) or "1") != "0"
 
 
+def usar_en_despacho(db=None) -> bool:
+    """Despacho → Tienda Nube usa SmartPost (token de la API y/o usuario del panel) salvo que esté apagado."""
+    return (configurado(db) or panel_configurado(db)) and (ajustes.leer("sp_despacho", db) or "1") != "0"
+
+
 def olvidar():
     with _lock:
         _cache.clear()
+    try:
+        olvidar_panel()
+    except NameError:
+        pass
 
 
 def llamar(ruta: str, body: dict | None = None):
@@ -166,6 +175,22 @@ def orden_de_guia(codigo: str, por_enviar: list[dict]) -> dict:
         c = _cache.get(clave)
         if c and time.monotonic() - c[0] < CACHE_SEG:
             return c[1]
+    if panel_configurado():
+        try:
+            pg = guia_en_panel(codigo)
+        except SPError:
+            pg = None
+        if pg and pg.get("orden"):
+            res = {"encontrada": True, "guia": pg["guia"], "estado": pg["estado"], "nombre": "", "remitos": [],
+                   "numero": pg["orden"], "via": "panel"}
+            with _lock:
+                _cache[clave] = (time.monotonic(), res)
+            return res
+        if pg:
+            return {"encontrada": True, "guia": pg["guia"], "estado": pg["estado"], "nombre": pg.get("destinatario", ""),
+                    "remitos": [pg.get("remito", "")], "numero": "", "via": "", "sin_orden": True}
+    if not configurado():
+        return {"encontrada": False, "guia": codigo, "estado": "", "nombre": "", "remitos": [], "numero": "", "via": ""}
     g = leer_guia(codigo)
     res = {k: g[k] for k in ("encontrada", "guia", "estado", "nombre", "remitos")}
     res.update(numero="", via="")
@@ -189,3 +214,184 @@ def orden_de_guia(codigo: str, por_enviar: list[dict]) -> dict:
             with _lock:
                 _cache[clave] = (time.monotonic(), res)
     return res
+
+
+# ─────────────── Panel web de SmartPost (usuario + contraseña) ───────────────
+# La API pública no dice a qué orden de Tienda Nube corresponde cada guía. Esa relación está en el panel:
+#   • Tiendanube → Mis Pedidos  (POST /tiendanube/mis/pedidos/list): nº de orden TN ↔ nº de guía (retiro_id), estado
+#   • Guías → Búsqueda de Guía  (POST /guias/filter, fecha_remito "dd/mm/aaaa - dd/mm/aaaa"): guías del día
+# La app entra con el usuario y la contraseña que se cargan en Conexiones → SmartPost (secreto en la base).
+import http.cookiejar
+import urllib.parse
+from datetime import timedelta
+
+PANEL_TIMEOUT = 25
+PANEL_CACHE_SEG = 120
+_panel = {"opener": None, "csrf": "", "ts": 0.0}
+_panel_cache: dict[str, tuple[float, list]] = {}
+_panel_lock = threading.Lock()
+
+# Estados de SmartPost en que la guía ya salió o terminó (no va en la lista para despachar)
+FINALES = re.compile(r"ENTREG|CANCEL|ANULAD|DEVUEL|TRANSITO|TRÁNSITO|DISTRIBU|CAMINO|RETIRAD|RENDID|VISITA|SINIESTR|EXTRAV|RECHAZ", re.I)
+
+
+def panel_configurado(db=None) -> bool:
+    return bool((ajustes.leer("sp_panel_usuario", db) or "").strip() and (ajustes.leer("sp_panel_clave", db) or "").strip())
+
+
+def _panel_base() -> str:
+    return (ajustes.leer("sp_panel_url") or "https://smartpostecommerce.epresis.com").strip().rstrip("/")
+
+
+def _csrf_de(html: str) -> str:
+    m = re.search(r'<meta[^>]+name=["\']csrf-token["\'][^>]+content=["\']([^"\']+)', html) \
+        or re.search(r'name=["\']_token["\'][^>]*value=["\']([^"\']+)', html) \
+        or re.search(r'value=["\']([^"\']+)["\'][^>]*name=["\']_token["\']', html)
+    return m.group(1) if m else ""
+
+
+def _pedir_panel(opener, metodo: str, ruta: str, datos: dict | None = None, ajax: bool = False):
+    url = _panel_base() + ruta
+    h = {"User-Agent": "Mozilla/5.0 (PARKA Deposito)", "Accept": "application/json" if ajax else "text/html"}
+    body = None
+    if datos is not None:
+        body = urllib.parse.urlencode(datos).encode()
+        h["Content-Type"] = "application/x-www-form-urlencoded"
+    if ajax:
+        h["X-Requested-With"] = "XMLHttpRequest"
+    try:
+        with opener.open(urllib.request.Request(url, data=body, method=metodo, headers=h), timeout=PANEL_TIMEOUT) as r:
+            return r.status, r.geturl(), r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        return e.code, url, e.read().decode("utf-8", "replace")
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        raise SPError(f"No se pudo conectar con el panel de SmartPost ({getattr(e, 'reason', e)}).") from None
+
+
+def _login():
+    usuario = (ajustes.leer("sp_panel_usuario") or "").strip()
+    clave = (ajustes.leer("sp_panel_clave") or "").strip()
+    if not usuario or not clave:
+        raise SPError("Falta el usuario y la contraseña del panel de SmartPost (Conexiones → SmartPost).")
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+    st, _, html = _pedir_panel(opener, "GET", "/login")
+    tok = _csrf_de(html)
+    if not tok:
+        raise SPError("No se pudo abrir el login del panel de SmartPost.")
+    st, url, html = _pedir_panel(opener, "POST", "/login", {"_token": tok, "username": usuario, "password": clave})
+    if st >= 400 or urllib.parse.urlparse(url).path.rstrip("/").endswith("/login"):
+        raise SPError("SmartPost no aceptó el usuario o la contraseña del panel.")
+    csrf = _csrf_de(html)
+    if not csrf:
+        _, _, h2 = _pedir_panel(opener, "GET", "/tiendanube/mis/pedidos")
+        csrf = _csrf_de(h2)
+    _panel.update(opener=opener, csrf=csrf, ts=time.monotonic())
+
+
+def _panel_json(ruta: str, datos: dict) -> dict:
+    """POST al panel con la sesión abierta; si venció, vuelve a entrar una vez."""
+    with _panel_lock:
+        for intento in range(2):
+            if _panel["opener"] is None:
+                _login()
+            st, url, txt = _pedir_panel(_panel["opener"], "POST", ruta, dict(datos, _token=_panel["csrf"]), ajax=True)
+            vencida = st in (401, 419) or urllib.parse.urlparse(url).path.rstrip("/").endswith("/login") \
+                or (st == 200 and txt.lstrip().startswith("<"))
+            if vencida and intento == 0:
+                _panel.update(opener=None, csrf="")
+                continue
+            if st >= 400:
+                raise SPError(f"El panel de SmartPost respondió {st}.")
+            try:
+                return json.loads(txt)
+            except ValueError:
+                raise SPError("El panel de SmartPost devolvió algo que no es JSON.") from None
+    raise SPError("No se pudo abrir sesión en el panel de SmartPost.")
+
+
+def olvidar_panel():
+    with _panel_lock:
+        _panel.update(opener=None, csrf="", ts=0.0)
+    _panel_cache.clear()
+
+
+def _cacheado(clave: str, fn, refrescar: bool):
+    c = _panel_cache.get(clave)
+    if not refrescar and c and time.monotonic() - c[0] < PANEL_CACHE_SEG:
+        return c[1]
+    data = fn()
+    _panel_cache[clave] = (time.monotonic(), data)
+    return data
+
+
+def pedidos_tn(refrescar: bool = False, cantidad: int = 300) -> list[dict]:
+    """Tiendanube → Mis Pedidos: [{orden, guia, estado, cancelado, empaquetado, creado}] (más nuevos primero)."""
+    def leer():
+        filtros = {"Orden": "", "EstadoOrden": "", "Guia": "", "ClienteFiltro": "", "empaquetado": "",
+                   "Se_Imprimió_la_etiqueta": "", "estado": "", "fechaCreada": "", "fechaModificada": "", "tiendas": ""}
+        j = _panel_json("/tiendanube/mis/pedidos/list",
+                        dict(filtros, limit=cantidad, offset=0, order="desc", sort="tnb_order_number", search=""))
+        out = []
+        for x in (j.get("rows") or []) if isinstance(j, dict) else []:
+            if not x.get("tnb_order_number"):
+                continue
+            out.append({"orden": str(x.get("tnb_order_number")), "guia": str(x.get("retiro_id") or ""),
+                        "estado": str(x.get("estadoNombre") or x.get("tnb_estado_desc") or ""),
+                        "cancelado": bool(x.get("cancelado")), "empaquetado": bool(x.get("empaquetado")),
+                        "creado": str(x.get("created_at") or "")})
+        return out
+    return _cacheado("pedidos", leer, refrescar)
+
+
+def guias_del_dia(dia=None, refrescar: bool = False) -> list[dict]:
+    """Guías → Búsqueda de Guía con fecha de remito = `dia` (hoy por defecto)."""
+    from ..db import hoy
+    dia = dia or hoy()
+    f = dia.strftime("%d/%m/%Y")
+
+    def leer():
+        vacios = dict.fromkeys((
+            "cliente_id sucursal_id tipo_operacion_id ceco_id is_urgente nroGuia_desde nroGuia_hasta rto_cliente "
+            "guia_agente nroPlanilla_desde nroPlanilla_hasta fecha_ultima_planilla nro_constancia fecha_ultimo_estado "
+            "fecha_facturacion fecha_pactada fecha_hora_entrega sector deposito_id con_contrareembolso fecha_repactacion "
+            "fecha_confirmacion trabajo lote servicio_id is_facturada rendida planilla_rendicion fecha_rendicion "
+            "empresa_comprador nombre_comprador calle cuit dni nroSocio provincia localidad cp_comprador celular "
+            "contrareembolso nro_precinto fecha_vencimiento fecha_servicio nro_factura_desde nro_factura_hasta canal "
+            "nro_pedido impreso id_consulta").split(), "")
+        j = _panel_json("/guias/filter", dict(vacios, limit=500, offset=0, sort="id", order="desc",
+                                              fecha_remito=f"{f} - {f}"))
+        out = []
+        for x in (j.get("rows") or []) if isinstance(j, dict) else []:
+            out.append({"guia": str(x.get("id") or ""), "remito": str(x.get("remito") or ""),
+                        "estado": str(x.get("estado") or ""), "canal": str(x.get("canal") or ""),
+                        "destinatario": str(x.get("comprador_apellido_nombre") or x.get("comprador_empresa") or ""),
+                        "domicilio": " ".join(str(x.get(k) or "") for k in ("domicilio", "comprador_localidad")).strip(),
+                        "sucursal": str(x.get("sucursal_cliente") or ""), "fecha": str(x.get("fecha_hora") or "")})
+        return out
+    return _cacheado(f"guias:{f}", leer, refrescar)
+
+
+def pendiente(estado: str) -> bool:
+    """La guía todavía no salió (p. ej. "SOLICITUD CONFIRMADA", "PEND-…")."""
+    return not FINALES.search(estado or "")
+
+
+def probar_panel() -> dict:
+    olvidar_panel()
+    p = pedidos_tn(refrescar=True, cantidad=50)
+    return {"pedidos": len(p), "ultimo": p[0]["orden"] if p else ""}
+
+
+def guia_en_panel(codigo: str) -> dict | None:
+    """Nº de guía escaneado → {orden?, guia, estado, destinatario?, remito?} según el panel (Mis Pedidos / guías de hoy)."""
+    cod = str(codigo or "").strip().lstrip("0")
+    if not cod or not panel_configurado():
+        return None
+    for p in pedidos_tn():
+        if p["guia"].lstrip("0") == cod:
+            return {"orden": p["orden"], "guia": p["guia"], "estado": p["estado"], "cancelado": p["cancelado"]}
+    for g in guias_del_dia():
+        if g["guia"].lstrip("0") == cod:
+            return {"orden": "", "guia": g["guia"], "estado": g["estado"], "destinatario": g["destinatario"],
+                    "remito": g["remito"], "canal": g["canal"]}
+    return None

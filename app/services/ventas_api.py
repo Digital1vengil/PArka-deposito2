@@ -400,6 +400,52 @@ def tn_por_enviar(refrescar: bool = False) -> list[dict]:
     return data
 
 
+_tn_ab = {"ts": 0.0, "data": None}
+
+
+def tn_abiertas(refrescar: bool = False) -> list[dict]:
+    """Órdenes de TN pagadas, abiertas y sin enviar ("Por empaquetar" + "Por enviar"), como paquetes."""
+    with _lock:
+        if not refrescar and _tn_ab["data"] is not None and time.monotonic() - _tn_ab["ts"] < CACHE_SEG:
+            return _tn_ab["data"]
+    data = tn._ordenes_abiertas(lambda o: tn.es_pendiente(o) or tn.es_por_enviar(o), 30, 10)
+    with _lock:
+        _tn_ab.update(ts=time.monotonic(), data=data)
+    return data
+
+
+def tn_despacho_sp(refrescar: bool = False) -> list[dict]:
+    """Despacho → Tienda Nube armado desde el panel de SmartPost:
+    • Mis Pedidos: cada orden de TN con su nº de guía, si la guía todavía no salió y la orden sigue abierta en TN
+      (pagada, sin enviar, no cancelada). Se escanea la etiqueta de SmartPost (nº de guía) o el nº de orden.
+    • Guías con fecha de remito de hoy que no son de Tienda Nube (sin orden): entran como "SP-<guía>"
+      (los cambios CAM-… van por la pestaña Cambios)."""
+    from . import smartpost as sp
+    abiertas = {p["tracking"]: p for p in tn_abiertas(refrescar)}
+    out, vistos = [], set()
+    for pe in sp.pedidos_tn(refrescar):
+        if not pe["guia"] or pe["guia"] in vistos or pe["cancelado"] or not sp.pendiente(pe["estado"]):
+            continue
+        o = abiertas.get(pe["orden"])
+        if not o:
+            continue   # en TN ya figura enviada, cancelada o sin pagar
+        vistos.add(pe["guia"])
+        out.append(dict(o, tracking_alt=pe["guia"], ordenes=[pe["guia"]], sp_estado=pe["estado"],
+                        medio=f"SmartPost · guía {pe['guia']}", clave=f"tn:{o['tracking']}", hoy=True))
+    for g in sp.guias_del_dia(refrescar=refrescar):
+        if (not g["guia"] or g["guia"] in vistos or g["canal"].upper() == "TN" or g["remito"].upper().startswith("CAM-")
+                or not sp.pendiente(g["estado"])):
+            continue
+        vistos.add(g["guia"])
+        out.append(dict(tracking=f"SP-{g['guia']}", venta_id="", comprador=g["destinatario"][:120],
+                        producto=f"Guía SmartPost {g['guia']}" + (f" · remito {g['remito']}" if g["remito"] else ""),
+                        sku="", cantidad=1, tracking_alt=g["guia"], ordenes=[g["guia"]], items=[],
+                        medio="SmartPost · sin orden de Tienda Nube", tipo="tiendanube", hoy=True,
+                        clave=f"sp:{g['guia']}", sp_estado=g["estado"]))
+    out.sort(key=lambda p: (p["tracking"].startswith("SP-"), int(p["tracking"]) if p["tracking"].isdigit() else 0))
+    return out
+
+
 def canceladas(fuente: str, refrescar: bool = False) -> list[dict]:
     """Canceladas recientes ('ml' o 'tn'), cacheadas CANC_SEG segundos."""
     c = _canc[fuente]
@@ -436,13 +482,21 @@ def despacho(tipo: str, refrescar: bool = False) -> dict:
     if tipo == "tiendanube":
         if not tn.configurado():
             raise tn.TNError("Tienda Nube no está conectada (Conexiones → Tienda Nube).")
-        paq = tn_por_enviar(refrescar)
+        from . import smartpost as sp
+        aviso, fuente = "", "tiendanube"
+        if sp.panel_configurado() and sp.usar_en_despacho():
+            try:
+                paq, fuente = tn_despacho_sp(refrescar), "smartpost"
+            except sp.SPError as e:
+                paq, aviso = tn_por_enviar(refrescar), f"SmartPost: {e} — se muestran las órdenes \"Por enviar\" de Tienda Nube"
+        else:
+            paq = tn_por_enviar(refrescar)
         try:
             canc = canceladas("tn", refrescar)
         except tn.TNError:
             canc = []
-        return dict(base, paquetes=[_para_scanner(p) for p in paq], por_imprimir=0, proximos=0,
-                    canceladas=[_para_scanner(p) for p in canc])
+        return dict(base, paquetes=[_para_scanner(p) for p in paq], por_imprimir=0, proximos=0, fuente=fuente,
+                    aviso=aviso, canceladas=[_para_scanner(p) for p in canc])
     if tipo == "cambios":
         from . import cambios as cam
         if not cam.configurado():
@@ -548,24 +602,46 @@ POR_EMPAQUETAR_TN = tn.POR_EMPAQUETAR
 def _guia_sp(codigo: str):
     """Etiqueta de SmartPost (nº de guía) → orden de TN. None = SmartPost no conectado o la guía no existe."""
     from . import smartpost
-    if not smartpost.activo():
+    if not smartpost.usar_en_despacho():
         return None
     try:
-        m = smartpost.orden_de_guia(codigo, tn_por_enviar())
+        m = smartpost.orden_de_guia(codigo, _lista_tn())
     except smartpost.SPError as e:
         return {"error": f"SmartPost: {e}"}
     return m if m["encontrada"] else None
 
 
+def _modo_panel() -> bool:
+    from . import smartpost
+    return smartpost.panel_configurado() and smartpost.usar_en_despacho()
+
+
+def _lista_tn(refrescar: bool = False) -> list[dict]:
+    """La lista de Despacho → Tienda Nube: desde el panel de SmartPost si está cargado, si no TN "Por enviar"."""
+    if _modo_panel():
+        try:
+            return tn_despacho_sp(refrescar)
+        except Exception:  # noqa: BLE001 — el panel falló: se usa TN
+            pass
+    return tn_por_enviar(refrescar)
+
+
 def _explicar_tn(codigo: str) -> dict:
     """Tienda Nube: se acepta el nº de orden o la etiqueta de SmartPost (nº de guía)."""
-    corto = codigo.isdigit() and len(codigo) <= 7          # los nº de orden de TN son cortos; las guías no
+    corto = codigo.isdigit() and len(codigo) <= 5          # los nº de orden de TN son cortos; las guías (7 díg.) no
     o = tn.buscar_orden(codigo) if corto else None
     g = None
     if not o:
         g = _guia_sp(codigo)
         if g and g.get("error"):
             return {"motivo": "otro", "mensaje": g["error"]}
+        if g and g.get("sin_orden"):
+            for p in _lista_tn(refrescar=True):
+                if p["tracking"] == f"SP-{g['guia']}":
+                    return {"motivo": "agregar", "guia": g["guia"], "guia_via": "panel",
+                            "mensaje": f"Guía SmartPost {g['guia']} (sin orden de Tienda Nube)", "paquete": _para_scanner(p)}
+            return {"motivo": "otro", "guia": g["guia"],
+                    "mensaje": f"Guía SmartPost {g['guia']} sin orden de Tienda Nube · {g['estado'] or 'sin estado'}"}
         if g and not g["numero"]:
             return {"motivo": "no_existe", "guia": g["guia"],
                     "mensaje": f"Guía SmartPost {g['guia']}" + (f" ({g['nombre']})" if g["nombre"] else "")
@@ -584,14 +660,18 @@ def _explicar_tn(codigo: str) -> dict:
     st, env = (o.get("status") or ""), (o.get("shipping_status") or "").lower()
     if st == "cancelled":
         return {"motivo": "cancelada", "mensaje": de + "ORDEN CANCELADA — NO DESPACHAR", **extra}
-    if env in POR_EMPAQUETAR_TN:
+    panel = _modo_panel()
+    if env in POR_EMPAQUETAR_TN and not panel:
         return {"motivo": "no_lista", "mensaje": de + "la orden todavía está \"Por empaquetar\" en Tienda Nube", **extra}
     if env in tn.ENVIADA:
         return {"motivo": "ya_salio", "mensaje": de + "la orden ya figura enviada en Tienda Nube", **extra}
-    for p in tn_por_enviar(refrescar=True):
+    for p in _lista_tn(refrescar=True):
         if p["tracking"] == str(o.get("number")):
             msg = (f"Guía SmartPost {g['guia']} → orden #{o.get('number')}"
                    + (" (por el nombre del destinatario)" if g["via"] == "nombre" else "")) if g \
                 else "Orden por enviar (se suma a la lista)"
             return {"motivo": "agregar", "mensaje": msg, "paquete": _para_scanner(p), **extra}
+    if panel:
+        return {"motivo": "no_lista", "mensaje": de + "la orden no tiene guía de SmartPost pendiente (¿no se generó la "
+                "etiqueta o SmartPost ya la retiró?)", **extra}
     return {"motivo": "otro", "mensaje": de + f"estado en Tienda Nube: {st} / {env}", **extra}

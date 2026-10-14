@@ -53,6 +53,9 @@ CLAVES = {
     # SmartPost (ePresis): en Despacho → Tienda Nube se escanea la etiqueta de SmartPost (nº de guía) y se busca la orden
     "sp_url": ("SP_URL", "https://smartpostecommerce.epresis.com/api/", False),
     "sp_token": ("SP_TOKEN", "", True),
+    "sp_panel_url": ("SP_PANEL_URL", "https://smartpostecommerce.epresis.com", False),
+    "sp_panel_usuario": ("SP_PANEL_USUARIO", "", False),
+    "sp_panel_clave": ("SP_PANEL_CLAVE", "", True),   # contraseña del panel web (Mis Pedidos / Búsqueda de Guía)
     "sp_despacho": ("SP_DESPACHO", "1", False),   # 1 = verificar guías de SmartPost en Despacho (Tienda Nube)
     # Despacho: botón "Avisar por WhatsApp" con los totales del día (abre WhatsApp con el texto escrito)
     "wa_despacho_numero": ("WA_DESPACHO_NUMERO", "5491156053000", False),
