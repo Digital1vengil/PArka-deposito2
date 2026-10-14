@@ -42,6 +42,24 @@ def progreso_lote(db: Session, lote_id: int) -> tuple[int, int]:
     return hechos, total
 
 
+def progreso_lotes(db: Session, ids: list[int]) -> dict[int, tuple[int, int]]:
+    """(hechos, total) de varios lotes en una sola consulta."""
+    if not ids:
+        return {}
+    from sqlalchemy import case
+    filas = db.execute(select(Paquete.lote_id, func.sum(case((Paquete.estado == "despachado", 1), else_=0)),
+                              func.count()).where(Paquete.lote_id.in_(ids)).group_by(Paquete.lote_id)).all()
+    return {lid: (int(h or 0), int(t or 0)) for lid, h, t in filas}
+
+
+def sin_drive(db: Session) -> int:
+    """Paquetes despachados de lotes abiertos o de hoy que todavía no se guardaron en Drive."""
+    from sqlalchemy import or_
+    return db.scalar(select(func.count()).select_from(Paquete).join(Lote, Paquete.lote_id == Lote.id).where(
+        or_(Lote.fecha == hoy(), Lote.cerrado.is_(False)), Paquete.estado == "despachado",
+        Paquete.drive_enviado.isnot(True))) or 0
+
+
 def sincronizar_tarea_lote(db: Session, lote: Lote, usuario: Usuario | None) -> None:
     """La tarea automática del lote se completa sola cuando se despacha todo (y se reabre si se deshace)."""
     t = db.scalar(select(Tarea).where(Tarea.ref == f"lote:{lote.id}"))

@@ -375,7 +375,10 @@ def articulo_json(a: Articulo) -> dict:
 
 
 def lista(db: Session, limite: int = 30) -> list[Control]:
+    from sqlalchemy.orm import selectinload
     return list(db.scalars(select(Control).where(Control.modo == MODO)
+                           .options(selectinload(Control.paquetes), selectinload(Control.participantes),
+                                    selectinload(Control.boxes))
                            .order_by(Control.id.desc()).limit(limite)).all())
 
 
