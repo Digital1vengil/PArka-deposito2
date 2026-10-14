@@ -375,7 +375,10 @@ def articulo_json(a: Articulo) -> dict:
 
 
 def lista(db: Session, limite: int = 30) -> list[Control]:
+    from sqlalchemy.orm import selectinload
     return list(db.scalars(select(Control).where(Control.modo == MODO)
+                           .options(selectinload(Control.paquetes), selectinload(Control.participantes),
+                                    selectinload(Control.boxes))
                            .order_by(Control.id.desc()).limit(limite)).all())
 
 
@@ -387,10 +390,11 @@ def paquetes_pendientes_hoy(db: Session) -> int:
 
 
 # ─────────────────────────── BOX (cajas de la mesa) ───────────────────────────
-# El operario junta prendas; cuando tiene la cantidad del BOX (5 por defecto, configurable) o ya no le queda
-# nada por buscar, las lleva a la mesa y la app le dice en qué BOX dejarlas. Una venta no se parte entre cajas
-# (si ya tiene un BOX abierto, lo nuevo va a ese mismo). En la mesa de control, al escanear la etiqueta del
-# envío, se ve en qué BOX está. Cuando todas las ventas de un BOX quedan controladas, el número se libera.
+# Cada persona tiene SUS BOX: las primeras N prendas que marca como "La tengo" (5 por defecto, configurable)
+# van a su BOX 1, las siguientes a su BOX 2, y así (numerados por persona: "Lucas · BOX 1", "Ana · BOX 1").
+# Se asigna solo al marcar la prenda. Una venta de varias prendas no se parte: reserva su lugar entero en el
+# BOX donde cae la primera. En la mesa de control se ven los BOX de cada persona con las etiquetas que
+# esperan ser escaneadas; al escanear la etiqueta del envío aparece de quién y qué BOX es.
 
 BOX_DEFECTO = 5
 
@@ -408,20 +412,38 @@ def en_box(i: ControlItem) -> int:
 
 
 def box_activo(b: ControlBox) -> bool:
-    """Sigue ocupado mientras alguna de sus ventas no esté controlada (las canceladas no lo traban)."""
+    """Sigue en la mesa mientras alguna de sus ventas no esté controlada (las canceladas no lo traban)."""
     return any(not bi.item.paquete.cancelado and bi.item.paquete.estado != "completo" for bi in b.items)
 
 
-def _numero_libre(c: Control) -> int:
-    ocupados = {b.numero for b in c.boxes if box_activo(b)}
-    n = 1
-    while n in ocupados:
-        n += 1
-    return n
+def unidades_box(b: ControlBox) -> int:
+    return sum(bi.cantidad for bi in b.items)
+
+
+def _ocupado(b: ControlBox) -> int:
+    """Lugar que ocupa: las ventas enteras que tiene adentro (una venta de 2 reserva 2 aunque falte traer una)."""
+    ps = OrderedDict((bi.item.paquete_id, bi.item.paquete) for bi in b.items)
+    return sum(sum(i.cantidad for i in p.items) for p in ps.values())
+
+
+def boxes_de(c: Control, usuario_id: int) -> list[ControlBox]:
+    return sorted((b for b in c.boxes if b.usuario_id == usuario_id), key=lambda b: b.numero)
+
+
+def _box_de_venta(p: ControlPaquete, usuario_id: int) -> ControlBox | None:
+    for i in p.items:
+        for bi in i.box_items:
+            if bi.box.usuario_id == usuario_id:
+                return bi.box
+    return None
+
+
+def nombre_box(b: ControlBox) -> str:
+    return (f"{b.usuario.nombre} · " if b.usuario else "") + f"BOX {b.numero}"
 
 
 def en_mano(c: Control, usuario_id: int) -> list[tuple[ControlItem, int]]:
-    """Prendas que la persona ya juntó y todavía no dejó en un BOX."""
+    """Prendas que la persona marcó y todavía no tienen BOX (se asignan solas con `asignar_box`)."""
     out = []
     for i in sorted(_items(c), key=_orden_ficha):
         quien = i.buscado_por_id or i.asignado_id
@@ -431,61 +453,77 @@ def en_mano(c: Control, usuario_id: int) -> list[tuple[ControlItem, int]]:
     return out
 
 
-def estado_box(db: Session, c: Control, usuario_id: int) -> dict:
-    mano = sum(n for _, n in en_mano(c, usuario_id))
-    pend = sum(pendiente_busqueda(i) for i in _items(c) if i.asignado_id == usuario_id)
-    cant = box_cantidad(db)
-    return {"en_mano": mano, "cantidad": cant, "pendientes": pend,
-            "habilitado": mano > 0 and (mano >= cant or pend == 0)}
-
-
-def _box_de_venta(p: ControlPaquete) -> ControlBox | None:
-    for i in p.items:
-        for bi in i.box_items:
-            if box_activo(bi.box):
-                return bi.box
-    return None
-
-
-def llevar_a_box(db: Session, c: Control, u: Usuario, forzar: bool = False) -> list[dict]:
-    """Reparte lo que la persona tiene en la mano en BOX (de a `box_cantidad` prendas, sin partir ventas).
-    Devuelve cada BOX con lo que hay que dejar adentro."""
-    est = estado_box(db, c, u.id)
-    if not est["en_mano"]:
-        raise ValueError("No tenés prendas juntadas para llevar a la mesa")
-    if not est["habilitado"] and not forzar:
-        raise ValueError(f"El BOX se habilita con {est['cantidad']} prendas (tenés {est['en_mano']})")
-    cap = est["cantidad"]
-    por_venta: "OrderedDict[int, list[tuple[ControlItem, int]]]" = OrderedDict()
-    for i, n in en_mano(c, u.id):
-        por_venta.setdefault(i.paquete_id, []).append((i, n))
-    usados: "OrderedDict[int, dict]" = OrderedDict()   # box.id → detalle
-    actual, ocupado, creados = None, 0, set()
-    for lista_ in por_venta.values():
-        p = lista_[0][0].paquete
-        k = sum(n for _, n in lista_)
-        previo = _box_de_venta(p)
-        if previo is not None and previo is not actual:
-            box = previo                                   # esta venta ya tiene un BOX: va al mismo
-        else:
-            if actual is None or (ocupado and ocupado + k > cap):
-                actual = ControlBox(numero=_numero_libre(c), usuario_id=u.id)
+def asignar_box(db: Session, c: Control, usuario_id: int) -> list[ControlBox]:
+    """Pone en el BOX de la persona lo que acaba de marcar. Devuelve los BOX que se llenaron con esto."""
+    mano = en_mano(c, usuario_id)
+    if not mano:
+        return []
+    cap = box_cantidad(db)
+    mios = boxes_de(c, usuario_id)
+    actual = mios[-1] if mios else None
+    antes: dict[int, int] = {}
+    tocados: "OrderedDict[int, ControlBox]" = OrderedDict()
+    for i, n in mano:
+        p = i.paquete
+        box = _box_de_venta(p, usuario_id)
+        if box is None:
+            k = sum(x.cantidad for x in p.items)
+            if actual is None or _ocupado(actual) >= cap or (_ocupado(actual) and _ocupado(actual) + k > cap):
+                actual = ControlBox(numero=(actual.numero if actual else 0) + 1, usuario_id=usuario_id)
                 c.boxes.append(actual)
-                creados.add(id(actual))
-                ocupado = 0
             box = actual
-            ocupado += k
-        for i, n in lista_:
-            box.items.append(ControlBoxItem(item=i, cantidad=n))
-        d = usados.setdefault(id(box), {"box": box, "nuevo": id(box) in creados, "unidades": 0,
-                                        "ventas": OrderedDict()})
-        d["unidades"] += k
-        d["ventas"][p.id] = p
-    db.flush()
-    out = [{"numero": d["box"].numero, "nuevo": d["nuevo"], "unidades": d["unidades"],
-            "ventas": [_venta_box(p, d["box"]) for p in d["ventas"].values()]} for d in usados.values()]
+        antes.setdefault(id(box), unidades_box(box))
+        box.items.append(ControlBoxItem(item=i, cantidad=n))
+        tocados[id(box)] = box
     db.commit()
-    return out
+    return [b for k, b in tocados.items() if antes[k] < cap <= unidades_box(b)]
+
+
+def restar(db: Session, c: Control, lineas: list[ControlItem], u: Usuario) -> None:
+    """−1: me equivoqué. Si la prenda ya estaba en un BOX, sale de ese BOX (si el BOX queda vacío, se borra)."""
+    todas = [i for i in lineas if i.buscado > 0]
+    if not todas:
+        raise ValueError("No hay nada para restar")
+    i = todas[-1]
+    if i.paquete.estado == "completo":
+        raise ValueError("Esa venta ya se controló en la mesa: no se puede restar")
+    if min(i.buscado, i.cantidad) <= en_box(i) and i.box_items:
+        bi = i.box_items[-1]
+        box = bi.box
+        bi.cantidad -= 1
+        if bi.cantidad <= 0:
+            box.items.remove(bi)
+            if bi in i.box_items:
+                i.box_items.remove(bi)
+            db.delete(bi)
+        if not box.items:
+            c.boxes.remove(box)
+            db.delete(box)
+        db.flush()
+    marcar_buscado(db, i, u, -1)
+
+
+def estado_box(db: Session, c: Control, usuario_id: int) -> dict:
+    """Cómo viene el BOX de la persona (el último es el que está armando)."""
+    cap = box_cantidad(db)
+    mios = boxes_de(c, usuario_id)
+    pend = sum(pendiente_busqueda(i) for i in _items(c) if i.asignado_id == usuario_id)
+    act = mios[-1] if mios else None
+    return {"cantidad": cap, "pendientes": pend, "en_mano": sum(n for _, n in en_mano(c, usuario_id)),
+            "actual": act.numero if act else None, "en_actual": unidades_box(act) if act else 0,
+            "lleno": bool(act and unidades_box(act) >= cap),
+            "boxes": [{"numero": b.numero, "unidades": unidades_box(b), "activo": box_activo(b)} for b in mios]}
+
+
+def box_json(b: ControlBox) -> dict:
+    ventas = OrderedDict((bi.item.paquete_id, bi.item.paquete) for bi in b.items)
+    vs = [_venta_box(p, b) for p in ventas.values()]
+    return {"id": b.id, "numero": b.numero, "activo": box_activo(b), "nombre": nombre_box(b),
+            "usuario_id": b.usuario_id, "quien": b.usuario.nombre if b.usuario else "",
+            "hora": b.creado_at.strftime("%H:%M") if b.creado_at else "",
+            "unidades": unidades_box(b), "ventas": vs,
+            "controladas": sum(1 for v in vs if v["estado"] == "completo"),
+            "esperando": sum(1 for v in vs if v["estado"] != "completo" and not v["cancelado"])}
 
 
 def _venta_box(p: ControlPaquete, b: ControlBox) -> dict:
@@ -499,14 +537,7 @@ def _venta_box(p: ControlPaquete, b: ControlBox) -> dict:
 
 
 def boxes(c: Control) -> list[dict]:
-    """Lista por BOX (los ocupados primero, por número)."""
-    out = []
-    for b in c.boxes:
-        ventas = OrderedDict((bi.item.paquete_id, bi.item.paquete) for bi in b.items)
-        vs = [_venta_box(p, b) for p in ventas.values()]
-        out.append({"id": b.id, "numero": b.numero, "activo": box_activo(b),
-                     "quien": b.usuario.nombre if b.usuario else "", "hora": b.creado_at.strftime("%H:%M"),
-                     "unidades": sum(bi.cantidad for bi in b.items), "ventas": vs,
-                     "controladas": sum(1 for v in vs if v["estado"] == "completo")})
-    out.sort(key=lambda x: (not x["activo"], x["numero"] if x["activo"] else -x["id"]))
+    """Lista de BOX por persona (en orden de número)."""
+    out = [box_json(b) for b in c.boxes]
+    out.sort(key=lambda x: (x["quien"].lower(), x["numero"]))
     return out
