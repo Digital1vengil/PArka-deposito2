@@ -5,8 +5,16 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from .config import DATABASE_URL, TZ
 
-_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
-engine = create_engine(DATABASE_URL, connect_args=_args, pool_pre_ping=True)
+if DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False}, pool_pre_ping=True)
+else:
+    # Postgres (Neon): pool más grande para los pedidos en paralelo + tareas automáticas, conexiones que se
+    # renuevan antes de que Neon las corte por inactividad, keepalive TCP y timeout de conexión acotado
+    # (si la base tarda en despertar, el pedido falla con un error claro en vez de quedar colgado).
+    engine = create_engine(
+        DATABASE_URL, pool_pre_ping=True, pool_size=8, max_overflow=12, pool_recycle=240, pool_timeout=20,
+        connect_args={"connect_timeout": 15, "keepalives": 1, "keepalives_idle": 30,
+                      "keepalives_interval": 10, "keepalives_count": 3, "application_name": "parka-deposito"})
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 

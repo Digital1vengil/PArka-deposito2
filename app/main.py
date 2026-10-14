@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 
 from . import config
 from .auth import NoAutenticado, SinPermiso
@@ -25,7 +26,9 @@ STATIC = Path(__file__).parent / "static"
 def _iniciar_scheduler():
     from apscheduler.schedulers.background import BackgroundScheduler
     from .db import hoy, ahora
-    sch = BackgroundScheduler(timezone=config.TZ)
+    # coalesce: si una vuelta se atrasó no se ejecutan las acumuladas; max_instances=1: nunca dos a la vez
+    sch = BackgroundScheduler(timezone=config.TZ,
+                              job_defaults={"coalesce": True, "max_instances": 1, "misfire_grace_time": 60})
 
     # 1) Cierre propio por mail SMTP (opcional, apagado por defecto)
     if config.CIERRE_AUTOMATICO:
@@ -173,6 +176,19 @@ async def _celulares_a_https(request: Request, call_next):
     return await call_next(request)
 
 
+@app.middleware("http")
+async def _cache_estaticos(request: Request, call_next):
+    """Los archivos de /static con ?v=<versión> no cambian nunca: el navegador los guarda un año y no
+    vuelve a preguntar en cada pantalla. Sin ?v= se revalidan siempre (no-cache)."""
+    resp = await call_next(request)
+    p = request.url.path
+    if p.startswith(("/static/", "/etiquetas-fonts/")) and resp.status_code == 200:
+        resp.headers["Cache-Control"] = ("public, max-age=31536000, immutable" if request.query_params.get("v")
+                                         else "public, max-age=0, must-revalidate")
+    return resp
+
+
+app.add_middleware(GZipMiddleware, minimum_size=1500, compresslevel=5)
 app.add_middleware(SessionMiddleware, secret_key=config.SECRET_KEY, session_cookie="parka_dep",
                    max_age=config.SESION_HORAS * 3600, same_site="lax")
 app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
