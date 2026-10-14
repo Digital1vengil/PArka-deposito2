@@ -494,20 +494,7 @@ def explicar_envio(codigo: str, tipo: str) -> dict:
         return {"motivo": "agregar", "mensaje": "Cambio para despachar (se suma a la lista)",
                 "paquete": _para_scanner(cam.a_paquete(s_))}
     if tipo == "tiendanube":
-        o = tn.buscar_orden(codigo) if codigo.isdigit() else None
-        if not o:
-            return {"motivo": "no_existe", "mensaje": "No es una orden de Tienda Nube"}
-        st, env = (o.get("status") or ""), (o.get("shipping_status") or "").lower()
-        if st == "cancelled":
-            return {"motivo": "cancelada", "mensaje": "ORDEN CANCELADA — NO DESPACHAR"}
-        if env in POR_EMPAQUETAR_TN:
-            return {"motivo": "no_lista", "mensaje": "La orden todavía está \"Por empaquetar\" en Tienda Nube"}
-        if env in tn.ENVIADA:
-            return {"motivo": "ya_salio", "mensaje": "La orden ya figura enviada en Tienda Nube"}
-        for p in tn_por_enviar(refrescar=True):
-            if p["tracking"] == str(o.get("number")):
-                return {"motivo": "agregar", "mensaje": "Orden por enviar (se suma a la lista)", "paquete": _para_scanner(p)}
-        return {"motivo": "otro", "mensaje": f"Estado en Tienda Nube: {st} / {env}"}
+        return _explicar_tn(codigo)
     if not codigo.isdigit():
         return {"motivo": "no_existe", "mensaje": "No es una etiqueta de Mercado Libre"}
     sid = codigo
@@ -556,3 +543,55 @@ def explicar_envio(codigo: str, tipo: str) -> dict:
 
 
 POR_EMPAQUETAR_TN = tn.POR_EMPAQUETAR
+
+
+def _guia_sp(codigo: str):
+    """Etiqueta de SmartPost (nº de guía) → orden de TN. None = SmartPost no conectado o la guía no existe."""
+    from . import smartpost
+    if not smartpost.activo():
+        return None
+    try:
+        m = smartpost.orden_de_guia(codigo, tn_por_enviar())
+    except smartpost.SPError as e:
+        return {"error": f"SmartPost: {e}"}
+    return m if m["encontrada"] else None
+
+
+def _explicar_tn(codigo: str) -> dict:
+    """Tienda Nube: se acepta el nº de orden o la etiqueta de SmartPost (nº de guía)."""
+    corto = codigo.isdigit() and len(codigo) <= 7          # los nº de orden de TN son cortos; las guías no
+    o = tn.buscar_orden(codigo) if corto else None
+    g = None
+    if not o:
+        g = _guia_sp(codigo)
+        if g and g.get("error"):
+            return {"motivo": "otro", "mensaje": g["error"]}
+        if g and not g["numero"]:
+            return {"motivo": "no_existe", "guia": g["guia"],
+                    "mensaje": f"Guía SmartPost {g['guia']}" + (f" ({g['nombre']})" if g["nombre"] else "")
+                    + ": no coincide con ninguna orden de Tienda Nube por enviar"}
+        if g:
+            o = tn.buscar_orden(g["numero"])
+        elif codigo.isdigit() and not corto:
+            o = tn.buscar_orden(codigo)
+    if not o:
+        if g:
+            return {"motivo": "no_existe", "guia": g["guia"],
+                    "mensaje": f"Guía SmartPost {g['guia']} → orden #{g['numero']}, que no existe en Tienda Nube"}
+        return {"motivo": "no_existe", "mensaje": "No es una orden de Tienda Nube ni una guía de SmartPost"}
+    extra = {"guia": g["guia"], "guia_via": g["via"], "orden": str(o.get("number"))} if g else {}
+    de = f"Guía {g['guia']} → orden #{o.get('number')}: " if g else ""
+    st, env = (o.get("status") or ""), (o.get("shipping_status") or "").lower()
+    if st == "cancelled":
+        return {"motivo": "cancelada", "mensaje": de + "ORDEN CANCELADA — NO DESPACHAR", **extra}
+    if env in POR_EMPAQUETAR_TN:
+        return {"motivo": "no_lista", "mensaje": de + "la orden todavía está \"Por empaquetar\" en Tienda Nube", **extra}
+    if env in tn.ENVIADA:
+        return {"motivo": "ya_salio", "mensaje": de + "la orden ya figura enviada en Tienda Nube", **extra}
+    for p in tn_por_enviar(refrescar=True):
+        if p["tracking"] == str(o.get("number")):
+            msg = (f"Guía SmartPost {g['guia']} → orden #{o.get('number')}"
+                   + (" (por el nombre del destinatario)" if g["via"] == "nombre" else "")) if g \
+                else "Orden por enviar (se suma a la lista)"
+            return {"motivo": "agregar", "mensaje": msg, "paquete": _para_scanner(p), **extra}
+    return {"motivo": "otro", "mensaje": de + f"estado en Tienda Nube: {st} / {env}", **extra}

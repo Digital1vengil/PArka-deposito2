@@ -50,6 +50,10 @@ CLAVES = {
     "cambios_estados": ("CAMBIOS_ESTADOS", "Aceptado,Etiqueta enviada,Recibido", False),
     "cambios_marcar_despacho": ("CAMBIOS_MARCAR_DESPACHO", "1", False),
     "tn_marcar_despacho": ("TN_MARCAR_DESPACHO", "1", False),   # 1 = al despachar, la orden pasa a enviada en TN
+    # SmartPost (ePresis): en Despacho → Tienda Nube se escanea la etiqueta de SmartPost (nº de guía) y se busca la orden
+    "sp_url": ("SP_URL", "https://smartpostecommerce.epresis.com/api/", False),
+    "sp_token": ("SP_TOKEN", "", True),
+    "sp_despacho": ("SP_DESPACHO", "1", False),   # 1 = verificar guías de SmartPost en Despacho (Tienda Nube)
     # Despacho: botón "Avisar por WhatsApp" con los totales del día (abre WhatsApp con el texto escrito)
     "wa_despacho_numero": ("WA_DESPACHO_NUMERO", "5491156053000", False),
     "wa_despacho_nombre": ("WA_DESPACHO_NOMBRE", "Sr. Gabriel", False),
