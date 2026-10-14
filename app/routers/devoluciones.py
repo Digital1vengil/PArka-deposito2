@@ -57,7 +57,7 @@ def por_codigo(c: str = "", u: Usuario = Depends(acceso), db: Session = Depends(
 class ItemIn(BaseModel):
     articulo_id: int
     cantidad: int = 1
-    estado: str = "OPTIMO"
+    estado: str = ""       # OPTIMO | FALLA (obligatorio, por prenda; sin valor por defecto)
     plataforma: str = ""   # ML | TN (obligatorio, por prenda)
 
 
@@ -97,6 +97,9 @@ def confirmar(body: ConfirmarIn, u: Usuario = Depends(acceso), db: Session = Dep
         it.plataforma = (it.plataforma or general).strip().upper()
         if it.plataforma not in ("ML", "TN"):
             raise HTTPException(400, "Cada prenda tiene que tener la plataforma: TN o ML")
+        it.estado = (it.estado or "").strip().upper()
+        if it.estado not in ("OPTIMO", "FALLA"):
+            raise HTTPException(400, "Cada prenda tiene que tener el estado: Óptimo o Falla")
     usadas = sorted({it.plataforma for it in items})
     plataforma = "+".join(usadas)
     d = Devolucion(fecha=hoy(), usuario_id=u.id, plataforma=plataforma)
@@ -110,7 +113,7 @@ def confirmar(body: ConfirmarIn, u: Usuario = Depends(acceso), db: Session = Dep
         color, talle = svc.color_talle(a)
         d.items.append(DevolucionItem(articulo_id=a.id, codigo_barras=a.codigo_barras, sku=a.sku,
                                       articulo=a.articulo, color=color, talle=talle,
-                                      estado="FALLA" if it.estado.upper() == "FALLA" else "OPTIMO",
+                                      estado=it.estado,
                                       plataforma=it.plataforma,
                                       cantidad=min(it.cantidad, 999)))
     d.total = sum(i.cantidad for i in d.items)
