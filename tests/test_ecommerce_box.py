@@ -37,62 +37,50 @@ def test_venta_de_varias_prendas_va_junta_y_box():
         v1283 = next(g["venta"] for g in multi if g["venta"]["venta_id"] == "1283" or g["venta"]["tracking"] == "1283")
         assert v1283["prendas"] == 2
 
-        # BOX: se habilita al juntar la cantidad configurada
+        # BOX: cada persona tiene los suyos y la prenda entra sola al marcarla
         assert ana.post("/ecommerce/api/box/cantidad", json={"cantidad": 2}).status_code == 403
         assert adm.post("/ecommerce/api/box/cantidad", json={"cantidad": 2}).json()["cantidad"] == 2
         d = ana.get(f"/ecommerce/api/{cid}/mia").json()
-        assert d["box"] == {"en_mano": 0, "cantidad": 2, "pendientes": d["box"]["pendientes"], "habilitado": False}
-        assert ana.post(f"/ecommerce/api/{cid}/box/llevar", json={}).status_code == 400
+        assert d["box"]["actual"] is None and d["box"]["cantidad"] == 2
 
-        juntadas = 0
-        for g in d["grupos"]:
-            if not g["faltan"]:
-                continue
-            for _ in range(g["faltan"]):
-                if g["vinculado"] and g["codigo_barras"]:
-                    r = ana.post(f"/ecommerce/api/{cid}/encontre", json={"codigo": g["codigo_barras"]}).json()
-                    assert r["ok"], r
-                else:
-                    assert ana.post(f"/ecommerce/api/{cid}/la-tengo", json={"item_ids": g["item_ids"]}).json()["ok"]
-                juntadas += 1
-            if juntadas >= 1:
-                break
-        est = ana.get(f"/ecommerce/api/{cid}/mia").json()["box"]
-        assert est["en_mano"] == juntadas
-        if not est["habilitado"]:
-            assert ana.post(f"/ecommerce/api/{cid}/box/llevar", json={}).status_code == 400
-        r = ana.post(f"/ecommerce/api/{cid}/box/llevar", json={"forzar": True}).json()
-        assert r["ok"] and r["boxes"][0]["numero"] == 1 and r["boxes"][0]["nuevo"]
-        assert sum(b["unidades"] for b in r["boxes"]) == juntadas and r["box"]["en_mano"] == 0
-        venta = r["boxes"][0]["ventas"][0]
+        def marcar(cli, g):
+            if g["vinculado"] and g["codigo_barras"]:
+                r = cli.post(f"/ecommerce/api/{cid}/encontre", json={"codigo": g["codigo_barras"]}).json()
+            else:
+                r = cli.post(f"/ecommerce/api/{cid}/la-tengo", json={"item_ids": g["item_ids"]}).json()
+            assert r["ok"], r
+            return r
 
-        # lo que está en un BOX no se resta
-        g = next(x for x in ana.get(f"/ecommerce/api/{cid}/mia").json()["grupos"] if x["en_box"])
-        assert g["boxes"] == [1]
-        assert "BOX 1" in ana.post(f"/ecommerce/api/{cid}/deshacer", json={"item_ids": g["item_ids"]}).json()["detail"]
+        g = next(x for x in d["grupos"] if x["faltan"])
+        r = marcar(ana, g)
+        assert r["box"]["actual"] == 1 and r["box"]["en_actual"] == 1
+        g = next(x for x in ana.get(f"/ecommerce/api/{cid}/mia").json()["grupos"] if x["item_ids"] == g["item_ids"])
+        assert g["boxes"] == [1] and g["en_box"] == 1
 
-        # lista por BOX
-        bs = beto.get(f"/ecommerce/api/{cid}/boxes").json()
-        assert bs["cantidad"] == 2 and bs["boxes"][0]["numero"] == 1 and bs["boxes"][0]["activo"]
-        assert bs["boxes"][0]["quien"] == "Ana"
+        # −1: sale del BOX (y el BOX vacío desaparece)
+        assert ana.post(f"/ecommerce/api/{cid}/deshacer", json={"item_ids": g["item_ids"]}).json()["ok"]
+        assert ana.get(f"/ecommerce/api/{cid}/mia").json()["box"]["actual"] is None
+        r = marcar(ana, g)
+        assert r["box"]["actual"] == 1
 
-        # mesa de control: al escanear la etiqueta dice en qué BOX está
+        # Beto también arranca en SU BOX 1
+        gb = next(x for x in beto.get(f"/ecommerce/api/{cid}/mia").json()["grupos"] if x["faltan"])
+        assert marcar(beto, gb)["box"]["actual"] == 1
+        bs = adm.get(f"/ecommerce/api/{cid}/boxes").json()
+        assert bs["cantidad"] == 2
+        assert sorted((b["quien"], b["numero"]) for b in bs["boxes"]) == [("Ana", 1), ("Beto", 1)]
+        ba = next(b for b in bs["boxes"] if b["quien"] == "Ana")
+        assert ba["nombre"] == "Ana · BOX 1" and ba["activo"] and ba["esperando"] == 1
+        venta = ba["ventas"][0]
+
+        # mesa de control: al escanear la etiqueta dice de quién y qué BOX
         p = ana.post(f"/control/api/{cid}/escanear", json={"codigo": venta["tracking"]}).json()
         assert p["tipo"] == "paquete" and p["paquete"]["boxes"] == [1]
-
-        # Beto junta otra venta: el BOX 1 sigue ocupado → le toca el 2
-        db_ = beto.get(f"/ecommerce/api/{cid}/mia").json()
-        g = next(x for x in db_["grupos"] if x["faltan"])
-        if g["vinculado"] and g["codigo_barras"]:
-            assert beto.post(f"/ecommerce/api/{cid}/encontre", json={"codigo": g["codigo_barras"]}).json()["ok"]
-        else:
-            assert beto.post(f"/ecommerce/api/{cid}/la-tengo", json={"item_ids": g["item_ids"]}).json()["ok"]
-        r = beto.post(f"/ecommerce/api/{cid}/box/llevar", json={"forzar": True}).json()
-        assert r["boxes"][0]["numero"] in (1, 2)   # 1 solo si es la misma venta que ya estaba en el BOX 1
+        assert p["paquete"]["boxes_det"][0]["nombre"] == "Ana · BOX 1"
 
 
-def test_box_no_parte_ventas_y_libera_numero():
-    """Servicio: de a N prendas por BOX, una venta entera en el mismo BOX y el número se reusa al controlarla."""
+def test_box_por_persona_se_llena_solo_y_no_parte_ventas():
+    """Servicio: de a N prendas por BOX, numerados por persona, una venta entera en el mismo BOX."""
     from app.db import SessionLocal
     from app.models import Control, ControlItem, ControlPaquete, Usuario
     from app.services import ajustes
@@ -101,30 +89,54 @@ def test_box_no_parte_ventas_y_libera_numero():
     db = SessionLocal()
     try:
         u = db.scalar(select(Usuario).where(Usuario.nombre == "Vengil"))
+        otro = db.scalar(select(Usuario).where(Usuario.id != u.id))
         c = Control(fecha=svc.hoy(), usuario_id=u.id, modo=svc.MODO, nombre="test box")
         db.add(c)
-        for k, cant in enumerate((1, 1, 3, 1)):   # venta de 3 prendas en el medio
+        for k, cant in enumerate((1, 1, 3, 1, 1)):   # venta de 3 prendas en el medio
             p = ControlPaquete(tracking=f"T{k}", tipo="flex")
             for j in range(cant):
                 p.items.append(ControlItem(sku=f"S{k}{j}", cantidad=1, orden_ruta=k * 10 + j))
             c.paquetes.append(p)
         db.flush()
-        for i in (i for p in c.paquetes for i in p.items):
-            i.asignado_id = i.buscado_por_id = u.id
-            i.buscado = i.cantidad
+        items = [i for p in c.paquetes for i in p.items]
+        for i in items:
+            i.asignado_id = u.id
+        items[-1].asignado_id = otro.id
         db.commit()
         ajustes.guardar(db, "re_box_cant", "3")
-        assert svc.estado_box(db, c, u.id)["habilitado"]
-        bs = svc.llevar_a_box(db, c, u)
-        # T0+T1 (2) en BOX 1; la venta de 3 no entra → BOX 2; T3 → BOX 3
-        assert [(b["numero"], b["unidades"]) for b in bs] == [(1, 2), (2, 3), (3, 1)]
-        assert [v["tracking"] for v in bs[1]["ventas"]] == ["T2"]
-        # se controla todo el BOX 1 → el número 1 queda libre
-        for p in c.paquetes[:2]:
-            p.estado = "completo"
+
+        def marcar(i, quien):
+            svc.marcar_buscado(db, i, quien, +1)
+            return [b.numero for b in svc.asignar_box(db, c, quien.id)]
+
+        assert marcar(items[0], u) == []                 # T0 → BOX 1
+        assert marcar(items[1], u) == []                 # T1 → BOX 1 (2 de 3)
+        assert marcar(items[2], u) == []                 # venta de 3 no entra en el lugar que queda → BOX 2
+        assert marcar(items[3], u) == []
+        assert marcar(items[4], u) == [2]                # BOX 2 lleno con la venta entera
+        assert marcar(items[5], u) == []                 # T3 → BOX 3 (el 1 quedó con 2, la venta no entraba)
+        assert marcar(items[6], otro) == []              # la otra persona arranca en SU BOX 1
+        mios = svc.boxes_de(c, u.id)
+        assert [(b.numero, svc.unidades_box(b)) for b in mios] == [(1, 2), (2, 3), (3, 1)]
+        assert [(b.numero, svc.unidades_box(b)) for b in svc.boxes_de(c, otro.id)] == [(1, 1)]
+        assert svc.estado_box(db, c, u.id)["actual"] == 3
+
+        # −1 de la única prenda del BOX 3 → el BOX 3 desaparece
+        svc.restar(db, c, [items[5]], u)
+        assert [b.numero for b in svc.boxes_de(c, u.id)] == [1, 2]
+        assert marcar(items[5], u) == []
+        assert [b.numero for b in svc.boxes_de(c, u.id)] == [1, 2, 3]
+
+        # una venta controlada en la mesa ya no se puede restar
+        c.paquetes[0].estado = "completo"
         db.commit()
-        assert svc._numero_libre(c) == 1
-        assert [b["numero"] for b in svc.boxes(c)][:2] == [2, 3]
+        try:
+            svc.restar(db, c, [items[0]], u)
+            assert False, "tendría que fallar"
+        except ValueError:
+            pass
+        b1 = next(b for b in svc.boxes(c) if b["usuario_id"] == u.id and b["numero"] == 1)
+        assert b1["esperando"] == 1 and b1["controladas"] == 1
     finally:
         ajustes.guardar(db, "re_box_cant", "5")
         db.close()
