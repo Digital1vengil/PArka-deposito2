@@ -291,13 +291,17 @@ def paquete_json(p: ControlPaquete, con_items: bool = True) -> dict:
          "resumen": " + ".join(f"{i.cantidad}× {i.articulo or i.producto[:40]}"
                                + (f" {i.color} {i.talle}" if i.articulo_id else "") for i in p.items)}
     # Recolección Ecommerce: en qué BOX de la mesa quedaron las prendas de esta venta
-    nums = []
+    # (cada persona tiene sus BOX: "Lucas · BOX 1")
+    det = {}
     for i in p.items:
         for bi in i.box_items:
-            if bi.box.numero not in nums:
-                nums.append(bi.box.numero)
-    d["boxes"] = sorted(nums)
-    d["sin_box"] = total - sum(bi.cantidad for i in p.items for bi in i.box_items) if nums else total
+            b = bi.box
+            det.setdefault(b.id, {"numero": b.numero, "quien": b.usuario.nombre if b.usuario else "",
+                                  "nombre": (f"{b.usuario.nombre} · " if b.usuario else "") + f"BOX {b.numero}"})
+    bx = sorted(det.values(), key=lambda x: (x["quien"], x["numero"]))
+    d["boxes"] = [x["numero"] for x in bx]
+    d["boxes_det"] = bx
+    d["sin_box"] = total - sum(bi.cantidad for i in p.items for bi in i.box_items) if bx else total
     if con_items:
         d["items"] = [item_json(i) for i in p.items]
     return d

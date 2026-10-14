@@ -347,6 +347,8 @@ def repartir(cid: int, u: Usuario = Depends(acceso), db: Session = Depends(get_d
 @router.get("/api/{cid}/mia")
 def mia(cid: int, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
     c = _control(db, cid)
+    if c.estado == "abierto":
+        svc.asignar_box(db, c, u.id)        # lo marcado antes de los BOX automáticos entra a su BOX
     return {"grupos": svc.grupos_de(c, u.id, solo_pendientes=False),
             "otros": svc.grupos_de(c, None, solo_pendientes=False, excluir=u.id), "busqueda": svc.resumen(c, u),
             "box": svc.estado_box(db, c, u.id)}
@@ -373,7 +375,23 @@ def encontre(cid: int, body: CodigoIn, u: Usuario = Depends(acceso), db: Session
     r = svc.escanear_busqueda(db, c, u, cod)
     if not r["ok"]:
         registrar(db, u, "ecommerce_error", f"RE-{c.id}: {r.get('escaneado') or cod} ({r['motivo']})", "ecommerce")
-    return {**r, "busqueda": svc.resumen(c, u)}
+        return {**r, "busqueda": svc.resumen(c, u)}
+    return {**r, **_box_tras_marcar(db, c, u), "busqueda": svc.resumen(c, u)}
+
+
+def _box_tras_marcar(db: Session, c: Control, u: Usuario) -> dict:
+    """Después de "La tengo": la prenda entra sola al BOX de la persona. Si el BOX se llenó (o ya no le queda
+    nada por buscar), se avisa para llevarlo a la mesa."""
+    llenos = svc.asignar_box(db, c, u.id)
+    est = svc.estado_box(db, c, u.id)
+    if not llenos and est["pendientes"] == 0 and est["actual"] and not est["lleno"]:
+        b = svc.boxes_de(c, u.id)[-1]
+        if svc.box_activo(b):
+            llenos = [b]
+    if llenos:
+        registrar(db, u, "ecommerce_box", f"RE-{c.id}: " + ", ".join(
+            f"BOX {b.numero} ({svc.unidades_box(b)})" for b in llenos) + " a la mesa", "ecommerce")
+    return {"box": est, "box_llevar": [svc.box_json(b) for b in llenos]}
 
 
 class ItemsIn(BaseModel):
@@ -408,44 +426,22 @@ def la_tengo(cid: int, body: ItemsIn, u: Usuario = Depends(acceso), db: Session 
     if quien:
         registrar(db, u, "ecommerce_ajena", f"RE-{c.id}: trajo una prenda de {quien.nombre}", "ecommerce")
     falta = sum(svc.pendiente_busqueda(i) for i in _lineas(db, c, body.item_ids))
-    return {"ok": True, "faltan": falta}
+    return {"ok": True, "faltan": falta, **_box_tras_marcar(db, c, u)}
 
 
 @router.post("/api/{cid}/deshacer")
 def deshacer(cid: int, body: ItemsIn, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
-    """−1: me equivoqué al escanear (la prenda vuelve a su lugar)."""
-    c = _control(db, cid)
-    _abierta(c)
-    todas = [i for i in _lineas(db, c, body.item_ids) if i.buscado > 0]
-    ls = [i for i in todas if min(i.buscado, i.cantidad) > svc.en_box(i)]
-    if todas and not ls:
-        nums = sorted({bi.box.numero for i in todas for bi in i.box_items})
-        raise HTTPException(400, f"Ya está en el BOX {', '.join(map(str, nums))}: no se puede restar")
-    if not ls:
-        raise HTTPException(400, "No hay nada para restar")
-    svc.marcar_buscado(db, ls[-1], u, -1)
-    return {"ok": True}
-
-
-# ─────────────── BOX: cajas de la mesa ───────────────
-
-class LlevarIn(BaseModel):
-    forzar: bool = False
-
-
-@router.post("/api/{cid}/box/llevar")
-def box_llevar(cid: int, body: LlevarIn, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
-    """Llevo a la mesa lo que junté: la app dice en qué BOX dejar cada venta."""
+    """−1: me equivoqué al escanear (la prenda vuelve a su lugar y sale de su BOX)."""
     c = _control(db, cid)
     _abierta(c)
     try:
-        bs = svc.llevar_a_box(db, c, u, forzar=body.forzar)
+        svc.restar(db, c, _lineas(db, c, body.item_ids), u)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    registrar(db, u, "ecommerce_box", f"RE-{c.id}: " + ", ".join(f"BOX {b['numero']} ({b['unidades']})" for b in bs),
-              "ecommerce")
-    return {"ok": True, "boxes": bs, "box": svc.estado_box(db, c, u.id)}
+    return {"ok": True}
 
+
+# ─────────────── BOX: cajas de la mesa (cada persona tiene los suyos, se llenan solos) ───────────────
 
 @router.get("/api/{cid}/boxes")
 def box_lista(cid: int, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):

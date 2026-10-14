@@ -56,6 +56,19 @@
   #re-box.on { display: flex; }
   #re-box .grande { font-size: 7rem; font-weight: 900; line-height: 1; }
   #re-box .bx { border: 2px solid rgba(255,255,255,.35); border-radius: 18px; padding: 1rem; margin-top: .8rem; text-align: left; }
+  /* Escáner: solo el botón acompaña el scroll (encima de ParkIA); la cámara se abre flotando arriba */
+  #scan-fab { position: fixed; right: 1.25rem; bottom: calc(1.25rem + 3.5rem + .75rem + env(safe-area-inset-bottom)); z-index: 44;
+              width: 3.5rem; height: 3.5rem; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center;
+              background: #fff; color: #111; border: 2px solid #111; box-shadow: 0 6px 18px rgba(0,0,0,.22); cursor: pointer; }
+  #scan-fab.hidden { display: none; }
+  #scan-fab.on { background: #111; color: #fff; }
+  #cam-box { position: fixed; z-index: 43; top: calc(3.5rem + .5rem); left: 50%; transform: translateX(-50%);
+             width: min(28rem, calc(100% - 1.5rem)); background: #000; border-radius: 14px; overflow: hidden; box-shadow: 0 14px 40px rgba(0,0,0,.35); }
+  #cam-box.hidden { display: none; }
+  .cam-cab { display: flex; align-items: center; justify-content: space-between; padding: .45rem .75rem; color: #fff; font-size: .85rem; font-weight: 600; }
+  .cam-cab button { color: #fff; background: transparent; border: 0; font-size: 1.1rem; cursor: pointer; padding: 0 .25rem; }
+  @media (max-width: 640px) { #scan-fab { right: 1rem; bottom: calc(1rem + 3.25rem + .75rem + env(safe-area-inset-bottom)); width: 3.25rem; height: 3.25rem; } }
+  body.parkia-on #scan-fab { display: none; }
 </style>{% endblock %}
 {% block contenido %}
 <a href="/" class="text-sm text-zinc-500 hover:text-violeta">← Inicio</a>
@@ -160,17 +173,22 @@
 
   <!-- Mi búsqueda -->
   <section id="t-mia" class="flex flex-col gap-3">
-    <div class="card p-4 sticky top-14 z-20">
+    <div class="card p-4">
       <div class="flex gap-2">
         <input id="esc" class="input flex-1 !text-lg !py-3" placeholder="Escaneá la prenda que encontraste" autocomplete="off">
         <button class="btn btn-gris" onclick="toggleCam()" title="Usar la cámara del celular">📷</button>
       </div>
-      <div id="cam-box" class="hidden mt-2"><div id="qr-reader" class="w-full min-h-[200px] bg-black rounded-xl overflow-hidden"></div></div>
+      <div id="cam-box" class="hidden"><div class="cam-cab"><span>📷 Apuntá al código de barras</span><button type="button" onclick="pararCam()" aria-label="Cerrar cámara">✕</button></div>
+        <div id="qr-reader" class="w-full min-h-[200px] bg-black overflow-hidden"></div></div>
       <div id="mia-info" class="text-sm mt-2"></div>
       <div id="box-bar" class="mt-2"></div>
     </div>
     <div id="mia-lista" class="flex flex-col gap-3"></div>
   </section>
+  <button id="scan-fab" type="button" class="hidden" onclick="toggleCam()" title="Escanear con la cámara" aria-label="Escanear con la cámara">
+    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+      <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8v8M10 8v8M13 8v8M16 8v8"/></svg>
+  </button>
 
   <!-- Equipo -->
   <section id="t-equipo" class="card p-4 hidden">
@@ -208,8 +226,8 @@
       {% if organiza %}<label class="text-sm flex items-center gap-2">Prendas por BOX
         <input id="box-cant" type="number" min="1" max="50" class="input !w-20 !py-1" onchange="boxCant(this.value)"></label>{% endif %}
     </div>
-    <p class="text-xs text-zinc-500 mb-3">Cada persona junta prendas y, al llegar a la cantidad del BOX (<b id="box-cant-txt">5</b>), las lleva a la mesa y la app le dice en qué BOX dejarlas.
-      Las ventas de varias prendas van siempre juntas en el mismo BOX. En la mesa de control, al escanear la etiqueta, aparece el BOX. Cuando todas las ventas de un BOX quedan controladas, el número se libera.</p>
+    <p class="text-xs text-zinc-500 mb-3">Cada persona tiene <b>sus</b> BOX: las primeras <b id="box-cant-txt">5</b> prendas que marca van a su BOX 1, las siguientes a su BOX 2, y así (se asignan solas al tocar <b>La tengo</b> o escanear).
+      Las ventas de varias prendas van siempre juntas en el mismo BOX. En la mesa de control se ven los BOX de cada persona con las etiquetas que faltan escanear.</p>
     <div id="box-lista" class="flex flex-col gap-2 text-sm"></div>
   </section>
 
@@ -236,9 +254,9 @@
 
 <div id="re-ok"><div><div class="tilde">✔</div><div id="ok-txt" class="text-3xl font-black mt-2">OK</div><div id="ok-sub" class="text-lg mt-2 opacity-90"></div></div></div>
 <div id="re-box"><div class="max-w-lg w-full text-center py-6">
-  <div class="text-xl font-bold opacity-80">Dejá las prendas en</div>
+  <div class="text-xl font-bold opacity-80">Llevá a la mesa de control</div>
   <div id="bx-cuerpo"></div>
-  <button class="btn !bg-white !text-black !border-white !py-3 !px-6 mt-6 w-full !text-lg font-black" onclick="cerrarBox()">Listo, ya las dejé</button>
+  <button class="btn !bg-white !text-black !border-white !py-3 !px-6 mt-6 w-full !text-lg font-black" onclick="cerrarBox()">Listo, ya lo llevé</button>
 </div></div>
 <div id="re-alerta"><div class="max-w-lg w-full">
   <div class="cruz">✖</div>
@@ -482,13 +500,14 @@ function pintarCabecera() {
     document.getElementById('re-reabrir').classList.toggle('hidden', abierta);
   }
   document.getElementById('esc').disabled = !abierta || !re.me_sume;
+  fabScan();
 }
 function tab(t) {
   tabAct = t;
   document.querySelectorAll('#tabs [data-tab]').forEach(b => b.classList.toggle('activo', b.dataset.tab === t));
   ['mia', 'equipo', 'todo', 'box', 'mesa'].forEach(x => { const el = document.getElementById('t-' + x); if (el) el.classList.toggle('hidden', x !== t); });
   if (t !== 'mia') pararCam();
-  cargarTab(); foco();
+  fabScan(); cargarTab(); foco();
 }
 function cargarTab() { if (tabAct === 'mia') cargarMia(); else if (tabAct === 'equipo') pintarEquipo(); else if (tabAct === 'todo') cargarTodo(); else if (tabAct === 'box') cargarBoxes(); }
 async function sumarme() {
@@ -603,31 +622,29 @@ function bloqueHtml(b, activo) {
     <div class="flex flex-col gap-2">${b.gs.map(g => grupoHtml(g, activo && g.faltan > 0)).join('')}</div></div>`;
 }
 
-// ───────── BOX: llevar lo juntado a la mesa ─────────
+// ───────── BOX: cada persona tiene los suyos y se llenan solos ─────────
 let boxEst = null;
 function boxBar() {
   const el = document.getElementById('box-bar'); if (!el) return;
   const b = boxEst;
-  if (!b || !re || !re.me_sume || re.estado !== 'abierto') { el.innerHTML = ''; return; }
-  if (!b.en_mano) { el.innerHTML = `<div class="text-xs text-zinc-500">📦 BOX: cuando juntes <b>${b.cantidad}</b> prendas (o termines tu tramo) se habilita <b>Llevar a la mesa</b>.</div>`; return; }
-  el.innerHTML = `<div class="box-bar ${b.habilitado ? 'on' : ''}"><div class="flex-1 min-w-0"><b>📦 En la mano: ${b.en_mano}</b>
-      <span class="text-sm">${b.habilitado ? '· ¡listo para la mesa!' : 'de ' + b.cantidad}</span>
-      <div class="box-prog"><i style="width:${Math.min(100, 100 * b.en_mano / b.cantidad)}%"></i></div></div>
-    <button class="btn ${b.habilitado ? 'btn-primario' : 'btn-gris'} font-bold" onclick="llevarBox(${b.habilitado ? 'false' : 'true'})">📦 Llevar a la mesa</button></div>`;
-}
-async function llevarBox(forzar) {
-  if (forzar && !confirm(`Todavía no llegaste a ${boxEst.cantidad} prendas. ¿Las llevás igual a la mesa?`)) return;
-  try { const r = await api(`/ecommerce/api/${re.id}/box/llevar`, { json: { forzar } }); boxEst = r.box; mostrarBox(r.boxes); cargarMia(); }
-  catch (e) { toast(e.message, 'error'); }
+  if (!b || !re || !re.me_sume) { el.innerHTML = ''; return; }
+  if (!b.actual) { el.innerHTML = `<div class="text-xs text-zinc-500">📦 Tus prendas van solas a tu BOX: las primeras <b>${b.cantidad}</b> al BOX 1, las siguientes al BOX 2…</div>`; return; }
+  const otros = (b.boxes || []).filter(x => x.numero !== b.actual);
+  el.innerHTML = `<div class="box-bar ${b.lleno ? 'on' : ''}"><span class="box-num" style="font-size:1.4rem">${b.actual}</span><div class="flex-1 min-w-0"><b>📦 Tu BOX ${b.actual}: ${b.en_actual} de ${b.cantidad}</b>
+      <span class="text-sm">${b.lleno ? '· ¡completo, llevalo a la mesa!' : b.pendientes === 0 ? '· terminaste: llevalo a la mesa' : ''}</span>
+      <div class="box-prog"><i style="width:${Math.min(100, 100 * b.en_actual / b.cantidad)}%"></i></div>
+      ${otros.length ? `<div class="text-xs text-zinc-500 mt-1">${otros.map(x => `BOX ${x.numero} (${x.unidades}) ${x.activo ? '' : '✔'}`).join(' · ')}</div>` : ''}</div></div>`;
 }
 function mostrarBox(bs) {
+  if (!bs || !bs.length) return;
   alerta = true; beepOk();
   document.getElementById('bx-cuerpo').innerHTML = bs.map(b => `<div class="bx"><div class="flex items-center gap-4">
       <div class="grande">${b.numero}</div><div><div class="text-2xl font-black">BOX ${b.numero}</div>
-      <div class="opacity-80">${b.unidades} prenda${b.unidades > 1 ? 's' : ''}${b.nuevo ? '' : ' · <b>ya tiene prendas de esta venta</b>'}</div></div></div>
+      <div class="opacity-80">${esc(b.quien || '')} · ${b.unidades} prenda${b.unidades > 1 ? 's' : ''}</div></div></div>
     ${b.ventas.map(v => `<div class="mt-2 text-sm"><b>${esc(v.tipo)} ${esc(v.tracking)}</b>${v.comprador ? ' · ' + esc(v.comprador) : ''}<br><span class="opacity-80">${v.prendas.map(esc).join(' · ')}</span></div>`).join('')}</div>`).join('');
   document.getElementById('re-box').classList.add('on');
 }
+function trasMarcar(r) { if (r && r.box) { boxEst = r.box; boxBar(); } if (r && r.box_llevar && r.box_llevar.length) setTimeout(() => mostrarBox(r.box_llevar), 900); }
 function cerrarBox() { alerta = false; document.getElementById('re-box').classList.remove('on'); foco(); }
 async function cargarBoxes() {
   let d; try { d = await api(`/ecommerce/api/${re.id}/boxes`); } catch (e) { toast(e.message, 'error'); return; }
@@ -635,15 +652,19 @@ async function cargarBoxes() {
   const inp = document.getElementById('box-cant'); if (inp && document.activeElement !== inp) inp.value = d.cantidad;
   const card = b => `<div class="box-card ${b.activo ? '' : 'vacio'}"><div class="flex items-center gap-3">
       <span class="box-num">${b.numero}</span><div class="flex-1"><b>BOX ${b.numero}</b> · ${b.unidades} prenda${b.unidades > 1 ? 's' : ''}
-      <div class="text-xs text-zinc-500">👤 ${esc(b.quien || '—')} · ${b.hora}</div></div>
-      <span class="chip ${b.activo ? 'chip-en_curso' : 'chip-hecha'}">${b.activo ? `${b.controladas}/${b.ventas.length} controladas` : 'vacío · libre'}</span></div>
+      <div class="text-xs text-zinc-500">desde ${b.hora}</div></div>
+      <span class="chip ${b.activo ? 'chip-en_curso' : 'chip-hecha'}">${b.activo ? `${b.controladas}/${b.ventas.length} controladas` : '✔ controlado'}</span></div>
     ${b.ventas.map(v => `<div class="box-v"><div class="flex flex-wrap items-center gap-2"><b>${esc(v.tipo)} ${esc(v.tracking)}</b>
         ${v.cancelado ? '<span class="chip chip-vencida">CANCELADA</span>' : v.estado === 'completo' ? '<span class="chip chip-hecha">✔ controlada</span>' : ''}
         <span class="text-zinc-500">${esc(v.comprador || '')}</span>${v.unidades < v.total ? `<span class="text-xs text-amber-700">${v.unidades} de ${v.total} en este BOX</span>` : ''}</div>
       <div class="text-xs text-zinc-600">${v.prendas.map(esc).join(' · ')}</div></div>`).join('')}</div>`;
-  const act = d.boxes.filter(b => b.activo), vac = d.boxes.filter(b => !b.activo);
-  document.getElementById('box-lista').innerHTML = (act.map(card).join('') || '<p class="text-zinc-500">Todavía no se llevó nada a la mesa.</p>')
-    + (vac.length ? `<details class="mt-2"><summary class="cursor-pointer font-bold text-zinc-500">Ya vaciados (${vac.length})</summary><div class="flex flex-col gap-2 mt-2">${vac.map(card).join('')}</div></details>` : '');
+  const porPersona = {};
+  d.boxes.forEach(b => (porPersona[b.quien || '—'] = porPersona[b.quien || '—'] || []).push(b));
+  document.getElementById('box-lista').innerHTML = Object.entries(porPersona).map(([q, bs]) => {
+    const act = bs.filter(b => b.activo), vac = bs.filter(b => !b.activo);
+    return `<details class="card p-3" open><summary class="font-bold cursor-pointer">👤 ${esc(q)} · ${act.length} BOX en la mesa${vac.length ? ` · ${vac.length} controlado${vac.length > 1 ? 's' : ''}` : ''}</summary>
+      <div class="flex flex-col gap-2 mt-2">${act.map(card).join('')}${vac.length ? `<details><summary class="cursor-pointer text-zinc-500 font-bold">Ya controlados (${vac.length})</summary><div class="flex flex-col gap-2 mt-2">${vac.map(card).join('')}</div></details>` : ''}</div></details>`;
+  }).join('') || '<p class="text-zinc-500">Todavía nadie marcó prendas.</p>';
 }
 async function boxCant(v) {
   try { const r = await api('/ecommerce/api/box/cantidad', { json: { cantidad: parseInt(v, 10) } }); toast(`BOX de ${r.cantidad} prendas`); cargarBoxes(); }
@@ -676,7 +697,7 @@ async function traje(ids, quien, desdeEscaneo) {
   if (!desdeEscaneo && !confirm(`Esta prenda la tiene asignada ${quien || 'otra persona'}. ¿La trajiste vos? Va a quedar a tu nombre.`)) return;
   try {
     const r = await api(`/ecommerce/api/${re.id}/la-tengo`, { json: { item_ids: ids, ajena: true } });
-    okGrande('LA TRAJISTE VOS', `queda a tu nombre${quien ? ' (era de ' + corto(quien) + ')' : ''}`); cargarTab(); refrescar();
+    okGrande('LA TRAJISTE VOS', `queda a tu nombre${quien ? ' (era de ' + corto(quien) + ')' : ''}`); trasMarcar(r); cargarTab(); refrescar();
   } catch (e) { toast(e.message, 'error'); }
 }
 function grupoHtml(g, activo) {
@@ -731,7 +752,7 @@ async function manual(ids) {
   try {
     const r = await api(`/ecommerce/api/${re.id}/la-tengo`, { json: { item_ids: ids } });
     if (r.ok === false && r.motivo === 'otro') return traje(ids, r.quien);
-    okGrande('LA TENGO', r.faltan ? `faltan ${r.faltan} de esta prenda` : 'completa'); cargarTab(); refrescar();
+    okGrande('LA TENGO', (r.box && r.box.actual ? `BOX ${r.box.actual} · ` : '') + (r.faltan ? `faltan ${r.faltan} de esta prenda` : 'completa')); trasMarcar(r); cargarTab(); refrescar();
   } catch (e) { toast(e.message, 'error'); }
 }
 async function cargarTodo() {
@@ -754,7 +775,8 @@ async function procesar(v) {
     const r = await api(`/ecommerce/api/${re.id}/encontre`, { json: { codigo: v } });
     re = r.busqueda; pintarCabecera();
     if (r.ok) {
-      okGrande('OK', r.escaneado + (r.grupo && r.grupo.faltan ? ` · faltan ${r.grupo.faltan}` : ''));
+      okGrande('OK', (r.box && r.box.actual ? `BOX ${r.box.actual} · ` : '') + r.escaneado + (r.grupo && r.grupo.faltan ? ` · faltan ${r.grupo.faltan}` : ''));
+      trasMarcar(r);
       await cargarMia();
       if (r.grupo) { const c = document.getElementById('g-' + r.grupo.clave); if (c) { c.classList.add('flash'); c.scrollIntoView({ block: 'center', behavior: 'smooth' }); } }
     } else mostrarAlerta(r);
@@ -791,17 +813,22 @@ const inpEsc = document.getElementById('esc');
 inpEsc.addEventListener('keydown', e => { if (e.key !== 'Enter') return; e.preventDefault(); const v = inpEsc.value; inpEsc.value = ''; procesar(v); });
 
 let scanner = null, ultimo = '', ultimoT = 0;
+function fabScan() {
+  const f = document.getElementById('scan-fab'); if (!f) return;
+  f.classList.toggle('hidden', tabAct !== 'mia' || document.getElementById('esc').disabled);
+  f.classList.toggle('on', !document.getElementById('cam-box').classList.contains('hidden'));
+}
 async function toggleCam() {
   if (scanner) { pararCam(); return; }
   if (typeof Html5Qrcode === 'undefined') { toast('No se pudo cargar el lector de la cámara (¿sin internet?)', 'error'); return; }
-  document.getElementById('cam-box').classList.remove('hidden');
+  document.getElementById('cam-box').classList.remove('hidden'); document.getElementById('scan-fab')?.classList.add('on');
   try {
     scanner = new Html5Qrcode('qr-reader', { verbose: false, experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
     await scanner.start({ facingMode: 'environment' }, { fps: 12, qrbox: (w, h) => ({ width: Math.round(w * .9), height: Math.max(80, Math.round(h * .35)) }) },
       t => { const n = Date.now(); if (t === ultimo && n - ultimoT < 2500) return; ultimo = t; ultimoT = n; procesar(t); }, () => {});
   } catch (e) { toast('No se pudo abrir la cámara: ' + e, 'error', 6000); pararCam(); }
 }
-async function pararCam() { if (scanner) { try { await scanner.stop(); } catch {} scanner = null; } const b = document.getElementById('cam-box'); if (b) b.classList.add('hidden'); }
+async function pararCam() { if (scanner) { try { await scanner.stop(); } catch {} scanner = null; } const b = document.getElementById('cam-box'); if (b) b.classList.add('hidden'); document.getElementById('scan-fab')?.classList.remove('on'); }
 
 // ───────── acciones de quien organiza ─────────
 async function sumarArchivos(input) {

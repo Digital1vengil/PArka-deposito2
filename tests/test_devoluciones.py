@@ -70,7 +70,7 @@ def test_drive_falla_y_reintento(monkeypatch):
     with TestClient(app) as c:
         _login(c)
         v = c.get("/devoluciones/api/buscar?q=2000000035901").json()["modelos"][0]["variantes"][0]
-        d = c.post("/devoluciones/api/confirmar", json={"plataforma": "ML", "items": [{"articulo_id": v["id"], "cantidad": 1}]}).json()["devolucion"]
+        d = c.post("/devoluciones/api/confirmar", json={"plataforma": "ML", "items": [{"articulo_id": v["id"], "cantidad": 1, "estado": "OPTIMO"}]}).json()["devolucion"]
         assert not d["drive_ok"] and "sin conexión" in d["drive_error"]
         monkeypatch.setattr(svc, "enviar", lambda dev: {"ok": True, "id": "D-2"})
         assert c.post(f"/devoluciones/api/{d['id']}/reintentar").json()["devolucion"]["drive_ok"]
@@ -142,6 +142,9 @@ def test_plataforma_por_prenda(monkeypatch):
         assert c.post("/devoluciones/api/confirmar", json={"items": [{"articulo_id": v["id"], "cantidad": 1}]}).status_code == 400
         assert c.post("/devoluciones/api/confirmar", json={"items": [
             {"articulo_id": v["id"], "cantidad": 1, "plataforma": "XX"}]}).status_code == 400
+        # el estado (Óptimo / Falla) también es obligatorio: no hay valor por defecto
+        r = c.post("/devoluciones/api/confirmar", json={"items": [{"articulo_id": v["id"], "cantidad": 1, "plataforma": "ML"}]})
+        assert r.status_code == 400 and "estado" in r.json()["detail"]
         d = c.post("/devoluciones/api/confirmar", json={"items": [
             {"articulo_id": v["id"], "cantidad": 2, "estado": "OPTIMO", "plataforma": "tn"},
             {"articulo_id": v["id"], "cantidad": 1, "estado": "FALLA", "plataforma": "ML"}]}).json()["devolucion"]
