@@ -472,6 +472,8 @@ def vivo_canceladas(tipo: str, u: Usuario = Depends(acceso)):
         return {"ok": False, "error": str(e), "canceladas": []}
     if fuente == "ml":
         lista = [p for p in lista if p.get("tipo") == tipo]
+        if tipo == "flex":
+            lista = lista + ventas_api.flex_tn()[1]
     return {"ok": True, "fecha": hoy().isoformat(), "canceladas": [ventas_api._para_scanner(p) for p in lista]}
 
 
