@@ -446,6 +446,24 @@ def tn_despacho_sp(refrescar: bool = False) -> list[dict]:
     return out
 
 
+def flex_tn(refrescar: bool = False) -> tuple[list[dict], list[dict], str]:
+    """Lo de Tienda Nube que se suma a Flex (sale por SmartPost): (paquetes, canceladas, aviso).
+    Solo si el panel de SmartPost está cargado y Tienda Nube conectada; si algo falla, Flex sigue con lo de ML."""
+    from . import smartpost as sp
+    if not (_modo_panel() and tn.configurado()):
+        return [], [], ""
+    try:
+        paq = tn_despacho_sp(refrescar)
+    except Exception as e:  # noqa: BLE001
+        return [], [], f"Tienda Nube / SmartPost: {e}"
+    try:
+        con_guia = {p["orden"] for p in sp.pedidos_tn()}
+        canc = [p for p in canceladas("tn", refrescar) if p["tracking"] in con_guia]
+    except Exception:  # noqa: BLE001
+        canc = []
+    return paq, canc, ""
+
+
 def canceladas(fuente: str, refrescar: bool = False) -> list[dict]:
     """Canceladas recientes ('ml' o 'tn'), cacheadas CANC_SEG segundos."""
     c = _canc[fuente]
@@ -470,7 +488,7 @@ def _para_scanner(p: dict) -> dict:
     if p.get("tipo") == "cambio":
         d.update(medioEnvio=p.get("medio") or "", cambio=True)
     if tn_:
-        d.update(orderNum=int(d["trackingId"]) if d["trackingId"].isdigit() else 0,
+        d.update(orderNum=int(d["trackingId"]) if d["trackingId"].isdigit() else 0, tn=True,
                  tnTracking=p.get("tracking_alt") or "", medioEnvio=p.get("medio") or "")
     return d
 
@@ -517,7 +535,12 @@ def despacho(tipo: str, refrescar: bool = False) -> dict:
         canc = [p for p in canceladas("ml", refrescar) if p["tipo"] == tipo]
     except meli.MeliError:
         canc = []
-    return dict(base, paquetes=[_para_scanner(p) for p in listas],
+    aviso = ""
+    if tipo == "flex":
+        # Flex también lleva lo de Tienda Nube que sale por SmartPost (Mis Pedidos + guías de hoy sin orden)
+        extra, canc_tn, aviso = flex_tn(refrescar)
+        listas, canc = listas + extra, canc + canc_tn
+    return dict(base, aviso=aviso, paquetes=[_para_scanner(p) for p in listas],
                 por_imprimir=sum(1 for p in mios if p["etiqueta"] == "por_imprimir" and p["hoy"]),
                 proximos=sum(1 for p in mios if not p["hoy"]),
                 canceladas=[_para_scanner(p) for p in canc])
@@ -549,6 +572,10 @@ def explicar_envio(codigo: str, tipo: str) -> dict:
                 "paquete": _para_scanner(cam.a_paquete(s_))}
     if tipo == "tiendanube":
         return _explicar_tn(codigo)
+    if tipo == "flex" and _modo_panel() and tn.configurado() and (not codigo.isdigit() or len(codigo) <= 9):
+        r = _explicar_tn(codigo)      # nº de orden de TN (4 díg.) o guía de SmartPost (7 díg.): los envíos de ML son más largos
+        if r.get("motivo") != "no_existe" or r.get("guia"):
+            return r                  # si no es nada de TN / SmartPost, se sigue con Mercado Libre
     if not codigo.isdigit():
         return {"motivo": "no_existe", "mensaje": "No es una etiqueta de Mercado Libre"}
     sid = codigo
