@@ -80,6 +80,9 @@ def guardar(body: AjustesIn, u: Usuario = Depends(solo_admin), db: Session = Dep
     if any(k.startswith("meli_") for k in cambiados):
         from ..services import meli
         meli.olvidar_cache()
+    if any(k.startswith("sp_") for k in cambiados):
+        from ..services import smartpost
+        smartpost.olvidar()
     registrar(db, u, "conexiones_guardadas", ", ".join(cambiados))
     return {"ok": True, "guardados": cambiados, "aj": ajustes.resumen(db)}
 
@@ -102,6 +105,32 @@ def meli_crudo(path: str = "/users/me", u: Usuario = Depends(solo_admin)):
         return {"ok": True, "path": path, "respuesta": meli.crudo(path)}
     except meli.MeliError as e:
         return {"ok": False, "mensaje": str(e), "status": e.status}
+
+
+@router.get("/admin/api/conexiones/smartpost/guia")
+def smartpost_guia(codigo: str, u: Usuario = Depends(solo_admin)):
+    """Probar con una etiqueta real: qué devuelve SmartPost para ese nº de guía y a qué orden de TN corresponde."""
+    from ..services import smartpost, ventas_api
+    from ..services import tiendanube as tn
+    codigo = (codigo or "").strip()
+    if not codigo:
+        raise HTTPException(400, "Escribí o escaneá un nº de guía")
+    try:
+        g = smartpost.leer_guia(codigo)
+    except smartpost.SPError as e:
+        return {"ok": False, "mensaje": str(e)}
+    if not g["encontrada"]:
+        return {"ok": True, "encontrada": False, "mensaje": f"SmartPost no encontró la guía {codigo}"}
+    por_enviar, aviso_tn = [], ""
+    try:
+        por_enviar = ventas_api.tn_por_enviar(refrescar=False) if tn.configurado() else []
+    except tn.TNError as e:
+        aviso_tn = str(e)
+    smartpost.olvidar()
+    m = smartpost.orden_de_guia(codigo, por_enviar)
+    return {"ok": True, "encontrada": True, "guia": g["guia"], "estado": g["estado"], "nombre": g["nombre"],
+            "remitos": g["remitos"], "textos": g["textos"], "orden": m["numero"], "via": m["via"],
+            "aviso_tn": aviso_tn, "crudo": g["crudo"]}
 
 
 @router.post("/admin/api/conexiones/probar/{que}")
@@ -129,6 +158,13 @@ def probar(que: str, u: Usuario = Depends(solo_admin), db: Session = Depends(get
         except cambios.CambiosError as e:
             return {"ok": False, "mensaje": str(e)}
         return {"ok": True, "mensaje": f"Conectado a la app de cambios · {r['total']} cambios · {r['a_preparar']} para preparar / despachar"}
+    if que == "smartpost":
+        from ..services import smartpost
+        try:
+            r = smartpost.probar()
+        except smartpost.SPError as e:
+            return {"ok": False, "mensaje": str(e)}
+        return {"ok": True, "mensaje": "Conectado a SmartPost" + (f" · cliente {r['cliente']}" if r["cliente"] else "")}
     if que == "tiendanube":
         from ..services import tiendanube as tn
         try:
