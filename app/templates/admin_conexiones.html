@@ -99,7 +99,9 @@
   <h2 class="text-lg font-bold mb-1">SmartPost · guías de los envíos de Tienda Nube</h2>
   <p class="text-sm text-zinc-500 mb-4">En <b>Despacho → Tienda Nube</b> se escanea la <b>etiqueta de SmartPost</b>: con el nº de guía la app consulta
     SmartPost, encuentra la orden de Tienda Nube (por el remito / referencia o, si no, por el nombre del destinatario) y la verifica
-    contra la lista del día. El token sale del panel de SmartPost (ePresis → Documentación APIs); se guarda en la base, no en el código.</p>
+    contra la lista del día. La API solo da los estados de la guía: la relación <b>orden ↔ guía</b> se lee del panel
+    (<i>Tiendanube → Mis Pedidos</i> y, para las guías sin orden de Tienda Nube, <i>Búsqueda de Guía</i> con fecha de remito de hoy),
+    por eso la app entra con el <b>usuario y la contraseña del panel</b>. Todo se guarda en la base, no en el código.</p>
   <div class="grid sm:grid-cols-3 gap-3">
     <div><label class="lbl">Dirección de la API</label><input class="input" name="sp_url" value="{{ aj.sp_url.valor }}"></div>
     <div class="sm:col-span-2"><label class="lbl">Token (api_token) {{ '✅ cargado' if aj.sp_token.cargado else '— sin cargar' }}</label>
@@ -107,13 +109,20 @@
         <input class="input flex-1" id="sp_token" name="sp_token" type="password" value="{{ aj.sp_token.valor }}" autocomplete="off" placeholder="Pegá el token de SmartPost">
         <button type="button" class="btn btn-gris btn-chico" onclick="const i=document.getElementById('sp_token'); i.type = i.type==='password' ? 'text' : 'password';" title="Mostrar / ocultar">👁</button>
       </div></div>
+    <div><label class="lbl">Usuario del panel {{ '✅' if aj.sp_panel_usuario.cargado else '' }}</label>
+      <input class="input" name="sp_panel_usuario" value="{{ aj.sp_panel_usuario.valor }}" autocomplete="off" placeholder="El de smartpostecommerce.epresis.com"></div>
+    <div class="sm:col-span-2"><label class="lbl">Contraseña del panel {{ '✅ cargada' if aj.sp_panel_clave.cargado else '— sin cargar' }}</label>
+      <div class="flex gap-2">
+        <input class="input flex-1" id="sp_panel_clave" name="sp_panel_clave" type="password" value="{{ aj.sp_panel_clave.valor }}" autocomplete="new-password" placeholder="Contraseña del panel de SmartPost">
+        <button type="button" class="btn btn-gris btn-chico" onclick="const i=document.getElementById('sp_panel_clave'); i.type = i.type==='password' ? 'text' : 'password';" title="Mostrar / ocultar">👁</button>
+      </div></div>
     <div class="sm:col-span-2"><label class="lbl">En Despacho → Tienda Nube</label>
       <select class="input" name="sp_despacho">
         <option value="1" {{ 'selected' if aj.sp_despacho.valor != '0' }}>Verificar las etiquetas de SmartPost por nº de guía</option>
         <option value="0" {{ 'selected' if aj.sp_despacho.valor == '0' }}>No usar SmartPost (solo nº de orden)</option>
       </select></div>
   </div>
-  {% if aj.sp_token.cargado %}
+  {% if aj.sp_token.cargado or aj.sp_panel_clave.cargado %}
   <div class="mt-4"><label class="lbl">Probar con una etiqueta real (escaneá o escribí el nº de guía)</label>
     <div class="flex gap-2"><input class="input flex-1" id="sp_guia" placeholder="Nº de guía de SmartPost" autocomplete="off"
         onkeydown="if (event.key === 'Enter') { event.preventDefault(); spGuia(); }">
@@ -262,7 +271,7 @@ async function spGuia() {
     const r = await api('/admin/api/conexiones/smartpost/guia?codigo=' + encodeURIComponent(codigo));
     if (!r.ok) { box.textContent = '❌ ' + r.mensaje; return; }
     if (!r.encontrada) { box.textContent = '❌ ' + r.mensaje; return; }
-    const via = { remito: 'por el remito / referencia', nombre: 'por el nombre del destinatario', remito_fuera: 'por el remito (no está \"Por enviar\")' }[r.via] || '';
+    const via = { panel: 'según Mis Pedidos del panel', remito: 'por el remito / referencia', nombre: 'por el nombre del destinatario', remito_fuera: 'por el remito (no está \"Por enviar\")' }[r.via] || '';
     box.innerHTML = `<p><b>Guía:</b> ${esc(r.guia)}${r.estado ? ' · ' + esc(r.estado) : ''}</p>
       <p><b>Destinatario:</b> ${esc(r.nombre || '—')}</p>
       <p><b>Remito / referencia:</b> ${esc((r.remitos || []).join(', ') || '—')}</p>
