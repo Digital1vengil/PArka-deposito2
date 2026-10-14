@@ -422,12 +422,12 @@
     <div id="qr-reader" style="width:100%; height:100%;"></div>
 
     <!-- Camera-idle overlay: default state — the camera only turns on from "Iniciar Despacho" -->
-    <div id="cam-activate-overlay" class="absolute inset-0 bg-slate-900/95 flex flex-col items-center justify-center z-30">
+    <div id="cam-activate-overlay" onclick="camTap()" role="button" style="cursor:pointer" class="absolute inset-0 bg-slate-900/95 flex flex-col items-center justify-center z-30">
       <div class="w-16 h-16 rounded-full bg-white/10 flex items-center justify-center mb-4">
         <i data-lucide="camera-off" class="icon text-white" style="width:32px;height:32px;"></i>
       </div>
       <p class="text-white font-bold text-xl mb-2">Cámara apagada</p>
-      <p class="text-slate-300 text-sm text-center px-10">Se enciende automáticamente al presionar<br>"Iniciar Despacho"</p>
+      <p class="text-slate-300 text-sm text-center px-10">Tocá acá para encender la cámara</p>
     </div>
 
     <!-- Corner frame overlay -->
@@ -2075,8 +2075,10 @@ function toggleListExpand(forceValue) {
 // ─────────────────────────────────────────────
 // CAMERA / SCANNER  (Android-hardened)
 // ─────────────────────────────────────────────
+let scannerStartingAt = 0;
 async function startScanner(fromUserGesture = false) {
-  if (scannerStarting) return;
+  // Si un intento anterior quedó colgado (pasa en algunos celulares), a los 8 s se permite reintentar
+  if (scannerStarting && Date.now() - scannerStartingAt < 8000) return;
   document.getElementById('paused-overlay').classList.add('hidden');
 
   // Mobile: camera requires a user gesture. Without one, show tap overlay.
@@ -2090,6 +2092,7 @@ async function startScanner(fromUserGesture = false) {
   }
 
   scannerStarting = true;
+  scannerStartingAt = Date.now();
 
   // Destruir instancia anterior y recrear el elemento DOM completamente
   if (scanner) {
@@ -2193,6 +2196,7 @@ async function startScanner(fromUserGesture = false) {
 
   scannerRunning = true;
   setMenuPauseLabel('Pausar cámara', 'pause');
+  if (despachoActive) setDespachoUI('active');
 
   // Android/iOS: add playsinline so video doesn't go fullscreen
   setTimeout(() => {
@@ -2239,11 +2243,19 @@ function showCamError(type, detail = '') {
 // (ver iniciarDespacho) y se apaga/libera al presionar "Finalizar
 // Despacho" (ver finalizarDespacho) o al pausarla desde el menú.
 // ─────────────────────────────────────────────
+// Tocar el recuadro "Cámara apagada": enciende la cámara (y si el despacho no empezó, lo inicia)
+function camTap() {
+  if (!state) { toast('Primero cargá la lista del día', 'warn', 2500); return; }
+  if (despachoActive) startScanner(true);
+  else document.getElementById('btnIniciar')?.click();
+}
+
 async function stopScannerAndRelease() {
   if (scanner && scannerRunning) {
     try { await scanner.stop(); } catch {}
   }
   scannerRunning = false;
+  if (despachoActive) setDespachoUI('active');
   document.getElementById('paused-overlay')?.classList.add('hidden');
   document.getElementById('cam-activate-overlay')?.classList.remove('hidden');
   setMenuPauseLabel('Pausar cámara', 'pause');
@@ -2657,9 +2669,15 @@ function setDespachoUI(phase) {
     bIni.innerHTML = ic('rocket') + ' Iniciar Despacho · ' + tipoLbl;
     bFin.innerHTML = ic('check-circle') + ' Finalizar Despacho';
   } else if (phase === 'active') {
-    bIni.disabled = true;  bIni.classList.add('opacity-40','cursor-not-allowed');
     bFin.disabled = false; bFin.classList.remove('opacity-40','cursor-not-allowed');
-    bIni.innerHTML = ic('circle-dot') + ' ' + tipoLbl + ' activo';
+    if (typeof scannerRunning !== 'undefined' && scannerRunning) {
+      bIni.disabled = true;  bIni.classList.add('opacity-40','cursor-not-allowed');
+      bIni.innerHTML = ic('circle-dot') + ' ' + tipoLbl + ' activo';
+    } else {
+      // Despacho en curso con la cámara apagada (marcado a mano, recarga, lista en vivo): el botón la enciende
+      bIni.disabled = false; bIni.classList.remove('opacity-40','cursor-not-allowed');
+      bIni.innerHTML = ic('camera') + ' Encender cámara';
+    }
   } else if (phase === 'saving') {
     bIni.disabled = true; bFin.disabled = true;
     bFin.innerHTML = ic('loader-circle') + ' Guardando…';
@@ -3263,6 +3281,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('btn-begin-day')?.addEventListener('click', beginDay);
   document.getElementById('btnIniciar')?.addEventListener('click', () => {
+    if (despachoActive) { startScanner(true); return; }   // ya iniciado: solo enciende la cámara
     setScanMode(resolveDispatchType() === 'flex' ? 'qr' : 'barcode');
     iniciarDespacho();
   });

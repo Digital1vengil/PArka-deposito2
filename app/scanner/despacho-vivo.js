@@ -231,6 +231,7 @@
     horaRevision = d.hora || '';
     toast('✅ ' + nuevos.length + ' ' + (tipo === 'tiendanube' ? 'órdenes' : tipo === 'cambios' ? 'cambios' : 'envíos') + ' de ' + TIPOS[tipo] + ' cargados', 'ok', 3500);
     pintarBanda();
+    if (typeof setDespachoUI === 'function') setDespachoUI(despachoActive ? 'active' : 'idle');   // el botón muestra el tipo correcto
   }
 
   // El navegador de archivos de Drive pasa a ser la lista en vivo
