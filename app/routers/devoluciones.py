@@ -1,4 +1,5 @@
 """Sección Devoluciones: buscar artículo → color → talle → cantidad → confirmar (Drive + etiquetas)."""
+from sqlalchemy.orm import selectinload
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -135,7 +136,7 @@ def reintentar(did: int, u: Usuario = Depends(acceso), db: Session = Depends(get
 
 @router.get("/api/historial")
 def historial(u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
-    ds = db.scalars(select(Devolucion).order_by(Devolucion.id.desc()).limit(25)).all()
+    ds = db.scalars(select(Devolucion).options(selectinload(Devolucion.items)).order_by(Devolucion.id.desc()).limit(25)).all()
     return {"devoluciones": [dev_json(d) for d in ds]}
 
 

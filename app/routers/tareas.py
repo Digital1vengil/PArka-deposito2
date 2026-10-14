@@ -9,7 +9,7 @@ from ..actividad import registrar
 from ..auth import usuario_actual, secciones_de, SinPermiso, puede
 from ..db import get_db, ahora, hoy
 from ..models import Seccion, Tarea, Usuario
-from ..services.tareas import tareas_de_seccion, mis_tareas, tarea_json
+from ..services.tareas import tareas_de_seccion, tareas_de_secciones, mis_tareas, tarea_json
 from ..templating import render
 
 router = APIRouter(prefix="/tareas")
@@ -40,10 +40,11 @@ def pagina(request: Request, u: Usuario = Depends(usuario_actual), db: Session =
 @router.get("/api/lista")
 def lista(u: Usuario = Depends(usuario_actual), db: Session = Depends(get_db)):
     secs = _secciones_tareas(db, u)
+    por_sec = tareas_de_secciones(db, [s.slug for s in secs])
     return {
         "mias": [tarea_json(t) for t in mis_tareas(db, u)],
         "secciones": [{"slug": s.slug, "nombre": s.nombre, "icono": s.icono,
-                       "tareas": [tarea_json(t) for t in tareas_de_seccion(db, s.slug)]} for s in secs],
+                       "tareas": [tarea_json(t) for t in por_sec.get(s.slug, [])]} for s in secs],
     }
 
 

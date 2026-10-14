@@ -13,14 +13,22 @@ from ..templating import render
 router = APIRouter()
 
 
-def contadores_seccion(db: Session, slug: str) -> dict:
-    pend = db.scalar(select(func.count()).where(Tarea.seccion_slug == slug, Tarea.estado != "hecha")) or 0
-    venc = db.scalar(select(func.count()).where(Tarea.seccion_slug == slug, Tarea.estado != "hecha",
-                                                Tarea.vence < hoy())) or 0
+def conteo_tareas(db: Session) -> dict[str, tuple[int, int]]:
+    """Tareas abiertas y vencidas por sección, en una sola consulta (clave "*" = todas)."""
+    from sqlalchemy import case
+    filas = db.execute(select(Tarea.seccion_slug, func.count(),
+                              func.sum(case((Tarea.vence < hoy(), 1), else_=0)))
+                       .where(Tarea.estado != "hecha").group_by(Tarea.seccion_slug)).all()
+    r = {slug: (int(n or 0), int(v or 0)) for slug, n, v in filas}
+    r["*"] = (sum(n for n, _ in r.values()), sum(v for _, v in r.values()))
+    return r
+
+
+def contadores_seccion(db: Session, slug: str, tareas: dict[str, tuple[int, int]] | None = None) -> dict:
+    if tareas is None:
+        tareas = conteo_tareas(db)
+    pend, venc = tareas.get("*" if slug == "tareas" else slug, (0, 0))
     extra = {}
-    if slug == "tareas":
-        pend = db.scalar(select(func.count()).where(Tarea.estado != "hecha")) or 0
-        venc = db.scalar(select(func.count()).where(Tarea.estado != "hecha", Tarea.vence < hoy())) or 0
     if slug in ("asistente", "ml"):
         extra["panel"] = True
     if slug == "devoluciones":
@@ -58,7 +66,8 @@ def contadores_seccion(db: Session, slug: str) -> dict:
 @router.get("/")
 def inicio(request: Request, u: Usuario = Depends(usuario_actual), db: Session = Depends(get_db)):
     secciones = secciones_de(db, u)
-    tarjetas = [(s, contadores_seccion(db, s.slug)) for s in secciones]
+    tt = conteo_tareas(db)
+    tarjetas = [(s, contadores_seccion(db, s.slug, tt)) for s in secciones]
     return render(request, "inicio.html", u=u, tarjetas=tarjetas, mis=mis_tareas(db, u), hoy=hoy())
 
 
