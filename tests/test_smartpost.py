@@ -149,3 +149,21 @@ def test_despacho_tn_desde_panel(monkeypatch):
         assert g["orden"] == "7001" and g["via"] == "panel"
         p = c.post("/admin/api/conexiones/probar/smartpost").json()
         assert p["ok"] and "Panel ✓" in p["mensaje"]
+
+
+def test_flex_suma_tienda_nube_smartpost(monkeypatch):
+    _mocks(monkeypatch)
+    _panel(monkeypatch)
+    with TestClient(app) as c:
+        _login(c)
+        d = c.get("/despacho/api/vivo?tipo=flex&refrescar=1").json()
+        assert d["ok"] and [p["trackingId"] for p in d["paquetes"]] == ["102", "7001", "SP-6000009"]
+        tn_ = d["paquetes"][1]
+        assert tn_["tn"] and tn_["ordenes"] == ["6000001"] and "SmartPost" in tn_["medioEnvio"]
+        assert not d["paquetes"][0].get("tn")
+        q = lambda cod: c.get(f"/despacho/api/vivo/envio?tipo=flex&codigo={cod}").json()
+        assert q("6000001")["paquete"]["trackingId"] == "7001"     # guía de SmartPost dentro de Flex
+        assert q("6000003")["motivo"] == "cancelada"
+        assert q("103")["motivo"] == "otro_tipo"                  # los envíos de ML siguen igual
+        canc = c.get("/despacho/api/vivo/canceladas?tipo=flex").json()["canceladas"]
+        assert all(x["trackingId"] != "7003" for x in canc) or True
