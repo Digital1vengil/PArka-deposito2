@@ -84,6 +84,15 @@ def canjear_codigo(db, code: str) -> dict:
         raise TNError(f"No vino el token: {motivo}. El código se usa una sola vez y vence rápido: autorizá de nuevo.")
     ajustes.guardar(db, "tn_access_token", str(token))
     ajustes.guardar(db, "tn_store_id", str(tienda))
+    # Con la autorización nueva (p. ej. después de sumar permisos) las órdenes que fallaron vuelven a intentarse
+    try:
+        from ..models import TnEnvio
+        from sqlalchemy import select
+        for e in db.scalars(select(TnEnvio).where(TnEnvio.estado == "error")).all():
+            e.intentos = 0
+        db.commit()
+    except Exception:  # noqa: BLE001
+        db.rollback()
     return {"tienda": str(tienda), "scope": j.get("scope", "")}
 
 
@@ -330,6 +339,8 @@ def procesar_envio(db, numero: str, usuario_id: int | None = None) -> dict:
         e.estado, e.error = "error", str(ex)[:500]
         if ex.status in (404,) or "no tiene órdenes de envío" in str(ex):
             e.intentos = max(e.intentos, MAX_INTENTOS)  # no tiene sentido reintentar
+        elif ex.status == 403:
+            e.intentos = min(e.intentos, MAX_INTENTOS - 1)  # falta un permiso: se reintenta cuando se autorice de nuevo
         msg = str(ex)
     db.commit()
     return {"ok": e.estado == "ok", "estado": e.estado, "mensaje": msg}
