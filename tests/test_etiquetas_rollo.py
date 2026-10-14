@@ -91,7 +91,7 @@ def test_conteo_y_devolucion_rollo(monkeypatch):
         # devoluciones
         d = c.get("/devoluciones/api/buscar?q=abba 02003").json()["modelos"]
         par = next(x for x in d if x["articulo"] == "ABBA 02003")["variantes"][0]
-        dv = c.post("/devoluciones/api/confirmar", json={"plataforma": "ML", "items": [{"articulo_id": par["id"], "cantidad": 2}]}).json()["devolucion"]
+        dv = c.post("/devoluciones/api/confirmar", json={"plataforma": "ML", "items": [{"articulo_id": par["id"], "cantidad": 2, "estado": "OPTIMO"}]}).json()["devolucion"]
         puerto, recibido, t = _servidor()
         c.post("/admin/api/conexiones", json={"valores": {"rollo_impresora": f"127.0.0.1:{puerto}"}})
         r = c.post(f"/devoluciones/api/{dv['id']}/imprimir-rollo", json={"filas": 1}).json()
