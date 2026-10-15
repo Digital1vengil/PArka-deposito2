@@ -176,3 +176,30 @@ def test_mesa_por_box_detecta_la_venta_sola():
         assert r["tipo"] == "paquete" and r["en_este_box"]
         with SessionLocal() as db:
             assert db.query(Articulo).count() > 0
+
+
+def test_mesa_simple_etiqueta_y_prendas():
+    """Mesa de control sin BOX: la etiqueta abre la venta y cada prenda dice si coincide."""
+    with TestClient(app) as adm:
+        _login(adm)
+        cid = _crear(adm)
+        d = adm.get(f"/ecommerce/api/{cid}/mesa").json()
+        assert d["total"] == 17 and d["controladas"] == 0
+        v = next(x for x in d["ventas"] if x["unidades"] == 1 and x["items"][0]["codigo_barras"])
+        otra = next(x for x in d["ventas"] if x["items"][0]["codigo_barras"]
+                    and x["items"][0]["codigo_barras"] != v["items"][0]["codigo_barras"])
+        # prenda sin etiqueta: dice en qué venta va
+        r = adm.post(f"/ecommerce/api/{cid}/mesa/escanear", json={"codigo": v["items"][0]["codigo_barras"]}).json()
+        assert r["tipo"] == "guia" and r["paquetes"]
+        # etiqueta → venta abierta
+        r = adm.post(f"/ecommerce/api/{cid}/mesa/escanear", json={"codigo": v["tracking"]}).json()
+        assert r["tipo"] == "paquete" and r["paquete"]["id"] == v["id"]
+        # prenda equivocada → no coincide
+        r = adm.post(f"/ecommerce/api/{cid}/mesa/escanear",
+                     json={"codigo": otra["items"][0]["codigo_barras"], "paquete_id": v["id"]}).json()
+        assert r["ok"] is False and r["motivo"] == "equivocado"
+        # la prenda correcta → coincide y la venta queda controlada
+        r = adm.post(f"/ecommerce/api/{cid}/mesa/escanear",
+                     json={"codigo": v["items"][0]["codigo_barras"], "paquete_id": v["id"]}).json()
+        assert r["ok"] and r["completo"]
+        assert adm.get(f"/ecommerce/api/{cid}/mesa").json()["controladas"] == 1

@@ -453,6 +453,17 @@ class BoxCantIn(BaseModel):
     cantidad: int
 
 
+@router.get("/api/{cid}/mesa")
+def mesa_ventas(cid: int, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    """Mesa de control: las ventas de la búsqueda con sus productos y cuánto se controló de cada una."""
+    from ..services import control as csvc
+    c = _control(db, cid)
+    ventas = [{**csvc.paquete_json(p), **{k: v for k, v in svc.venta_corta(p).items() if k in ("canal", "numero")}}
+              for p in c.paquetes if not p.cancelado]
+    ventas.sort(key=lambda v: (v["estado"] == "completo", v["id"]))
+    return {"ventas": ventas, "controladas": sum(1 for v in ventas if v["estado"] == "completo"), "total": len(ventas)}
+
+
 class MesaIn(BaseModel):
     codigo: str
     box_id: int | None = None

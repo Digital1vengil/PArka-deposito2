@@ -117,15 +117,6 @@
   <!-- paquete abierto -->
   <section id="pk" class="card p-4 hidden"></section>
 
-  {% if re_id %}
-  <!-- BOX de cada persona con las etiquetas que esperan ser escaneadas -->
-  <section class="card p-4">
-    <div class="flex flex-wrap items-center gap-2 mb-1"><h2 class="font-bold flex-1">📦 BOX en la mesa</h2>
-      <button class="btn btn-gris btn-chico" onclick="cargarMesaBox()">↻</button></div>
-    <p class="text-xs text-zinc-500 mb-2">Cada persona deja sus BOX. Tomá un BOX y escaneá las etiquetas que esperan; tocá una para abrirla.</p>
-    <div id="mesa-box" class="flex flex-col gap-2 text-sm"></div>
-  </section>
-  {% endif %}
 
   <section class="card p-4">
     <div class="flex flex-wrap items-center gap-2 mb-3">
@@ -283,7 +274,7 @@ async function abrirCp(id, pid) {
   document.getElementById('v-inicio').classList.add('hidden');
   document.getElementById('v-cp').classList.remove('hidden');
   document.getElementById('eventos').classList.add('hidden');
-  pintarCp(); pintarPk(); mesaBoxPronto();
+  pintarCp(); pintarPk();
   if (pid) await abrirPk(pid);
   foco();
 }
@@ -310,7 +301,7 @@ function pintarLista() {
   document.getElementById('cp-lista').innerHTML = ps.map(p => `<div class="cp-fila ${pk && pk.id === p.id ? 'activo' : ''}" onclick="abrirPk(${p.id})">
       <div class="flex flex-wrap items-center gap-2"><b>${esc(p.tracking)}</b>${chipEst(p.estado)}
         ${p.errores ? `<span class="chip chip-pendiente">${p.errores} error${p.errores > 1 ? 'es' : ''}</span>` : ''}
-        ${p.sin_vincular ? '<span class="chip chip-pendiente">sin vincular</span>' : ''}${chipEtq(p.etiqueta)}${chipCanc(p)}${(p.boxes_det || []).length ? `<span class="box-chip">📦 ${p.boxes_det.map(b => esc(b.nombre)).join(' + ')}</span>` : ''}
+        ${p.sin_vincular ? '<span class="chip chip-pendiente">sin vincular</span>' : ''}${chipEtq(p.etiqueta)}${chipCanc(p)}
         <span class="text-zinc-500 truncate">${esc(p.comprador)}</span><span class="flex-1"></span>
         <b>${p.escaneadas}/${p.unidades}</b>${p.controlado_por ? `<span class="text-xs text-zinc-500">✔ ${esc(p.controlado_por)} ${p.controlado_at}</span>` : ''}</div>
       <div class="text-xs text-zinc-600 mt-1">${esc(p.resumen)}</div></div>`).join('') || '<p class="text-zinc-500">No hay paquetes con ese filtro.</p>';
@@ -328,39 +319,9 @@ function aplicarResumen(r) {
     const k = cp.lista.findIndex(x => x.id === pk.id), corto = { ...pk }; delete corto.items;
     if (k >= 0) cp.lista[k] = corto; else cp.lista.unshift(corto);
   }
-  pintarCp(); pintarPk(); mesaBoxPronto();
+  pintarCp(); pintarPk();
 }
 
-// ── BOX de cada persona: etiquetas que esperan ser escaneadas ──
-let mesaBoxT = null, mesaBoxData = null;
-function mesaBoxPronto() { if (!RE_ID) return; clearTimeout(mesaBoxT); mesaBoxT = setTimeout(cargarMesaBox, 400); }
-async function cargarMesaBox() {
-  if (!RE_ID) return;
-  try { mesaBoxData = (await api(`/ecommerce/api/${RE_ID}/boxes`)).boxes; } catch (e) { return; }
-  pintarMesaBox();
-}
-function pintarMesaBox() {
-  const el = document.getElementById('mesa-box'); if (!el || !mesaBoxData) return;
-  const porPersona = {};
-  mesaBoxData.forEach(b => (porPersona[b.quien || '—'] = porPersona[b.quien || '—'] || []).push(b));
-  const etq = v => `<div class="mb-etq ${v.estado === 'completo' || v.cancelado ? 'hecha' : ''} ${pk && pk.id === v.paquete_id ? 'actual' : ''}" onclick="abrirPk(${v.paquete_id})">
-      ${v.cancelado ? '🚫' : v.estado === 'completo' ? '✅' : '🏷️'} <b>${esc(v.tipo)} ${esc(v.tracking)}</b><span class="text-zinc-500">${esc(v.comprador || '')}</span>
-      ${v.cancelado ? '<span class="chip chip-vencida">CANCELADA</span>' : v.estado === 'completo' ? '' : '<span class="chip chip-pendiente">esperando escanear</span>'}
-      ${v.unidades < v.total ? `<span class="text-xs text-amber-700">${v.unidades} de ${v.total} en este BOX</span>` : ''}
-      <div class="w-full text-xs text-zinc-600 pl-6">${v.prendas.map(esc).join(' · ')}</div></div>`;
-  const box = b => `<div class="mb-box"><div class="flex items-center gap-2"><span class="mb-num">${b.numero}</span>
-      <b class="flex-1">BOX ${b.numero} · ${b.unidades} prenda${b.unidades > 1 ? 's' : ''}</b>
-      <span class="chip ${b.esperando ? 'chip-en_curso' : 'chip-hecha'}">${b.esperando ? `${b.esperando} por escanear` : '✔ listo'}</span></div>
-    <div class="flex flex-col mt-1">${b.ventas.map(etq).join('')}</div></div>`;
-  el.innerHTML = Object.entries(porPersona).map(([q, bs]) => {
-    const act = bs.filter(b => b.esperando), hechos = bs.filter(b => !b.esperando);
-    const n = act.reduce((a, b) => a + b.esperando, 0);
-    return `<div class="mb-persona"><div class="font-bold text-base">👤 ${esc(q)} <span class="text-sm text-zinc-500 font-normal">· ${act.length} BOX · ${n} etiqueta${n === 1 ? '' : 's'} esperando</span></div>
-      ${act.map(box).join('')}
-      ${hechos.length ? `<details class="mt-2"><summary class="cursor-pointer text-zinc-500 font-bold text-xs">Ya controlados (${hechos.length})</summary>${hechos.map(box).join('')}</details>` : ''}</div>`;
-  }).join('') || '<p class="text-zinc-500">Todavía nadie dejó prendas en un BOX.</p>';
-}
-if (RE_ID) setInterval(() => { if (!document.hidden && cp) cargarMesaBox(); }, 20000);
 async function abrirPk(pid) {
   try { aplicarResumen(await api('/control/api/paquete/' + pid)); verPk(); }
   catch (e) { toast(e.message, 'error'); }
@@ -381,17 +342,10 @@ function pintarPk() {
       ${pk.errores ? `<span class="chip chip-pendiente">${pk.errores} error${pk.errores > 1 ? 'es' : ''}</span>` : ''}${chipEtq(pk.etiqueta)}${chipCanc(pk)}
       <span class="flex-1"></span><b class="text-2xl ${pk.estado === 'completo' ? 'text-teal-600' : ''}">${pk.escaneadas}/${pk.unidades}</b></div>
     <div class="text-sm text-zinc-600 mb-3">${esc(pk.comprador || 'Sin comprador')}${pk.venta_id ? ' · venta ' + esc(pk.venta_id) : ''}</div>
-    ${boxHtml(pk)}
     ${pk.nota ? `<div class="rounded-xl p-2 mb-3 text-sm" style="background:#fef3c7;color:#92400e">⚠️ ${esc(pk.nota)}</div>` : ''}
     <div class="flex flex-col gap-3">${pk.items.map(i => itemHtml(i, abierto)).join('')}</div>
     ${abierto ? `<div class="flex flex-wrap gap-2 mt-3"><button class="btn btn-gris btn-chico" onclick="reiniciarPk()">↺ Vaciar y controlar de nuevo</button>
       <button class="btn btn-gris btn-chico" onclick="pk=null;pintarPk();pintarLista();foco()">Cerrar en pantalla</button></div>` : ''}`;
-}
-function boxHtml(p) {
-  if (!RE_ID && !(p.boxes || []).length) return '';
-  if (!(p.boxes || []).length) return p.estado === 'completo' ? '' : `<div class="rounded-xl p-2 mb-3 text-sm" style="background:var(--soft)">📦 Todavía no llegó a ningún BOX: se está buscando.</div>`;
-  return `<div class="flex flex-wrap items-center gap-2 mb-3"><span class="box-badge ${p.sin_box ? 'parcial' : ''}">📦 ${(p.boxes_det || []).map(b => esc(b.nombre)).join(' + ')}</span>
-    ${p.sin_box ? `<span class="text-sm text-amber-700 font-semibold">falta${p.sin_box > 1 ? 'n' : ''} llegar ${p.sin_box} prenda${p.sin_box > 1 ? 's' : ''}</span>` : '<span class="text-sm text-zinc-500">sacá las prendas de esta venta de ese BOX</span>'}</div>`;
 }
 function itemHtml(i, abierto) {
   const cls = i.faltante ? 'faltante' : !i.vinculado ? 'sinvinc' : i.completo ? 'completo' : i.escaneado ? 'parcial' : '';
@@ -471,8 +425,6 @@ async function procesar(v) {
     if (r.tipo === 'paquete') {
       beepOk(); aplicarResumen(r);
       if (r.aviso) toast(r.aviso, 'warn', 5000);
-      if ((pk.boxes || []).length && pk.estado !== 'completo')
-        okGrande(`<div style="font-size:1.4rem">ESTÁ EN</div>${(pk.boxes_det || []).map(b => `<div style="font-size:1.8rem">${esc(b.quien)}</div><div style="font-size:6rem;line-height:1">📦 ${b.numero}</div>`).join('')}<div>BOX</div>${pk.sin_box ? `<div style="font-size:1rem">faltan llegar ${pk.sin_box}</div>` : ''}`, 2000);
       verPk();
       return;
     }

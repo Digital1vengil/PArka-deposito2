@@ -446,6 +446,7 @@ def sincronizar(db: Session, forzar: bool = False) -> dict:
         else:
             juntadas = 0
         abiertas = _abiertas(db)
+        tocadas_vinc: set[int] = set()
         en_busqueda: dict[str, ControlPaquete] = {}
         de_hoy: set[str] = set()
         for cc in abiertas:
@@ -480,6 +481,19 @@ def sincronizar(db: Session, forzar: bool = False) -> dict:
             for p in nuevas:
                 avisar(db, "nueva", f"🛍️ Entró una venta: {_desc(p)}", f"La búsqueda del día ahora tiene {total} ventas.",
                        c.id, clave=f"nueva:{p['clave']}")
+        # prendas que entraron con un SKU sin vincular: se vuelve a intentar el cruce con Odoo (fórmula nueva,
+        # catálogo actualizado o vínculo cargado a mano después)
+        for cc in abiertas:
+            for cp in cc.paquetes:
+                for it in cp.items:
+                    if not it.articulo_id and it.sku and not it.escaneado and not it.buscado:
+                        csvc.resolver_item(db, it)
+                        if it.articulo_id:
+                            tocadas_vinc.add(cc.id)
+        for cid in tocadas_vinc:
+            cc = db.get(Control, cid)
+            if cc:
+                svc.repartir(db, cc)
         # la etiqueta de ML se imprimió después → se actualiza en la búsqueda
         por_trk = {p["tracking"]: p for p in pendientes}
         for trk, cp in en_busqueda.items():

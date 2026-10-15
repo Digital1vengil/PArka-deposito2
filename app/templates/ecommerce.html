@@ -64,20 +64,6 @@
   .re-venta.listo { border-color: #bbf7d0; }
   .re-venta-cab { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; font-size: .9rem; margin: 0 .2rem .5rem; }
   .re-venta-cab .vcant { font-size: 1.3rem; font-weight: 900; }
-  /* BOX */
-  .box-bar { display: flex; align-items: center; gap: .75rem; border: 2px dashed var(--line2); border-radius: 14px; padding: .55rem .75rem; }
-  .box-bar.on { border: 2px solid var(--ink); background: var(--soft); }
-  .box-prog { height: 6px; border-radius: 99px; background: var(--line); margin-top: .3rem; overflow: hidden; }
-  .box-prog i { display: block; height: 100%; background: var(--ink); }
-  .box-num { font-size: 2rem; font-weight: 900; line-height: 1; background: var(--ink); color: #fff; border-radius: 12px; padding: .3rem .7rem; }
-  .box-card { border: 2px solid var(--line); border-radius: 14px; padding: .7rem; background: #fff; }
-  .box-card.vacio { opacity: .55; }
-  .box-v { border-top: 1px solid var(--line); padding-top: .4rem; margin-top: .4rem; }
-  #re-box { position: fixed; inset: 0; z-index: 91; display: none; align-items: center; justify-content: center; padding: 1rem;
-            background: rgba(10, 10, 10, .96); color: #fff; overflow-y: auto; }
-  #re-box.on { display: flex; }
-  #re-box .grande { font-size: 7rem; font-weight: 900; line-height: 1; }
-  #re-box .bx { border: 2px solid rgba(255,255,255,.35); border-radius: 18px; padding: 1rem; margin-top: .8rem; text-align: left; }
   /* Escáner: solo el botón acompaña el scroll (encima de ParkIA); la cámara se abre flotando arriba */
   #scan-fab { position: fixed; right: 1.25rem; bottom: calc(1.25rem + 3.5rem + .75rem + env(safe-area-inset-bottom)); z-index: 44;
               width: 3.5rem; height: 3.5rem; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center;
@@ -91,24 +77,17 @@
   .cam-cab button { color: #fff; background: transparent; border: 0; font-size: 1.1rem; cursor: pointer; padding: 0 .25rem; }
   @media (max-width: 640px) { #scan-fab { right: 1rem; bottom: calc(1rem + 3.25rem + .75rem + env(safe-area-inset-bottom)); width: 3.25rem; height: 3.25rem; } }
   body.parkia-on #scan-fab { display: none; }
-  /* Mesa de control por BOX */
-  .mesa-grid { display: grid; gap: 1rem; }
-  @media (min-width: 1024px) { .mesa-grid { grid-template-columns: 20rem 1fr; } }
-  .mbox { display: flex; align-items: center; gap: .7rem; width: 100%; text-align: left; border: 2px solid var(--line); border-radius: 14px;
-          padding: .55rem .7rem; background: #fff; cursor: pointer; }
-  .mbox:hover { border-color: #111; }
-  .mbox.sel { border-color: #111; background: var(--soft); box-shadow: inset 4px 0 0 #111; }
-  .mbox .box-num { font-size: 1.5rem; padding: .2rem .55rem; }
-  .mbox.llenando { opacity: .75; } .mbox.controlado { opacity: .55; }
-  .mesa-tit { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: .9rem 0 .4rem; }
-  .mventa { border: 2px solid var(--line); border-radius: 14px; padding: .65rem .75rem; background: #fff; }
-  .mventa.abierta { border-color: #111; box-shadow: 0 0 0 3px rgba(17,17,17,.08); }
-  .mventa.ok { border-color: #bbf7d0; background: var(--turq-bg); }
-  .mventa.cancel { border-color: var(--alta); background: var(--alta-bg); }
-  .mitem { display: flex; align-items: center; gap: .5rem; font-size: .9rem; padding: .2rem 0; }
-  .mitem .uds { display: inline-flex; gap: .2rem; }
-  .mitem .ud { width: 1.15rem; height: 1.15rem; border-radius: 4px; border: 2px solid var(--line2); }
+  /* Mesa de control: etiqueta → prendas */
+  .mesa-venta { border: 3px solid #111; border-radius: 18px; padding: 1rem; background: #fff; }
+  .mesa-venta.ok { border-color: #15803d; background: var(--turq-bg); }
+  .mitem { display: flex; align-items: center; gap: .6rem; font-size: 1rem; padding: .45rem 0; border-top: 1px solid var(--line); }
+  .mitem:first-child { border-top: 0; }
+  .mitem .uds { display: inline-flex; gap: .25rem; flex: none; }
+  .mitem .ud { width: 1.5rem; height: 1.5rem; border-radius: 6px; border: 2px solid var(--line2); }
   .mitem .ud.on { background: #15803d; border-color: #15803d; }
+  .mesa-vacia { border: 3px dashed var(--line2); border-radius: 18px; padding: 2rem 1rem; text-align: center; }
+  .mfila { display: flex; align-items: center; gap: .6rem; padding: .45rem .2rem; border-top: 1px solid var(--line); font-size: .88rem; }
+  .mfila:first-child { border-top: 0; }
 </style>{% endblock %}
 {% block contenido %}
 <a href="/" class="text-sm text-zinc-500 hover:text-violeta">← Inicio</a>
@@ -207,7 +186,7 @@
     <button class="tab activo" data-tab="mia" onclick="tab('mia')">🧺 Mi búsqueda</button>
     <button class="tab" data-tab="equipo" onclick="tab('equipo')">👥 Equipo</button>
     {% if organiza %}<button class="tab" data-tab="todo" onclick="tab('todo')">📋 Búsqueda total</button>{% endif %}
-    <button class="tab" data-tab="mesa" onclick="tab('mesa')">📦 Mesa de control · BOX</button>
+    <button class="tab" data-tab="mesa" onclick="tab('mesa', true)">📦 Mesa de control</button>
   </div>
 
   <!-- Mi búsqueda -->
@@ -218,7 +197,6 @@
         <button class="btn btn-gris" onclick="toggleCam()" title="Usar la cámara del celular">📷</button>
       </div>
       <div id="mia-info" class="text-sm mt-2"></div>
-      <div id="box-bar" class="mt-2"></div>
     </div>
     <div id="mia-lista" class="flex flex-col gap-3"></div>
   </section>
@@ -268,29 +246,21 @@
     <div id="todo" class="flex flex-col gap-3 text-sm"></div>
   </section>
 
-  <!-- Mesa de control por BOX -->
-  <section id="t-mesa" class="hidden">
-    <div class="card p-4 mb-3">
-      <div class="flex flex-wrap items-center gap-2">
-        <h2 class="font-bold flex-1">📦 Mesa de control por BOX</h2>
-        {% if organiza %}<label class="text-sm flex items-center gap-2">Prendas por BOX
-          <input id="box-cant" type="number" min="1" max="50" class="input !w-20 !py-1" onchange="boxCant(this.value)"></label>{% endif %}
-        <a id="mesa-link" class="btn btn-gris btn-chico" title="La mesa de antes: para ventas que no pasaron por un BOX">Mesa completa ↗</a>
+  <!-- Mesa de control: etiqueta del envío → cada prenda, verde si coincide -->
+  <section id="t-mesa" class="hidden flex flex-col gap-3">
+    <div class="card p-4">
+      <div class="flex flex-wrap items-center gap-2 mb-3">
+        <h2 class="font-bold text-lg flex-1">📦 Mesa de control</h2>
+        <span id="mesa-prog" class="chip chip-en_curso"></span>
       </div>
-      <p class="text-sm text-zinc-500 mt-1">Elegí un BOX de los <b>listos</b> y escaneá sus prendas: no hace falta escanear la etiqueta, la app sabe a qué venta va cada una.
-        Cuando una venta se completa, pegale la etiqueta que te indica. Cada persona va llenando BOX de <b id="box-cant-txt">5</b> prendas; el número de BOX es único en la búsqueda.</p>
-    </div>
-    <div class="mesa-grid">
-      <div class="card p-3 self-start"><div id="mesa-boxes" class="flex flex-col gap-2"><p class="text-zinc-500 text-sm">Cargando…</p></div></div>
-      <div class="card p-4 self-start">
-        <div id="mesa-cab" class="mb-3"></div>
-        <div class="flex gap-2 mb-3">
-          <input id="mesa-esc" class="input flex-1 !text-lg !py-3" placeholder="Escaneá una prenda del BOX (o la etiqueta del envío)" autocomplete="off">
-          <button class="btn btn-gris" onclick="toggleCam()" title="Usar la cámara del celular">📷</button>
-        </div>
-        <div id="mesa-ventas" class="flex flex-col gap-2"></div>
+      <div class="flex gap-2">
+        <input id="mesa-esc" class="input flex-1 !text-lg !py-3" placeholder="Escaneá la etiqueta del envío o la prenda" autocomplete="off">
+        <button class="btn btn-gris" onclick="toggleCam()" title="Cámara">📷</button>
       </div>
+      <div id="mesa-actual" class="mt-3"></div>
     </div>
+    <details class="card p-4" id="mesa-lista-box"><summary class="font-bold cursor-pointer">Ventas de la búsqueda <span id="mesa-lista-n" class="text-sm font-normal text-zinc-500"></span></summary>
+      <div id="mesa-lista" class="mt-2"></div></details>
   </section>
 
   {% if organiza %}
@@ -308,11 +278,6 @@
 </div>
 
 <div id="re-ok"><div><div class="tilde">✔</div><div id="ok-txt" class="text-3xl font-black mt-2">OK</div><div id="ok-sub" class="text-lg mt-2 opacity-90"></div></div></div>
-<div id="re-box"><div class="max-w-lg w-full text-center py-6">
-  <div class="text-xl font-bold opacity-80">Llevá a la mesa de control</div>
-  <div id="bx-cuerpo"></div>
-  <button class="btn !bg-white !text-black !border-white !py-3 !px-6 mt-6 w-full !text-lg font-black" onclick="cerrarBox()">Listo, ya lo llevé</button>
-</div></div>
 <div id="re-alerta"><div class="max-w-lg w-full">
   <div class="cruz">✖</div>
   <div id="al-titulo" class="text-3xl font-black mt-2"></div>
@@ -547,7 +512,6 @@ function pintarCabecera() {
   s.classList.toggle('hidden', !abierta || re.me_sume);
   s.innerHTML = `<button class="btn btn-turq sumarme w-full" onclick="sumarme()">🙋 Me sumo a la búsqueda</button>
     <p class="text-xs text-zinc-500 mt-1 text-center">Al sumarte, la app te asigna un tramo de la ruta.</p>`;
-  document.getElementById('mesa-link').href = `/control?re=${re.id}#cp${re.id}`;
   document.getElementById('mesa-esc').disabled = !abierta;
   if (ORGANIZA) {
     document.getElementById('re-excel').href = `/control/${re.id}/control.xlsx`;
@@ -558,12 +522,13 @@ function pintarCabecera() {
   document.getElementById('esc').disabled = !abierta || !re.me_sume;
   fabScan();
 }
-function tab(t) {
+function tab(t, gesto) {
   tabAct = t;
   document.querySelectorAll('#tabs [data-tab]').forEach(b => b.classList.toggle('activo', b.dataset.tab === t));
   ['mia', 'equipo', 'todo', 'mesa'].forEach(x => { const el = document.getElementById('t-' + x); if (el) el.classList.toggle('hidden', x !== t); });
   pararCam();
   fabScan(); cargarTab(); foco();
+  if (t === 'mesa' && gesto && re && re.estado === 'abierto' && matchMedia('(pointer: coarse)').matches) toggleCam();
 }
 function cargarTab() { if (tabAct === 'mia') cargarMia(); else if (tabAct === 'equipo') { if (eqAbierto !== null) api(`/ecommerce/api/${re.id}/todo`).then(d => { eqGrupos = d.grupos; pintarEquipo(); }).catch(() => {}); pintarEquipo(); } else if (tabAct === 'todo') cargarTodo(); else if (tabAct === 'mesa') cargarMesa(); }
 async function sumarme() {
@@ -658,10 +623,9 @@ async function cargarMia() {
   const el = document.getElementById('mia-lista'), info = document.getElementById('mia-info');
   if (!re.me_sume) {
     el.innerHTML = ''; info.innerHTML = re.estado === 'abierto' ? '👆 Tocá <b>Me sumo</b> para que te asignen un tramo.' : 'La búsqueda está cerrada.';
-    boxEst = null; boxBar();
     return;
   }
-  try { const d = await api(`/ecommerce/api/${re.id}/mia`); grupos = d.grupos; otros = d.otros || []; re = d.busqueda; boxEst = d.box || null; } catch (e) { toast(e.message, 'error'); return; }
+  try { const d = await api(`/ecommerce/api/${re.id}/mia`); grupos = d.grupos; otros = d.otros || []; re = d.busqueda; } catch (e) { toast(e.message, 'error'); return; }
   pintarMia();
 }
 function pintarMia() {
@@ -671,7 +635,6 @@ function pintarMia() {
   info.innerHTML = !grupos.length ? 'No tenés prendas asignadas.'
     : faltan ? `👉 Te faltan <b>${faltan}</b> prenda${faltan > 1 ? 's' : ''}. Seguí la ruta de arriba hacia abajo: escaneá el código de barras de cada prenda (se suma sola) o tocá <b>✓ La tengo</b>. Si no está, <b>✗ No la encontré</b>.`
     : '✅ <b>¡Terminaste tu tramo!</b> Llevá las prendas a la mesa de control.';
-  boxBar();
   el.innerHTML = pend.map(b => bloqueHtml(b, true)).join('')
     + (listos.length ? `<details class="card p-3"><summary class="font-bold cursor-pointer">✔ Ya juntadas o faltantes (${listos.length})</summary>
         <div class="flex flex-col gap-2 mt-2">${listos.map(b => bloqueHtml(b, false)).join('')}</div></details>` : '')
@@ -693,126 +656,84 @@ function bloqueHtml(b, activo) {
   if (b.g) return grupoHtml(b.g, activo);
   const v = b.venta, falta = bFaltan(b);
   const cant = b.gs.reduce((a, g) => a + g.cantidad, 0), bus = b.gs.reduce((a, g) => a + g.buscado, 0);
-  const bx = [...new Set(b.gs.flatMap(g => g.boxes || []))];
   const vc = (b.gs[0].ventas || [])[0];
   const qv = verQuien() ? `<span class="re-quien ${b.gs[0].asignado ? '' : 'nadie'}">👤 ${esc(b.gs[0].asignado ? corto(b.gs[0].asignado) : 'Sin asignar')}</span>` : '';
   return `<div class="re-venta ${falta ? '' : 'listo'}"><div class="re-venta-cab">${qv}${vc ? canalHtml(vc.canal, true) : '🧾'} <b>Venta de ${v.prendas} prendas · van juntas</b>
       <span class="text-xs text-zinc-500">${esc(v.tipo)} ${esc(vc ? vc.numero : v.tracking)}${v.comprador ? ' · ' + esc(v.comprador) : ''}</span>
-      ${bx.length ? `<span class="chip chip-hecha">📦 BOX ${bx.join(' + ')}</span>` : ''}<span class="flex-1"></span>
+      <span class="flex-1"></span>
       <span class="vcant ${falta ? '' : 'text-teal-600'}">${bus}<span class="text-zinc-400 text-base">/${cant}</span></span></div>
     <div class="flex flex-col gap-2">${b.gs.map(g => grupoHtml(g, activo && g.faltan > 0, true)).join('')}</div></div>`;
 }
 
-// ───────── BOX: cada persona tiene los suyos y se llenan solos ─────────
-let boxEst = null;
-function boxBar() {
-  const el = document.getElementById('box-bar'); if (!el) return;
-  const b = boxEst;
-  if (!b || !re || !re.me_sume) { el.innerHTML = ''; return; }
-  if (!b.actual) { el.innerHTML = `<div class="text-xs text-zinc-500">📦 Tus prendas van solas a tu BOX: las primeras <b>${b.cantidad}</b> al BOX 1, las siguientes al BOX 2…</div>`; return; }
-  const otros = (b.boxes || []).filter(x => x.numero !== b.actual);
-  el.innerHTML = `<div class="box-bar ${b.lleno ? 'on' : ''}"><span class="box-num" style="font-size:1.4rem">${b.actual}</span><div class="flex-1 min-w-0"><b>📦 Tu BOX ${b.actual}: ${b.en_actual} de ${b.cantidad}</b>
-      <span class="text-sm">${b.lleno ? '· ¡completo, llevalo a la mesa!' : b.pendientes === 0 ? '· terminaste: llevalo a la mesa' : ''}</span>
-      <div class="box-prog"><i style="width:${Math.min(100, 100 * b.en_actual / b.cantidad)}%"></i></div>
-      ${otros.length ? `<div class="text-xs text-zinc-500 mt-1">${otros.map(x => `BOX ${x.numero} (${x.unidades}) ${x.activo ? '' : '✔'}`).join(' · ')}</div>` : ''}</div></div>`;
-}
-function mostrarBox(bs) {
-  if (!bs || !bs.length) return;
-  alerta = true; beepOk();
-  document.getElementById('bx-cuerpo').innerHTML = bs.map(b => `<div class="bx"><div class="flex items-center gap-4">
-      <div class="grande">${b.numero}</div><div><div class="text-2xl font-black">BOX ${b.numero}</div>
-      <div class="opacity-80">${esc(b.quien || '')} · ${b.unidades} prenda${b.unidades > 1 ? 's' : ''}</div></div></div>
-    ${b.ventas.map(v => `<div class="mt-2 text-sm"><b>${esc(v.tipo)} ${esc(v.tracking)}</b>${v.comprador ? ' · ' + esc(v.comprador) : ''}<br><span class="opacity-80">${v.prendas.map(esc).join(' · ')}</span></div>`).join('')}</div>`).join('');
-  document.getElementById('re-box').classList.add('on');
-}
-function trasMarcar(r) { if (r && r.box) { boxEst = r.box; boxBar(); } if (r && r.box_llevar && r.box_llevar.length) setTimeout(() => mostrarBox(r.box_llevar), 900); }
-function cerrarBox() { alerta = false; document.getElementById('re-box').classList.remove('on'); foco(); }
-// ───────── Mesa de control por BOX ─────────
-let mesaBoxes = [], mesaSel = null, mesaPq = null, mesaEnviando = false;
-const MESA_EST = { lista: ['Lista para controlar', 'chip-en_curso'], llenando: ['Llenándose', 'chip-pendiente'], controlado: ['✔ Controlado', 'chip-hecha'] };
+// ───────── Mesa de control: etiqueta del envío → cada prenda (verde si coincide) ─────────
+let mesaVentas = [], mesaPq = null, mesaEnviando = false;
 async function cargarMesa() {
-  let d; try { d = await api(`/ecommerce/api/${re.id}/boxes`); } catch (e) { toast(e.message, 'error'); return; }
-  mesaBoxes = d.boxes;
-  document.getElementById('box-cant-txt').textContent = d.cantidad;
-  const inp = document.getElementById('box-cant'); if (inp && document.activeElement !== inp) inp.value = d.cantidad;
-  if (!mesaBoxes.some(b => b.id === mesaSel)) mesaSel = (mesaBoxes.find(b => b.mesa === 'lista') || {}).id || null;
+  let d; try { d = await api(`/ecommerce/api/${re.id}/mesa`); } catch (e) { toast(e.message, 'error'); return; }
+  mesaVentas = d.ventas;
+  document.getElementById('mesa-prog').textContent = `${d.controladas} / ${d.total} ventas controladas`;
   pintarMesa();
 }
-function boxSel() { return mesaBoxes.find(b => b.id === mesaSel) || null; }
-function elegirBox(id) { mesaSel = id; mesaPq = null; pintarMesa(); const e = document.getElementById('mesa-esc'); if (e && innerWidth > 700) e.focus(); }
-function mboxHtml(b) {
-  const [txt, chip] = MESA_EST[b.mesa] || ['', ''];
-  return `<button type="button" class="mbox ${b.mesa} ${b.id === mesaSel ? 'sel' : ''}" onclick="elegirBox(${b.id})">
-    <span class="box-num">${b.numero}</span>
-    <span class="flex-1 min-w-0"><b>${esc(corto(b.quien || '—'))}</b><span class="block text-xs text-zinc-500">${b.unidades} prenda${b.unidades === 1 ? '' : 's'} · ${b.controladas}/${b.ventas.length} ventas</span></span>
-    <span class="chip ${chip}">${txt}</span></button>`;
-}
+const ventaAct = () => mesaVentas.find(v => v.id === mesaPq) || null;
+function ventaNum(v) { return `${canalHtml(v.canal, true)} <b>${v.canal === 'tn' ? '#' : ''}${esc(v.numero || v.tracking)}</b>`; }
 function pintarMesa() {
-  const el = document.getElementById('mesa-boxes');
-  const grupo = (k, t) => { const bs = mesaBoxes.filter(b => b.mesa === k); return bs.length ? `<div class="mesa-tit">${t} (${bs.length})</div>${bs.map(mboxHtml).join('')}` : ''; };
-  const ctrl = mesaBoxes.filter(b => b.mesa === 'controlado');
-  el.innerHTML = mesaBoxes.length ? grupo('lista', '📥 Listos para controlar') + grupo('llenando', '⏳ Se están llenando')
-      + (ctrl.length ? `<details class="mt-2"><summary class="mesa-tit cursor-pointer">✔ Controlados (${ctrl.length})</summary>${ctrl.map(mboxHtml).join('')}</details>` : '')
-    : '<p class="text-zinc-500 text-sm">Todavía no hay BOX: se arman solos cuando marcan prendas en la búsqueda.</p>';
-  const b = boxSel(), cab = document.getElementById('mesa-cab'), vs = document.getElementById('mesa-ventas');
-  if (!b) { cab.innerHTML = '<p class="text-zinc-500">Elegí un BOX de la izquierda.</p>'; vs.innerHTML = ''; return; }
-  const [txt, chip] = MESA_EST[b.mesa] || ['', ''];
-  cab.innerHTML = `<div class="flex flex-wrap items-center gap-3"><span class="box-num">${b.numero}</span>
-    <div class="flex-1"><div class="text-xl font-black">BOX ${b.numero}</div><div class="text-sm text-zinc-500">${esc(b.quien || '')} · desde ${esc(b.hora)} · ${b.unidades} prenda${b.unidades === 1 ? '' : 's'}</div></div>
-    <span class="chip ${chip}">${txt}</span><b class="text-2xl">${b.controladas}<span class="text-zinc-400 text-base">/${b.ventas.length}</span></b></div>
-    ${b.mesa === 'llenando' ? '<p class="text-xs text-amber-700 mt-2">Este BOX todavía se está llenando: podés controlar lo que ya llegó.</p>' : ''}`;
-  vs.innerHTML = b.ventas.map(v => {
-    const ok = v.estado === 'completo', abierta = v.paquete_id === mesaPq;
-    const items = v.items.map(i => `<div class="mitem"><span class="uds">${Array.from({ length: i.cantidad }, (_, k) => `<span class="ud ${k < i.escaneado ? 'on' : ''}"></span>`).join('')}</span>
-        <span class="flex-1">${i.vinculado ? `<b>${esc(i.articulo)}</b> <span class="eq-talle">${esc(i.talle)}</span> ${esc(i.color)}` : esc(i.articulo)}</span>
-        ${i.faltante ? '<span class="chip chip-vencida">FALTA</span>' : ''}</div>`).join('');
-    return `<div class="mventa ${v.cancelado ? 'cancel' : ok ? 'ok' : abierta ? 'abierta' : ''}">
-      <div class="flex flex-wrap items-center gap-2 mb-1">${canalHtml(v.canal, true)}<b>${v.canal === 'tn' ? '#' : ''}${esc(v.numero || v.tracking)}</b>
-        <span class="text-sm text-zinc-500 flex-1 min-w-0 truncate">${esc(v.comprador || '')}</span>
-        ${v.cancelado ? '<span class="chip chip-vencida">CANCELADA · NO DESPACHAR</span>' : ok ? '<span class="chip chip-hecha">✔ controlada · pegá la etiqueta</span>' : `<b>${v.escaneadas}/${v.total}</b>`}</div>
-      ${v.unidades < v.total ? `<div class="text-xs text-amber-700 mb-1">${v.unidades} de ${v.total} prendas en este BOX</div>` : ''}
-      ${items}<div class="text-xs text-zinc-400 mt-1">Etiqueta: ${esc(v.tracking)}</div></div>`;
-  }).join('') || '<p class="text-zinc-500">BOX vacío.</p>';
+  const v = ventaAct(), el = document.getElementById('mesa-actual');
+  if (!v) {
+    el.innerHTML = `<div class="mesa-vacia"><div class="text-4xl">🏷️</div><div class="text-xl font-black mt-2">Escaneá la etiqueta del envío</div>
+      <div class="text-sm text-zinc-500 mt-1">Aparecen los productos de la venta y después escaneás cada prenda: verde si coincide, rojo si no.</div></div>`;
+  } else {
+    const ok = v.estado === 'completo';
+    el.innerHTML = `<div class="mesa-venta ${ok ? 'ok' : ''}">
+      <div class="flex flex-wrap items-center gap-2 mb-2">${ventaNum(v)}<span class="text-zinc-500 flex-1 min-w-0 truncate">${esc(v.comprador || '')}</span>
+        <b class="text-2xl">${v.escaneadas}<span class="text-zinc-400 text-base">/${v.unidades}</span></b></div>
+      ${ok ? '<div class="text-teal-700 font-black text-lg mb-2">✔ VENTA CONTROLADA · escaneá la etiqueta de la próxima</div>' : '<div class="text-sm font-semibold mb-2">👉 Escaneá cada prenda de esta venta</div>'}
+      ${v.items.map(i => `<div class="mitem"><span class="uds">${Array.from({ length: i.cantidad }, (_, k) => `<span class="ud ${k < Math.min(i.escaneado, i.cantidad) ? 'on' : ''}"></span>`).join('')}</span>
+        <span class="flex-1">${i.vinculado ? `<b>${esc(i.articulo)}</b> <span class="eq-talle">${esc(i.talle)}</span> ${esc(i.color)}` : `<b>${esc(i.producto || i.sku)}</b> <span class="text-xs text-amber-700">sin vincular</span>`}
+          <span class="block re-sku !mt-0">${esc(i.codigo_barras || i.sku || '')}</span></span>
+        ${i.faltante ? '<span class="chip chip-vencida">FALTA</span>' : ''}</div>`).join('')}</div>`;
+  }
+  const pend = mesaVentas.filter(x => x.estado !== 'completo'), hechas = mesaVentas.filter(x => x.estado === 'completo');
+  document.getElementById('mesa-lista-n').textContent = `· ${pend.length} sin controlar · ${hechas.length} controladas`;
+  const fila = x => `<div class="mfila"><span class="eq-est ${x.estado === 'completo' ? 'si' : x.escaneadas ? 'parcial' : 'pend'}">${x.estado === 'completo' ? '✓' : `${x.escaneadas}/${x.unidades}`}</span>
+    <span class="flex-1 min-w-0">${ventaNum(x)} <span class="text-zinc-500">${esc(x.comprador || '')}</span><span class="block text-xs text-zinc-500 truncate">${esc(x.resumen || '')}</span></span></div>`;
+  document.getElementById('mesa-lista').innerHTML = pend.map(fila).join('') + hechas.map(fila).join('') || '<p class="text-zinc-500">Sin ventas.</p>';
+}
+function actualizarVenta(pq) {
+  if (!pq) return;
+  const k = mesaVentas.findIndex(x => x.id === pq.id);
+  const v = { ...(k >= 0 ? mesaVentas[k] : {}), ...pq };
+  if (k >= 0) mesaVentas[k] = v; else mesaVentas.push(v);
 }
 async function mesaProcesar(v) {
   v = String(v || '').trim(); if (!v || !re) return;
   if (alerta) { beepError(); return; }
   if (mesaEnviando) return; mesaEnviando = true;
   try {
-    const r = await api(`/ecommerce/api/${re.id}/mesa/escanear`, { json: { codigo: v, box_id: mesaSel, paquete_id: mesaPq } });
-    if (r.box) { const k = mesaBoxes.findIndex(b => b.id === r.box.id); if (k >= 0) mesaBoxes[k] = r.box; }
+    const r = await api(`/ecommerce/api/${re.id}/mesa/escanear`, { json: { codigo: v, paquete_id: mesaPq } });
     const pq = r.paquete;
+    actualizarVenta(pq);
     if (r.tipo === 'paquete') {
-      // la etiqueta de una venta que está en otro BOX: se pasa a ese BOX
-      const otro = (pq.boxes || []).length && !r.en_este_box ? mesaBoxes.find(b => pq.boxes.includes(b.numero)) : null;
-      if (otro) { mesaSel = otro.id; toast(`Esa venta está en el BOX ${otro.numero}`, 'warn'); }
-      mesaPq = pq.estado === 'completo' ? null : pq.id;
-      if (pq.estado === 'completo') toast('Esa venta ya está controlada', 'info');
-      else okGrande('VENTA ' + (pq.venta_id || pq.tracking), `escaneá sus prendas · ${pq.escaneadas}/${pq.unidades}`);
+      mesaPq = pq.id;
+      if (pq.estado === 'completo') { beepWarn(); toast('Esta venta ya está controlada', 'info'); }
+      else { beepOk(); }
     } else if (r.tipo === 'prenda' && r.ok) {
-      mesaPq = r.completo ? null : pq.id;
-      if (r.completo) {
-        const b = boxSel(), boxListo = b && b.ventas.every(x => x.estado === 'completo' || x.cancelado);
-        okGrande('✔ VENTA CONTROLADA', `Pegá la etiqueta ${pq.tracking}${pq.comprador ? ' · ' + pq.comprador : ''}` + (boxListo ? ` · BOX ${b.numero} terminado` : ''));
-      } else okGrande('OK', `${r.escaneado} · ${pq.escaneadas}/${pq.unidades} de esta venta`);
+      okGrande(r.completo ? '✔ VENTA CONTROLADA' : '✔ COINCIDE', r.escaneado + (r.completo ? '' : ` · ${pq.escaneadas}/${pq.unidades}`));
     } else if (r.tipo === 'guia') {
-      beepWarn(); toast(r.mensaje, 'warn', 5000);
+      beepError();
+      const ps = r.paquetes || [];
+      mostrarAlerta({ motivo: 'guia', mensaje: ps.length ? `${r.escaneado}: primero escaneá la etiqueta del envío. Va en: ${ps.map(x => (x.venta_id || x.tracking) + (x.comprador ? ' (' + x.comprador + ')' : '')).join(' · ')}`
+                                                        : `${r.escaneado} no está en ninguna venta sin controlar de esta búsqueda.` });
     } else {
       if (['cerrado', 'cancelado'].includes(r.motivo)) mesaPq = null;
       mostrarAlerta(r);
     }
     pintarMesa();
-    refrescarCabecera();
+    if (r.completo) cargarMesa();
   } catch (e) { beepError(); toast(e.message, 'error', 5000); }
   finally { mesaEnviando = false; }
 }
-async function refrescarCabecera() { try { re = (await api('/ecommerce/api/' + re.id)).busqueda; pintarCabecera(); } catch {} }
 const inpMesa = document.getElementById('mesa-esc');
 inpMesa.addEventListener('keydown', e => { if (e.key !== 'Enter') return; e.preventDefault(); const v = inpMesa.value; inpMesa.value = ''; mesaProcesar(v); });
-async function boxCant(v) {
-  try { const r = await api('/ecommerce/api/box/cantidad', { json: { cantidad: parseInt(v, 10) } }); toast(`BOX de ${r.cantidad} prendas`); cargarMesa(); }
-  catch (e) { toast(e.message, 'error'); }
-}
+
 
 // ───────── lo que buscan los demás (plegado, compacto) ─────────
 let otros = [], otrosAbierto = false;
@@ -840,7 +761,7 @@ async function traje(ids, quien, desdeEscaneo) {
   if (!desdeEscaneo && !confirm(`Esta prenda la tiene asignada ${quien || 'otra persona'}. ¿La trajiste vos? Va a quedar a tu nombre.`)) return;
   try {
     const r = await api(`/ecommerce/api/${re.id}/la-tengo`, { json: { item_ids: ids, ajena: true } });
-    okGrande('LA TRAJISTE VOS', `queda a tu nombre${quien ? ' (era de ' + corto(quien) + ')' : ''}`); trasMarcar(r); cargarTab(); refrescar();
+    okGrande('LA TRAJISTE VOS', `queda a tu nombre${quien ? ' (era de ' + corto(quien) + ')' : ''}`); cargarTab(); refrescar();
   } catch (e) { toast(e.message, 'error'); }
 }
 // ───────── canal y números de venta ─────────
@@ -880,7 +801,7 @@ function grupoHtml(g, activo, enVenta) {
         ${abierta && activo && g.cantidad > 1 ? `<div class="flex gap-1">${g.buscado ? `<button class="btn btn-gris !px-3 !py-1 text-lg font-black" onclick='deshacer(${ids})' title="Restar una">−</button>` : ''}${g.faltan ? `<button class="btn btn-turq !px-3 !py-1 text-lg font-black" onclick='manual(${ids})' title="Sumar una más">+</button>` : ''}</div>` : ''}</div></div>
     <div class="flex flex-wrap gap-2 mt-2">${ub}</div>
     <div class="text-xs text-zinc-500 mt-2">${g.variante ? 'En la venta: ' + esc(g.variante) : ''}${g.vinculado && g.sku && g.sku !== g.sku_odoo ? (g.variante ? ' · ' : '') + 'SKU ML ' + esc(g.sku) : ''}${g.codigo_barras ? ' · cód. ' + esc(g.codigo_barras) : ''}</div>
-    <div class="text-xs text-zinc-400">${g.buscado && g.trajo && g.trajo.length ? '✓ trajo ' + esc(g.trajo.join(', ')) : ''}${(g.boxes || []).length ? ' · <b>📦 BOX ' + g.boxes.join(' + ') + '</b>' : ''}</div>
+    <div class="text-xs text-zinc-400">${g.buscado && g.trajo && g.trajo.length ? '✓ trajo ' + esc(g.trajo.join(', ')) : ''}</div>
     <div class="flex flex-wrap gap-2 mt-2">${acc}</div><div id="extra-${g.clave}"></div></div>`;
 }
 async function donde(iid, clave) {
@@ -909,7 +830,7 @@ async function manual(ids) {
   try {
     const r = await api(`/ecommerce/api/${re.id}/la-tengo`, { json: { item_ids: ids } });
     if (r.ok === false && r.motivo === 'otro') return traje(ids, r.quien);
-    okGrande('LA TENGO', (r.box && r.box.actual ? `BOX ${r.box.actual} · ` : '') + (r.faltan ? `faltan ${r.faltan} de esta prenda` : 'completa')); trasMarcar(r); cargarTab(); refrescar();
+    okGrande('LA TENGO', r.faltan ? `faltan ${r.faltan} de esta prenda` : 'completa'); cargarTab(); refrescar();
   } catch (e) { toast(e.message, 'error'); }
 }
 let todoM = 'ruta', todoGrupos = [];
@@ -949,8 +870,7 @@ async function procesar(v) {
     const r = await api(`/ecommerce/api/${re.id}/encontre`, { json: { codigo: v } });
     re = r.busqueda; pintarCabecera();
     if (r.ok) {
-      okGrande('OK', (r.box && r.box.actual ? `BOX ${r.box.actual} · ` : '') + r.escaneado + (r.grupo && r.grupo.faltan ? ` · faltan ${r.grupo.faltan}` : ''));
-      trasMarcar(r);
+      okGrande('OK', r.escaneado + (r.grupo && r.grupo.faltan ? ` · faltan ${r.grupo.faltan}` : ''));
       await cargarMia();
       if (r.grupo) { const c = document.getElementById('g-' + r.grupo.clave); if (c) { c.classList.add('flash'); c.scrollIntoView({ block: 'center', behavior: 'smooth' }); } }
     } else mostrarAlerta(r);
@@ -965,8 +885,8 @@ function okGrande(txt, sub) {
 }
 function mostrarAlerta(r) {
   alerta = true; beepError(); setTimeout(beepError, 450);
-  const tit = { desconocido: 'CÓDIGO DESCONOCIDO', otro: 'ES DE ' + String(corto(r.quien || 'OTRA PERSONA')).toUpperCase(), sobra: 'YA ESTÁN TODAS', equivocado: 'PRENDA EQUIVOCADA',
-                otro_box: 'NO VA EN ESTE BOX', cancelado: 'VENTA CANCELADA', cerrado: 'YA CONTROLADA' }[r.motivo] || 'ERROR';
+  const tit = { desconocido: 'CÓDIGO DESCONOCIDO', otro: 'ES DE ' + String(corto(r.quien || 'OTRA PERSONA')).toUpperCase(), sobra: 'YA ESTÁN TODAS', equivocado: 'NO COINCIDE CON LA VENTA',
+                cancelado: 'VENTA CANCELADA', cerrado: 'YA CONTROLADA', guia: 'PRIMERO LA ETIQUETA' }[r.motivo] || 'ERROR';
   document.getElementById('al-titulo').textContent = tit;
   const ajena = r.motivo === 'otro' && r.item_ids && r.item_ids.length;
   alertaAjena = ajena ? { ids: r.item_ids, quien: r.quien } : null;
