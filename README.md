@@ -53,6 +53,19 @@ pip install pytest httpx
 python -m pytest -q
 ```
 
+## Estilos (Tailwind)
+
+Los estilos de Tailwind van compilados en `app/static/tw.css` (antes se compilaban en el navegador con
+`cdn.tailwindcss.com` en cada pantalla, que era lo que hacía lenta y "tosca" la navegación).
+Si agregás clases nuevas en las plantillas, regeneralo con el CLI de Tailwind **v3.4.17**
+(binario único, sin Node: <https://github.com/tailwindlabs/tailwindcss/releases/tag/v3.4.17>):
+
+```bash
+tailwindcss -c tailwind.config.js -i app/static/tw-fuente.css -o app/static/tw.css --minify
+```
+
+El CI avisa (test rojo) si `tw.css` quedó desactualizado.
+
 ## Estructura
 
 ```

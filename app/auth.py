@@ -2,6 +2,9 @@
 import hashlib
 import hmac
 import os
+import threading
+import time
+from dataclasses import dataclass
 from datetime import timedelta
 
 from fastapi import Depends, Request
@@ -113,8 +116,49 @@ FUNCIONES = {
 }
 
 
+@dataclass(frozen=True)
+class SeccionMenu:
+    """Copia en memoria de una Seccion (para el menú y los permisos sin ir a la base en cada pantalla)."""
+    id: int
+    slug: str
+    nombre: str
+    icono: str
+    descripcion: str
+    orden: int
+    activa: bool
+    roles: str
+
+    def permite(self, rol: str) -> bool:
+        return rol == "admin" or rol in [r.strip() for r in self.roles.split(",")]
+
+
+SECCIONES_SEG = 60
+_secc_lock = threading.Lock()
+_secc: dict = {"ts": 0.0, "datos": None}
+
+
+def olvidar_secciones() -> None:
+    """Después de editar secciones: la próxima pantalla las vuelve a leer de la base."""
+    with _secc_lock:
+        _secc.update(ts=0.0, datos=None)
+
+
+def secciones_todas() -> list[SeccionMenu]:
+    """Todas las secciones en orden, cacheadas SECCIONES_SEG segundos (cambian solo desde Admin → Secciones)."""
+    with _secc_lock:
+        if _secc["datos"] is not None and time.monotonic() - _secc["ts"] < SECCIONES_SEG:
+            return _secc["datos"]
+    from .db import SessionLocal
+    with SessionLocal() as db:
+        datos = [SeccionMenu(s.id, s.slug, s.nombre, s.icono, s.descripcion, s.orden, s.activa, s.roles)
+                 for s in db.scalars(select(Seccion).order_by(Seccion.orden, Seccion.id))]
+    with _secc_lock:
+        _secc.update(ts=time.monotonic(), datos=datos)
+    return datos
+
+
 def accesos_por_rol(db: Session, rol: str) -> set[str]:
-    todas = db.scalars(select(Seccion)).all()
+    todas = secciones_todas()
     if rol == "admin":
         return {s.slug for s in todas} | set(FUNCIONES)
     return {s.slug for s in todas if s.permite(rol)}
@@ -133,8 +177,8 @@ def puede(db: Session, u: Usuario, clave: str) -> bool:
     return u.es_admin or clave in accesos_de(db, u)
 
 
-def secciones_de(db: Session, u: Usuario) -> list[Seccion]:
-    todas = db.scalars(select(Seccion).order_by(Seccion.orden, Seccion.id)).all()
+def secciones_de(db: Session, u: Usuario) -> list[SeccionMenu]:
+    todas = secciones_todas()
     acc = accesos_de(db, u)
     return [s for s in todas if s.slug in acc]
 

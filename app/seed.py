@@ -114,4 +114,6 @@ def sembrar(db: Session) -> None:
     if not db.scalar(select(Usuario).where(Usuario.rol == "admin")):
         db.add(Usuario(nombre=ADMIN_NOMBRE, rol="admin", pin_hash=hash_pin(ADMIN_PIN)))
     db.commit()
+    from .auth import olvidar_secciones
+    olvidar_secciones()
     cargar_catalogo_inicial(db)

@@ -22,7 +22,9 @@ def base_limpia():
     from app.db import Base, engine, SessionLocal
     from app.seed import sembrar
     from app.services import ajustes
+    from app.auth import olvidar_secciones
     ajustes.olvidar()
+    olvidar_secciones()
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
     db = SessionLocal()

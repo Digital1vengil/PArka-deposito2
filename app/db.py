@@ -44,11 +44,18 @@ def migrar() -> None:
     from sqlalchemy import inspect, text, Boolean, Integer
     insp = inspect(engine)
     tablas = set(insp.get_table_names())
+    # todas las columnas en una sola consulta (antes: una por tabla, ~35 viajes a Neon en cada arranque)
+    try:
+        columnas = {t: {c["name"] for c in cols} for (_, t), cols in insp.get_multi_columns().items()}
+    except (AttributeError, NotImplementedError):
+        columnas = {}
     with engine.begin() as con:
         for tabla in Base.metadata.sorted_tables:
             if tabla.name not in tablas:
                 continue
-            existentes = {c["name"] for c in insp.get_columns(tabla.name)}
+            existentes = columnas.get(tabla.name)
+            if existentes is None:
+                existentes = {c["name"] for c in insp.get_columns(tabla.name)}
             for col in tabla.columns:
                 if col.name in existentes:
                     continue

@@ -79,6 +79,6 @@ def ir_a_seccion(slug: str, request: Request, u: Usuario = Depends(usuario_actua
     if s.activa and slug == "pick_odoo":
         return RedirectResponse("/recolecciones-odoo", status_code=303)
     if s.activa and slug in ("despacho", "devoluciones", "conteo", "tareas", "articulos", "asistente", "ml",
-                                  "recoleccion", "mapeo", "ecommerce"):
+                                  "recoleccion", "mapeo", "ecommerce", "cambios"):
         return RedirectResponse(f"/{slug}", status_code=303)
     return render(request, "proximamente.html", u=u, s=s)

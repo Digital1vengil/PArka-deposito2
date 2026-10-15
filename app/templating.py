@@ -30,17 +30,11 @@ templates.env.globals["static_v"] = static_v
 def render(request, nombre: str, status_code: int = 200, **ctx):
     u = ctx.get("u")
     if u is not None and "acc" not in ctx:
-        from .auth import accesos_de
-        from .db import SessionLocal
-        db = SessionLocal()
-        try:
-            ctx["acc"] = accesos_de(db, u)
-            if "orden_menu" not in ctx:
-                from sqlalchemy import select
-                from .models import Seccion
-                ctx["orden_menu"] = list(db.scalars(select(Seccion.slug).order_by(Seccion.orden, Seccion.id)))
-        finally:
-            db.close()
+        # secciones y permisos salen de la caché en memoria (auth.secciones_todas): sin otra conexión a la base
+        from .auth import accesos_de, secciones_todas
+        ctx["acc"] = accesos_de(None, u)
+        if "orden_menu" not in ctx:
+            ctx["orden_menu"] = [s.slug for s in secciones_todas()]
     ctx.setdefault("acc", set())
     ctx.setdefault("orden_menu", [])
     return templates.TemplateResponse(request, nombre, ctx, status_code=status_code)

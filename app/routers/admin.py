@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from .. import config
 from ..actividad import registrar
-from ..auth import solo_admin, requiere, hash_pin, pin_valido, verificar_pin, accesos_de, accesos_por_rol, FUNCIONES
+from ..auth import solo_admin, requiere, hash_pin, pin_valido, verificar_pin, accesos_de, accesos_por_rol, FUNCIONES, olvidar_secciones
 acceso_cierre = requiere("cierre")
 from ..db import get_db, hoy
 from ..models import Cierre, Seccion, Usuario, ROLES
@@ -158,6 +158,7 @@ def ordenar_secciones(body: OrdenIn, u: Usuario = Depends(solo_admin), db: Sessi
         s.orden = n
     registrar(db, u, "seccion_editada", "Orden de secciones", commit=False)
     db.commit()
+    olvidar_secciones()
     return {"ok": True}
 
 
@@ -171,6 +172,7 @@ def editar_seccion(sid: int, body: SeccionIn, u: Usuario = Depends(solo_admin), 
     s.roles = ",".join(sorted({"admin", *[r for r in body.roles if r in ROLES]}))
     registrar(db, u, "seccion_editada", s.nombre, commit=False)
     db.commit()
+    olvidar_secciones()
     return {"ok": True}
 
 

@@ -19,7 +19,7 @@ a { text-decoration-color: var(--violeta-2); }
 #nav-mobile .nav-link.activo { font-weight: 700; color: var(--celeste); }
 #nav-mobile .nav-sep { color: rgba(255,255,255,.6); font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; padding: .6rem 0 .2rem; border-top: 1px solid rgba(255,255,255,.2); margin-top: .3rem; }
 
-/* Menú lateral (computadora, lg+) */
+/* Menú lateral (computadora y tablet, md+; en tablet va chico, solo íconos) */
 #nav-lateral { position: fixed; top: 3.5rem; left: 0; bottom: 0; width: 13.5rem; z-index: 20; flex-direction: column;
   background: var(--card); border-right: 1px solid var(--line); padding: .75rem .6rem; overflow-y: auto; transition: width .15s; }
 #nav-lateral .nav-link { display: flex; align-items: center; gap: .6rem; color: var(--ink); font-weight: 600; font-size: .86rem;
@@ -30,6 +30,13 @@ a { text-decoration-color: var(--violeta-2); }
 #nav-lateral .nav-sep { color: var(--muted); font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
   padding: .9rem .65rem .3rem; margin-top: .4rem; border-top: 1px solid var(--line); white-space: nowrap; }
 #lat-toggle { color: var(--muted) !important; font-weight: 500 !important; border-top: 1px solid var(--line); border-radius: 0 !important; margin-top: auto; padding-top: .7rem !important; }
+@media (min-width: 768px) and (max-width: 1023.98px) {
+  #nav-lateral { width: 4rem; }
+  .con-lateral { padding-left: 4rem; }
+  #nav-lateral .nav-txt { display: none; }
+  #nav-lateral .nav-sep { padding: .4rem 0 0; }
+  #lat-toggle { display: none !important; }
+}
 @media (min-width: 1024px) {
   .con-lateral { padding-left: 13.5rem; transition: padding-left .15s; }
   .lat-chico #nav-lateral { width: 4rem; }

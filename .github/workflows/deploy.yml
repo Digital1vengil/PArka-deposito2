@@ -16,3 +16,9 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements.txt pytest httpx
       - run: python -m pytest -q
+      - name: Tailwind compilado al día
+        run: |
+          curl -sL -o tw https://github.com/tailwindlabs/tailwindcss/releases/download/v3.4.17/tailwindcss-linux-x64
+          chmod +x tw
+          ./tw -c tailwind.config.js -i app/static/tw-fuente.css -o /tmp/tw.css --minify
+          cmp /tmp/tw.css app/static/tw.css || (echo "app/static/tw.css está desactualizado: ver README → Estilos (Tailwind)" && exit 1)

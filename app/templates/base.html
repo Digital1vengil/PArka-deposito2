@@ -10,23 +10,10 @@
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" href="/static/icons/icon-192.png">
   <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    // Diseño igual a la app de cambios PARKA: negro, blanco y grises; estados en color (Inter).
-    // Se redefinen los grises "zinc" para que toda la app tome el tema sin tocar cada pantalla.
-    tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] }, colors: {
-      zinc: { 50:'#ffffff', 100:'#111111', 200:'#111111', 300:'#333333', 400:'#6b6b6b', 500:'#6b6b6b', 600:'#8a8a8a',
-              700:'#e4e4e4', 800:'#f1f1f1', 900:'#fafafa', 950:'#111111' },
-      teal: { 50:'#f0fdf4', 200:'#bbf7d0', 300:'#15803d', 400:'#15803d', 500:'#16a34a', 600:'#15803d', 700:'#166534' },
-      violeta: { DEFAULT:'#111111', 2:'#333333', bg:'#f1f1f1' },
-      red: { 50:'#fef2f2', 200:'#fecaca', 300:'#b91c1c', 400:'#b91c1c', 600:'#b91c1c', 700:'#b91c1c', 800:'#f3c2c2', 950:'#fee2e2' },
-      amber: { 300:'#b45309', 400:'#b45309', 600:'#f59e0b', 700:'#d97706', 800:'#fcd34d', 950:'#fef3c7' },
-      green: { 400:'#15803d', 700:'#15803d', 800:'#bbf7d0', 950:'#dcfce7' },
-      sky: { 800:'#1d4ed8', 950:'#dbeafe' },
-    } } } };
-  </script>
   <link rel="stylesheet" href="/static/app.css?v={{ static_v("app.css") }}">
   {% block head %}{% endblock %}
+  {# Tailwind compilado (tailwind.config.js) — va último, como lo inyectaba antes cdn.tailwindcss.com #}
+  <link rel="stylesheet" href="/static/tw.css?v={{ static_v("tw.css") }}">
 </head>
 <body class="min-h-screen">
 <script>try { if (localStorage.getItem('pd_lateral') === 'chico') document.documentElement.classList.add('lat-chico'); } catch (e) {}</script>
@@ -43,15 +30,15 @@
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
         <span id="pd-campana-n" class="campana-n hidden"></span></button>{% endif %}
       <a href="/logout" class="hdr-btn">Salir</a>
-      <button class="lg:hidden text-2xl px-1 text-white" onclick="document.getElementById('nav-mobile').classList.toggle('hidden')" aria-label="Menú">☰</button>
+      <button class="md:hidden text-2xl px-1 text-white" onclick="document.getElementById('nav-mobile').classList.toggle('hidden')" aria-label="Menú">☰</button>
     </div>
   </div>
-  <nav id="nav-mobile" class="hidden lg:hidden border-t border-white/20 px-4 py-2 flex flex-col text-sm">
+  <nav id="nav-mobile" class="hidden md:hidden border-t border-white/20 px-4 py-2 flex flex-col text-sm">
     <span class="text-white/70 text-xs py-1">{{ u.nombre }} · {{ ROLES[u.rol] }}</span>
     {% include "_menu.html" %}
   </nav>
 </header>
-<aside id="nav-lateral" class="hidden lg:flex">
+<aside id="nav-lateral" class="hidden md:flex">
   <nav class="flex flex-col gap-0.5 text-sm">
     {% include "_menu.html" %}
   </nav>
