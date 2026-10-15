@@ -499,6 +499,25 @@ def sincronizar(db: Session, forzar: bool = False) -> dict:
         for trk, cp in en_busqueda.items():
             if trk in por_trk and por_trk[trk].get("etiqueta") and cp.etiqueta != por_trk[trk]["etiqueta"]:
                 cp.etiqueta = por_trk[trk]["etiqueta"]
+            if trk in por_trk and por_trk[trk].get("dia"):          # ML puede cambiar el día de despacho
+                cp.despacho = csvc.fecha_despacho(por_trk[trk])
+                cp.limite = str(por_trk[trk].get("hasta") or "")[:20]
+        # ventas que ML pasó a otro día (sale mañana): salen de la búsqueda de hoy si nadie las empezó a juntar
+        pasadas = 0
+        if c is not None:
+            for cp in list(c.paquetes):
+                pp = por_trk.get(cp.tracking)
+                if (pp and not _es_del_dia(pp) and not cp.cancelado and cp.estado == "pendiente"
+                        and all(not i.buscado and not i.escaneado and not i.faltante for i in cp.items)):
+                    avisar(db, "nueva", f"↪ Sale otro día, se sacó de la búsqueda: {_desc(pp)}",
+                           f"Mercado Libre pide despacharla el {pp.get('dia') or 'próximo día hábil'}.", c.id,
+                           clave=f"pasada:{hoy().isoformat()}:{cp.tracking}")
+                    c.paquetes.remove(cp)
+                    db.delete(cp)
+                    en_busqueda.pop(cp.tracking, None)
+                    pasadas += 1
+            if pasadas:
+                db.flush()
         # 2) canceladas
         cancel_trk = {p["tracking"] for p in canceladas}
         pend_trk = set(por_trk)
@@ -526,6 +545,7 @@ def sincronizar(db: Session, forzar: bool = False) -> dict:
         if c is not None and not creada:
             _actualizar_apertura(db, c)
         res = {"hora": ahora().strftime("%H:%M"), "nuevas": len(nuevas) + len(traidas), "canceladas": n_cancel, "juntadas": juntadas,
+               "pasadas": pasadas,
                "pendientes": len(pendientes), "errores": errores, "busqueda": c.id if c else None}
         ajustes.guardar(db, "re_auto_estado", json.dumps(res))   # hace commit
         # si ML o TN fallaron, se reintenta en el próximo minuto en vez de esperar la vuelta entera

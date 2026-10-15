@@ -355,3 +355,44 @@ def test_dia_de_despacho_en_hora_argentina():
     # Colecta sin fecha límite: "buffering" (00:00 UTC) es el día de despacho, sin pasarlo a hora argentina
     sh = {"shipping_option": {"buffering": {"date": M + "T00:00:00.000Z"}}}
     assert ventas_api._dia_despacho(sh, "colecta").isoformat() == M
+
+
+def test_fecha_de_despacho_y_ventas_que_pasan_a_manana(monkeypatch):
+    """Solo entra lo que ML pide despachar hoy; la fecha queda guardada; si ML pasa una venta a otro día y nadie
+    la empezó a juntar, sale de la búsqueda de hoy (y entra en la de ese día)."""
+    _mocks(monkeypatch)
+    from datetime import date
+    from app.db import SessionLocal
+    from app.models import ControlPaquete
+    from sqlalchemy import select
+    with TestClient(app) as c:
+        _login(c)
+        r = c.post("/ecommerce/api/auto/ahora").json()
+        cid = r["busqueda_id"]
+        db = SessionLocal()
+        try:
+            trks = {p.tracking: p for p in db.scalars(select(ControlPaquete).where(ControlPaquete.control_id == cid))}
+            assert "108" not in trks                                  # la de mañana no entra
+            assert trks["101"].despacho == date.fromisoformat(T.H) and trks["101"].limite.endswith("21:00")
+        finally:
+            db.close()
+        g = next(x for x in c.get(f"/ecommerce/api/{cid}/todo").json()["grupos"] if "101" in " ".join(x["paquetes"]))
+        assert g["despacho"] == T.H and g["limite"].endswith("21:00")
+        # ML pasa la 101 a mañana
+        viejo = T.SH["101"]["shipping_option"]
+        T.SH["101"]["shipping_option"] = {"estimated_handling_limit": {"date": T.MANANA + "T21:00:00.000-03:00"}}
+        try:
+            ventas_api._estado.clear()
+            ventas_api.olvidar()
+            ventas_auto._ultima[0] = None
+            r = c.post("/ecommerce/api/auto/ahora").json()
+        finally:
+            T.SH["101"]["shipping_option"] = viejo
+        assert r["pasadas"] == 1
+        textos = [n["texto"] for n in c.get("/ecommerce/api/novedades").json()["novedades"]]
+        assert any("Sale otro día" in t for t in textos)
+        db = SessionLocal()
+        try:
+            assert not db.scalar(select(ControlPaquete).where(ControlPaquete.control_id == cid, ControlPaquete.tracking == "101"))
+        finally:
+            db.close()

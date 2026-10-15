@@ -216,6 +216,15 @@ def crear(db: Session, u: Usuario, paquetes: list[dict], origen: str, tipo: str,
     return c
 
 
+def fecha_despacho(p: dict):
+    """Día de despacho que manda ML ("dia": "2026-10-15"); None si no viene (archivos, Tienda Nube)."""
+    from datetime import date as _date
+    try:
+        return _date.fromisoformat(str(p.get("dia") or "")[:10]) if p.get("dia") else None
+    except ValueError:
+        return None
+
+
 def agregar_paquetes(db: Session, c: Control, paquetes: list[dict]) -> tuple[int, int]:
     """Suma paquetes nuevos y completa los que ya estaban (si todavía no se empezaron a controlar)."""
     existentes = {p.tracking: p for p in c.paquetes}
@@ -228,6 +237,8 @@ def agregar_paquetes(db: Session, c: Control, paquetes: list[dict]) -> tuple[int
         cp = existentes.get(trk)
         if cp and p.get("etiqueta"):
             cp.etiqueta = str(p["etiqueta"])[:20]   # la etiqueta se pudo haber impreso después
+        if cp and (p.get("dia") or p.get("hasta")):
+            cp.despacho, cp.limite = fecha_despacho(p), str(p.get("hasta") or "")[:20]   # ML puede moverla de día
         if cp:
             if cp.estado != "pendiente" or any(i.escaneado or i.faltante for i in cp.items):
                 continue
@@ -245,7 +256,8 @@ def agregar_paquetes(db: Session, c: Control, paquetes: list[dict]) -> tuple[int
         cp = ControlPaquete(tracking=trk[:60], tracking_alt=str(p.get("tracking_alt") or "")[:80],
                             venta_id=str(p.get("venta_id") or "")[:60], comprador=str(p.get("comprador") or "")[:120],
                             tipo=str(p.get("tipo") or "")[:20], etiqueta=str(p.get("etiqueta") or "")[:20],
-                            unidades_etiqueta=int(p.get("unidades") or 0))
+                            unidades_etiqueta=int(p.get("unidades") or 0),
+                            despacho=fecha_despacho(p), limite=str(p.get("hasta") or "")[:20])
         c.paquetes.append(cp)
         _cargar_items(db, cp, items)
         existentes[trk] = cp

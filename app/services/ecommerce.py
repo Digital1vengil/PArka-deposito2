@@ -32,7 +32,8 @@ def venta_corta(p: ControlPaquete) -> dict:
     canal = CANAL.get(p.tipo or "", "")
     numero = (p.venta_id or p.tracking) if canal == "ml" else p.tracking
     return {"canal": canal, "numero": str(numero or ""), "tracking": p.tracking, "tipo": NOMBRES_TIPO.get(p.tipo, p.tipo or ""),
-            "hora": p.creado_at.strftime("%H:%M") if p.creado_at else ""}
+            "hora": p.creado_at.strftime("%H:%M") if p.creado_at else "",
+            "despacho": p.despacho.isoformat() if p.despacho else "", "limite": p.limite or ""}
 
 
 # ─────────────────────────── crear ───────────────────────────
@@ -313,13 +314,16 @@ def grupos_de(c: Control, usuario_id: int | None = None, solo_pendientes: bool =
             "producto": i.producto, "variante": i.variante, "ubicacion": i.ubicacion, "vinculado": bool(i.articulo_id),
             "cantidad": 0, "buscado": 0, "faltan": 0, "faltante": 0, "paquetes": [], "en_box": 0, "boxes": [],
             "asignado": i.asignado.nombre if i.asignado else "", "ventas": [], "canales": [], "sku_odoo": "",
-            "entro": "", "juntada": ""})
+            "entro": "", "juntada": "", "despacho": "", "limite": ""})
         g["item_ids"].append(i.id)
         vc = venta_corta(i.paquete)
         if vc["numero"] and vc["numero"] not in [v["numero"] for v in g["ventas"]]:
             g["ventas"].append(vc)
         if vc["canal"] and vc["canal"] not in g["canales"]:
             g["canales"].append(vc["canal"])
+        # día de despacho: el más urgente de las ventas que llevan esta prenda
+        if vc["despacho"] and (not g["despacho"] or vc["despacho"] < g["despacho"]):
+            g["despacho"], g["limite"] = vc["despacho"], vc["limite"]
         # hora en que entró la venta (la primera) y en que se juntó la prenda (la última)
         if vc["hora"] and (not g["entro"] or vc["hora"] < g["entro"]):
             g["entro"] = vc["hora"]

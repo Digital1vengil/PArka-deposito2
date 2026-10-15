@@ -424,6 +424,8 @@ class ControlPaquete(Base):
     cancelado: Mapped[bool] = mapped_column(Boolean, default=False)   # la venta se canceló: NO despachar
     cancelado_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     creado_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, default=ahora)  # cuándo entró la venta
+    despacho: Mapped[Optional[date]] = mapped_column(Date, nullable=True)   # día en que ML pide despacharla
+    limite: Mapped[str] = mapped_column(String(20), default="")             # fecha y hora límite de ML ("15/10 13:00")
     iniciado_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     controlado_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     controlado_por_id: Mapped[Optional[int]] = mapped_column(ForeignKey("usuarios.id"), nullable=True)
