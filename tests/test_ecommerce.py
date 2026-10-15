@@ -284,3 +284,19 @@ def test_todos_ven_lo_de_los_demas_y_queda_quien_la_trajo():
         # una suya: OK directo y queda a su nombre
         ge = next(x for x in d_eva["grupos"] if x["faltan"])
         assert eva.post(f"/ecommerce/api/{cid}/la-tengo", json={"item_ids": ge["item_ids"]}).json()["ok"]
+
+
+def test_fichas_con_canal_ventas_y_sku_odoo():
+    """Cada prenda trae el SKU de Odoo, los números de venta y el canal (ML / TN / cambio) para el ícono."""
+    with TestClient(app) as c:
+        _login(c)
+        r = c.post("/ecommerce/api/crear/archivo", data={"nombre": "Canales"},
+                   files=[("archivos", ARCHIVOS[0]), ("archivos", ARCHIVOS[2])]).json()
+        cid = r["busqueda"]["id"]
+        gs = c.get(f"/ecommerce/api/{cid}/todo").json()["grupos"]
+        ml = next(g for g in gs if g["sku"] == "W-2055-BLK-S")
+        assert ml["sku_odoo"] == "1-CAMP-W-02055-BLCK-S-PARK" and ml["canales"] == ["ml"]
+        assert {"canal": "ml", "numero": "2000015379915829", "tracking": "48185193093", "tipo": "Flex"} in ml["ventas"]
+        tn = next(g for g in gs if "tn" in g["canales"])
+        assert tn["ventas"][0]["canal"] == "tn" and tn["ventas"][0]["numero"] == tn["ventas"][0]["tracking"]
+        assert c.get("/ecommerce").status_code == 200

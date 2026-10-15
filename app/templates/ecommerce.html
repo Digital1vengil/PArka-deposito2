@@ -1,15 +1,37 @@
 {% extends "base.html" %}
 {% block titulo %}Recolección Ecommerce · {{ APP_NOMBRE }}{% endblock %}
-{% block head %}<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+{% block head %}<script src="/static/vendor/html5-qrcode-2.3.8.min.js?v=2.3.8"></script>
 <style>
-  .re-card { border: 2px solid var(--line); border-radius: 14px; padding: .8rem; background: #fff; }
+  .re-card { position: relative; border: 2px solid var(--line); border-radius: 14px; padding: .8rem; background: #fff; }
+  /* canal de la venta en la esquina: ML (amarillo), TN (azul), cambio (violeta) */
+  .re-canales { position: absolute; top: -.7rem; right: .7rem; display: flex; gap: .25rem; }
+  .canal { display: inline-flex; align-items: center; justify-content: center; min-width: 1.9rem; height: 1.4rem; padding: 0 .35rem;
+           border-radius: 999px; font-size: .68rem; font-weight: 900; letter-spacing: .02em; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.18); }
+  .canal-ml { background: #ffe600; color: #2d3277; }
+  .canal-tn { background: #2563eb; color: #fff; }
+  .canal-cambio { background: #7c3aed; color: #fff; }
+  .canal.mini { min-width: 1.6rem; height: 1.15rem; font-size: .6rem; border-width: 1px; box-shadow: none; }
+  .re-sku { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; color: var(--muted); margin-top: .15rem; word-break: break-all; }
+  .re-ventas { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .45rem; }
+  .re-vta { display: inline-flex; align-items: center; gap: .3rem; font-size: .78rem; font-weight: 600; background: var(--soft);
+            border: 1px solid var(--line); border-radius: 8px; padding: .1rem .45rem; font-variant-numeric: tabular-nums; }
+  .re-quien { display: inline-flex; align-items: center; gap: .3rem; font-size: .8rem; font-weight: 700; color: #fff; background: #111;
+              border-radius: 999px; padding: .15rem .6rem; }
+  .re-quien.nadie { background: #f59e0b; }
+  .eq-fila { display: flex; align-items: center; gap: .6rem; padding: .5rem .2rem; border-top: 1px solid var(--line); font-size: .85rem; }
+  .eq-fila:first-child { border-top: 0; }
+  .eq-est { flex: none; width: 1.8rem; height: 1.8rem; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; font-weight: 900; }
+  .eq-est.si { background: #dcfce7; color: #166534; } .eq-est.no { background: #fee2e2; color: #b91c1c; } .eq-est.pend { background: var(--soft); color: var(--muted); } .eq-est.parcial { background: #fef3c7; color: #92400e; font-size: .72rem; }
+  .eq-talle { font-weight: 900; background: #111; color: #fff; border-radius: 6px; padding: 0 .4rem; }
+  .re-persona.abre { cursor: pointer; } .re-persona.abre:hover { border-color: #111; }
   .re-card.listo { border-color: #bbf7d0; background: var(--turq-bg); }
   .re-card.parcial { border-color: #fcd34d; }
   .re-card.faltante { border-color: var(--alta); background: var(--alta-bg); }
   .re-card.sinvinc { border-style: dashed; border-color: #f59e0b; }
   .re-card.flash { animation: reFlash .9s ease-out; }
   @keyframes reFlash { from { box-shadow: 0 0 0 6px rgba(20,184,166,.55) } to { box-shadow: none } }
-  .re-talle { font-size: 2rem; font-weight: 900; color: var(--violeta); line-height: 1; }
+  .re-talle { display: inline-block; font-size: 1.9rem; font-weight: 900; color: #fff; background: #111; line-height: 1;
+              border-radius: 10px; padding: .2rem .65rem; min-width: 3rem; text-align: center; }
   .re-nombre { font-size: 1.15rem; font-weight: 800; color: var(--ink); line-height: 1.2; }
   .re-cuenta { font-size: 1.8rem; font-weight: 900; white-space: nowrap; }
   .re-ub { display: inline-flex; align-items: center; gap: .3rem; font-weight: 800; font-size: 1.05rem; color: var(--violeta);
@@ -166,7 +188,7 @@
   <div class="tabs !mb-0" id="tabs">
     <button class="tab activo" data-tab="mia" onclick="tab('mia')">🧺 Mi búsqueda</button>
     <button class="tab" data-tab="equipo" onclick="tab('equipo')">👥 Equipo</button>
-    {% if organiza %}<button class="tab" data-tab="todo" onclick="tab('todo')">📋 Guía completa</button>{% endif %}
+    {% if organiza %}<button class="tab" data-tab="todo" onclick="tab('todo')">📋 Búsqueda total</button>{% endif %}
     <button class="tab" data-tab="box" onclick="tab('box')">🗃️ BOX</button>
     <button class="tab" data-tab="mesa" onclick="tab('mesa')">📦 Mesa de control</button>
   </div>
@@ -209,14 +231,24 @@
     </div>
     {% endif %}
     <div id="equipo" class="flex flex-col gap-2 text-sm"></div>
-    <p class="text-xs text-zinc-500 mt-3">La ruta del depósito se corta en tramos con una cantidad pareja de prendas, uno por persona, en el orden en que se sumaron.
+    <p class="text-xs text-zinc-500 mt-3">Tocá a una persona para ver todo lo que tiene que buscar: ✓ ya la tiene, ✗ no la encontró. La ruta del depósito se corta en tramos con una cantidad pareja de prendas, uno por persona, en el orden en que se sumaron.
       Si alguien se suma o se va, se reparte de nuevo lo que falta buscar (lo que alguien ya empezó a traer sigue siendo suyo).</p>
   </section>
 
   <!-- Guía completa (organiza) -->
   <section id="t-todo" class="card p-4 hidden">
-    <h2 class="font-bold mb-3">Guía completa</h2>
-    <div id="todo" class="flex flex-col gap-2 text-sm"></div>
+    <div class="flex flex-wrap items-center gap-2 mb-3">
+      <h2 class="font-bold flex-1">📋 Búsqueda total</h2>
+      <div class="tabs !mb-0" id="todo-modo">
+        <button class="tab activo" data-m="ruta" onclick="todoModo('ruta')">Por ruta</button>
+        <button class="tab" data-m="persona" onclick="todoModo('persona')">Por persona</button>
+      </div>
+      <select id="todo-filtro" class="input !py-1 !w-auto text-sm" onchange="pintarTodo()">
+        <option value="todos">Todas</option><option value="pend">Pendientes</option><option value="listas">Ya juntadas</option><option value="faltan">No encontradas</option>
+      </select>
+    </div>
+    <div id="todo-resumen" class="text-sm text-zinc-500 mb-3"></div>
+    <div id="todo" class="flex flex-col gap-3 text-sm"></div>
   </section>
 
   <!-- BOX -->
@@ -509,7 +541,7 @@ function tab(t) {
   if (t !== 'mia') pararCam();
   fabScan(); cargarTab(); foco();
 }
-function cargarTab() { if (tabAct === 'mia') cargarMia(); else if (tabAct === 'equipo') pintarEquipo(); else if (tabAct === 'todo') cargarTodo(); else if (tabAct === 'box') cargarBoxes(); }
+function cargarTab() { if (tabAct === 'mia') cargarMia(); else if (tabAct === 'equipo') { if (eqAbierto !== null) api(`/ecommerce/api/${re.id}/todo`).then(d => { eqGrupos = d.grupos; pintarEquipo(); }).catch(() => {}); pintarEquipo(); } else if (tabAct === 'todo') cargarTodo(); else if (tabAct === 'box') cargarBoxes(); }
 async function sumarme() {
   try { re = (await api(`/ecommerce/api/${re.id}/sumarme`, { method: 'POST' })).busqueda; beepOk(); pintarCabecera(); tab('mia'); toast('¡Listo! Ya tenés tu tramo asignado'); }
   catch (e) { toast(e.message, 'error'); }
@@ -557,11 +589,33 @@ async function sumarGente() {
 async function repartir() {
   try { re = (await api(`/ecommerce/api/${re.id}/repartir`, { method: 'POST' })).busqueda; pintarEquipo(); toast('Repartido de nuevo'); } catch (e) { toast(e.message, 'error'); }
 }
+let eqAbierto = null, eqGrupos = null;
+async function verPersona(uid) {
+  eqAbierto = eqAbierto === uid ? null : uid;
+  if (eqAbierto !== null) { try { eqGrupos = (await api(`/ecommerce/api/${re.id}/todo`)).grupos; } catch (e) { toast(e.message, 'error'); } }
+  pintarEquipo();
+}
+function filaEquipo(g) {
+  const est = g.faltante && !g.faltan ? ['no', '✗', 'No la encontró'] : g.faltan === 0 ? ['si', '✓', 'Ya la tiene'] : [g.buscado ? 'parcial' : 'pend', `${g.buscado}/${g.cantidad}`, g.buscado ? 'Tiene algunas, le faltan otras' : 'Le falta buscarla'];
+  const desc = g.vinculado ? `<b>${esc(g.articulo)}</b> <span class="eq-talle">${esc(g.talle)}</span> ${esc(g.color)}` : `<b>${esc(g.producto || g.sku || '(sin título)')}</b>`;
+  const ub = g.ubicacion ? `<span class="text-xs text-zinc-500">📍 ${esc(g.ubicacion.split(',')[0].trim())}</span>` : '';
+  return `<div class="eq-fila"><span class="eq-est ${est[0]}" title="${est[2]}">${est[1]}</span>
+    <div class="flex-1 min-w-0"><div>${desc} ${ub}</div><div class="re-sku !mt-0">${esc(g.sku_odoo || g.sku || '')}</div>${ventasHtml(g.ventas)}</div>
+    <div class="flex gap-1">${(g.canales || []).map(c => canalHtml(c, true)).join('')}</div></div>`;
+}
+function detallePersona(uid) {
+  if (!eqGrupos) return '<p class="text-zinc-500 text-sm mt-2">Cargando…</p>';
+  const gs = eqGrupos.filter(g => g.asignado_id === uid);
+  if (!gs.length) return '<p class="text-zinc-500 text-sm mt-2">No tiene prendas asignadas.</p>';
+  const pend = gs.filter(g => g.faltan > 0), listas = gs.filter(g => g.faltan === 0);
+  return `<div class="mt-2 w-full">${pend.map(filaEquipo).join('')}${listas.map(filaEquipo).join('')}</div>`;
+}
 function pintarEquipo() {
   const b = re.busqueda, el = document.getElementById('equipo'), abierta = re.estado === 'abierto';
   const act = b.equipo.filter(x => x.activo);
   el.innerHTML = (act.length ? '' : '<p class="text-zinc-500">Todavía no se sumó nadie. Cuando se sumen, la app les reparte la ruta.</p>')
-    + b.equipo.map(p => `<div class="re-persona flex flex-wrap items-center gap-3 ${p.activo ? '' : 'opacity-50'}">
+    + b.equipo.map(p => `<div class="re-persona abre flex flex-wrap items-center gap-3 ${p.activo ? '' : 'opacity-50'}" onclick="if (!event.target.closest('button')) verPersona(${p.usuario_id})">
+      <span class="text-zinc-400">${eqAbierto === p.usuario_id ? '▾' : '▸'}</span>
       <b class="text-base">${esc(p.nombre)}</b>${p.usuario_id === YO ? '<span class="chip chip-auto">VOS</span>' : ''}
       ${p.activo ? `<span class="text-xs text-zinc-500">desde las ${p.unido}</span>` : '<span class="chip chip-pendiente">SALIÓ</span>'}
       <span class="flex-1"></span>
@@ -570,6 +624,7 @@ function pintarEquipo() {
       <div class="barra w-24"><div style="width:${p.unidades ? 100 * p.buscadas / p.unidades : 0}%"></div></div>
       ${abierta && p.activo && p.usuario_id === YO ? '<button class="btn btn-gris btn-chico" onclick="salir()">Salir</button>' : ''}
       ${abierta && p.activo && ORGANIZA && p.usuario_id !== YO ? `<button class="btn btn-gris btn-chico" onclick="sacar(${p.usuario_id}, '${esc(p.nombre)}')">Sacar</button>` : ''}
+      ${eqAbierto === p.usuario_id ? detallePersona(p.usuario_id) : ''}
     </div>`).join('')
     + (b.sin_asignar ? `<p class="text-sm mt-2 text-amber-700">⚠ ${b.sin_asignar} prendas sin asignar (no hay nadie sumado).</p>` : '');
 }
@@ -615,11 +670,13 @@ function bloqueHtml(b, activo) {
   const v = b.venta, falta = bFaltan(b);
   const cant = b.gs.reduce((a, g) => a + g.cantidad, 0), bus = b.gs.reduce((a, g) => a + g.buscado, 0);
   const bx = [...new Set(b.gs.flatMap(g => g.boxes || []))];
-  return `<div class="re-venta ${falta ? '' : 'listo'}"><div class="re-venta-cab">🧾 <b>Venta de ${v.prendas} prendas · van juntas</b>
-      <span class="text-xs text-zinc-500">${esc(v.tipo)} ${esc(v.tracking)}${v.comprador ? ' · ' + esc(v.comprador) : ''}</span>
+  const vc = (b.gs[0].ventas || [])[0];
+  const qv = verQuien() ? `<span class="re-quien ${b.gs[0].asignado ? '' : 'nadie'}">👤 ${esc(b.gs[0].asignado ? corto(b.gs[0].asignado) : 'Sin asignar')}</span>` : '';
+  return `<div class="re-venta ${falta ? '' : 'listo'}"><div class="re-venta-cab">${qv}${vc ? canalHtml(vc.canal, true) : '🧾'} <b>Venta de ${v.prendas} prendas · van juntas</b>
+      <span class="text-xs text-zinc-500">${esc(v.tipo)} ${esc(vc ? vc.numero : v.tracking)}${v.comprador ? ' · ' + esc(v.comprador) : ''}</span>
       ${bx.length ? `<span class="chip chip-hecha">📦 BOX ${bx.join(' + ')}</span>` : ''}<span class="flex-1"></span>
       <span class="vcant ${falta ? '' : 'text-teal-600'}">${bus}<span class="text-zinc-400 text-base">/${cant}</span></span></div>
-    <div class="flex flex-col gap-2">${b.gs.map(g => grupoHtml(g, activo && g.faltan > 0)).join('')}</div></div>`;
+    <div class="flex flex-col gap-2">${b.gs.map(g => grupoHtml(g, activo && g.faltan > 0, true)).join('')}</div></div>`;
 }
 
 // ───────── BOX: cada persona tiene los suyos y se llenan solos ─────────
@@ -700,12 +757,25 @@ async function traje(ids, quien, desdeEscaneo) {
     okGrande('LA TRAJISTE VOS', `queda a tu nombre${quien ? ' (era de ' + corto(quien) + ')' : ''}`); trasMarcar(r); cargarTab(); refrescar();
   } catch (e) { toast(e.message, 'error'); }
 }
-function grupoHtml(g, activo) {
+// ───────── canal y números de venta ─────────
+const CANAL_TXT = { ml: 'ML', tn: 'TN', cambio: '🔁' }, CANAL_NOM = { ml: 'Mercado Libre', tn: 'Tienda Nube', cambio: 'Cambio' };
+function canalHtml(c, mini) { return c ? `<span class="canal canal-${c} ${mini ? 'mini' : ''}" title="${CANAL_NOM[c] || c}">${CANAL_TXT[c] || esc(c)}</span>` : ''; }
+function canalesHtml(cs) { return cs && cs.length ? `<div class="re-canales">${cs.map(c => canalHtml(c)).join('')}</div>` : ''; }
+function ventasHtml(vs) {
+  if (!vs || !vs.length) return '';
+  const max = 4, mas = vs.length - max;
+  return `<div class="re-ventas">${vs.slice(0, max).map(v => `<span class="re-vta" title="${esc(v.tipo)} · envío ${esc(v.tracking)}">${canalHtml(v.canal, true)}${v.canal === 'tn' ? '#' : ''}${esc(v.numero)}</span>`).join('')}${mas > 0 ? `<span class="re-vta">+${mas}</span>` : ''}</div>`;
+}
+// En la búsqueda total y en el equipo se ve a quién le tocó cada prenda
+const verQuien = () => tabAct === 'todo' || tabAct === 'equipo';
+function grupoHtml(g, activo, enVenta) {
   const abierta = re.estado === 'abierto';
   const cls = g.faltante && !g.faltan ? 'faltante' : !g.vinculado ? 'sinvinc' : !g.faltan ? 'listo' : g.buscado ? 'parcial' : '';
   const titulo = g.vinculado
-    ? `<div class="re-nombre">${esc(g.articulo)}</div><div class="flex items-baseline gap-3 mt-1"><span class="text-base font-bold text-zinc-600">${esc(g.color)}</span><span class="re-talle">${esc(g.talle)}</span></div>`
-    : `<div class="re-nombre">${esc(g.producto || g.sku || '(sin título)')}</div><div class="text-sm text-amber-700 font-semibold mt-1">⚠ SKU sin vincular al catálogo: buscala por el título y la variante</div>`;
+    ? `<div class="re-nombre">${esc(g.articulo)}</div><div class="re-sku">${esc(g.sku_odoo || g.sku)}</div>
+       <div class="flex items-center gap-3 mt-2"><span class="re-talle">${esc(g.talle)}</span><span class="text-base font-bold text-zinc-600">${esc(g.color)}</span></div>`
+    : `<div class="re-nombre">${esc(g.producto || g.sku || '(sin título)')}</div>${g.sku ? `<div class="re-sku">${esc(g.sku)}</div>` : ''}
+       <div class="text-sm text-amber-700 font-semibold mt-1">⚠ SKU sin vincular al catálogo: buscala por el título y la variante</div>`;
   const ub = g.ubicacion ? g.ubicacion.split(',').map(u => `<span class="re-ub">📍 ${esc(u.trim())}</span>`).join(' ')
     : '<span class="text-xs text-zinc-500">Sin ubicación cargada</span>';
   const ids = JSON.stringify(g.item_ids);
@@ -717,13 +787,14 @@ function grupoHtml(g, activo) {
   }
   if (abierta && g.buscado && !(activo && g.cantidad > 1)) acc += `<button class="btn btn-gris btn-chico" onclick='deshacer(${ids})' title="Me equivoqué: restar una">−1</button>`;
   if (abierta && g.faltante) acc += `<button class="btn btn-gris btn-chico" onclick='quitarFaltante(${ids})'>Apareció: quitar faltante</button>`;
-  return `<div class="re-card ${cls}" id="g-${g.clave}">
-    <div class="flex items-start gap-3"><div class="flex-1 min-w-0">${titulo}</div>
+  const quien = verQuien() && !enVenta ? `<div class="mb-2"><span class="re-quien ${g.asignado ? '' : 'nadie'}">👤 ${esc(g.asignado ? corto(g.asignado) : 'Sin asignar')}</span></div>` : '';
+  return `<div class="re-card ${cls}" id="g-${g.clave}">${enVenta ? '' : canalesHtml(g.canales)}${quien}
+    <div class="flex items-start gap-3"><div class="flex-1 min-w-0">${titulo}${enVenta ? '' : ventasHtml(g.ventas)}</div>
       <div class="flex flex-col items-end gap-1"><div class="re-cuenta ${!g.faltan ? 'text-teal-600' : ''}">${g.faltante ? '<span class="text-red-700 text-base">FALTA ' + g.faltante + '</span> ' : ''}${g.buscado}<span class="text-zinc-400 text-xl">/${g.cantidad}</span></div>
         ${abierta && activo && g.cantidad > 1 ? `<div class="flex gap-1">${g.buscado ? `<button class="btn btn-gris !px-3 !py-1 text-lg font-black" onclick='deshacer(${ids})' title="Restar una">−</button>` : ''}${g.faltan ? `<button class="btn btn-turq !px-3 !py-1 text-lg font-black" onclick='manual(${ids})' title="Sumar una más">+</button>` : ''}</div>` : ''}</div></div>
     <div class="flex flex-wrap gap-2 mt-2">${ub}</div>
-    <div class="text-xs text-zinc-500 mt-2">${g.variante ? 'En la venta: ' + esc(g.variante) + ' · ' : ''}${g.sku ? 'SKU ' + esc(g.sku) : ''}${g.codigo_barras ? ' · cód. ' + esc(g.codigo_barras) : ''}</div>
-    <div class="text-xs text-zinc-400">Va en: ${g.paquetes.map(esc).join(', ')}${g.asignado && tabAct === 'todo' ? ' · 👤 ' + esc(g.asignado) : ''}${g.buscado && g.trajo && g.trajo.length ? ' · ✓ trajo ' + esc(g.trajo.join(', ')) : ''}${(g.boxes || []).length ? ' · <b>📦 BOX ' + g.boxes.join(' + ') + '</b>' : ''}</div>
+    <div class="text-xs text-zinc-500 mt-2">${g.variante ? 'En la venta: ' + esc(g.variante) : ''}${g.vinculado && g.sku && g.sku !== g.sku_odoo ? (g.variante ? ' · ' : '') + 'SKU ML ' + esc(g.sku) : ''}${g.codigo_barras ? ' · cód. ' + esc(g.codigo_barras) : ''}</div>
+    <div class="text-xs text-zinc-400">${g.buscado && g.trajo && g.trajo.length ? '✓ trajo ' + esc(g.trajo.join(', ')) : ''}${(g.boxes || []).length ? ' · <b>📦 BOX ' + g.boxes.join(' + ') + '</b>' : ''}</div>
     <div class="flex flex-wrap gap-2 mt-2">${acc}</div><div id="extra-${g.clave}"></div></div>`;
 }
 async function donde(iid, clave) {
@@ -755,13 +826,30 @@ async function manual(ids) {
     okGrande('LA TENGO', (r.box && r.box.actual ? `BOX ${r.box.actual} · ` : '') + (r.faltan ? `faltan ${r.faltan} de esta prenda` : 'completa')); trasMarcar(r); cargarTab(); refrescar();
   } catch (e) { toast(e.message, 'error'); }
 }
+let todoM = 'ruta', todoGrupos = [];
+function todoModo(m) { todoM = m; document.querySelectorAll('#todo-modo [data-m]').forEach(b => b.classList.toggle('activo', b.dataset.m === m)); pintarTodo(); }
 async function cargarTodo() {
-  try { const d = await api(`/ecommerce/api/${re.id}/todo`); grupos = d.grupos; } catch (e) { toast(e.message, 'error'); return; }
+  try { const d = await api(`/ecommerce/api/${re.id}/todo`); todoGrupos = d.grupos; } catch (e) { toast(e.message, 'error'); return; }
+  pintarTodo();
+}
+function pintarTodo() {
+  const f = document.getElementById('todo-filtro').value;
+  const pasa = g => f === 'todos' || (f === 'pend' && g.faltan > 0) || (f === 'listas' && g.faltan === 0 && !g.faltante) || (f === 'faltan' && g.faltante > 0);
+  const gs = todoGrupos.filter(pasa);
+  const tot = todoGrupos.reduce((a, g) => a + g.cantidad, 0), bus = todoGrupos.reduce((a, g) => a + g.buscado, 0);
+  const sin = todoGrupos.filter(g => !g.asignado && g.faltan > 0).reduce((a, g) => a + g.faltan, 0);
+  const falt = todoGrupos.reduce((a, g) => a + g.faltante, 0);
+  document.getElementById('todo-resumen').innerHTML = `<b>${bus}</b> de <b>${tot}</b> prendas juntadas`
+    + (falt ? ` · <span class="text-red-600 font-semibold">${falt} no encontradas</span>` : '')
+    + (sin ? ` · <span class="text-amber-700 font-semibold">${sin} sin asignar</span>` : '');
+  const el = document.getElementById('todo');
+  if (!gs.length) { el.innerHTML = '<p class="text-zinc-500">Sin prendas en esta lista.</p>'; return; }
+  if (todoM === 'ruta') { el.innerHTML = bloques(gs).map(b => bloqueHtml(b, false)).join(''); return; }
   const porPersona = {};
-  grupos.forEach(g => (porPersona[g.asignado || 'Sin asignar'] = porPersona[g.asignado || 'Sin asignar'] || []).push(g));
-  document.getElementById('todo').innerHTML = Object.entries(porPersona).map(([p, gs]) =>
-    `<details class="card p-3" open><summary class="font-bold cursor-pointer">👤 ${esc(p)} · ${gs.reduce((a, g) => a + g.buscado, 0)}/${gs.reduce((a, g) => a + g.cantidad, 0)}</summary>
-     <div class="flex flex-col gap-2 mt-2">${bloques(gs).map(b => bloqueHtml(b, false)).join('')}</div></details>`).join('') || '<p class="text-zinc-500">Sin prendas.</p>';
+  gs.forEach(g => (porPersona[g.asignado || 'Sin asignar'] = porPersona[g.asignado || 'Sin asignar'] || []).push(g));
+  el.innerHTML = Object.entries(porPersona).map(([p, xs]) =>
+    `<details class="card p-3" open><summary class="font-bold cursor-pointer">👤 ${esc(p)} · ${xs.reduce((a, g) => a + g.buscado, 0)}/${xs.reduce((a, g) => a + g.cantidad, 0)}</summary>
+     <div class="flex flex-col gap-3 mt-3">${bloques(xs).map(b => bloqueHtml(b, false)).join('')}</div></details>`).join('');
 }
 
 // ───────── escaneo en la búsqueda: pantalla verde / roja ─────────
