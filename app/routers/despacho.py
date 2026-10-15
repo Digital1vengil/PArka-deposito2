@@ -42,7 +42,7 @@ async def _leer(files: list[UploadFile]) -> list[tuple[str, bytes]]:
 # Hasta conectar la API de Mercado Libre, Despacho funciona exactamente como el scanner:
 # se sirve la misma app (app/scanner/index.html) y habla directo con el Apps Script de Drive.
 SCANNER_DIR = Path(__file__).resolve().parent.parent / "scanner"
-SCANNER_ARCHIVOS = {"html5-qrcode-2.3.8.min.js", "despacho-vivo.js", "styles.css", "manifest.json", "icon-192.png", "icon-512.png", "tema-parka.css", "ml-semaforo.js", "control-despacho.js", "tiendanube-despacho.js", "whatsapp-despacho.js"}
+SCANNER_ARCHIVOS = {"despacho-vivo.js", "styles.css", "manifest.json", "icon-192.png", "icon-512.png", "tema-parka.css", "ml-semaforo.js", "control-despacho.js", "tiendanube-despacho.js", "whatsapp-despacho.js"}
 # Colores del scanner original (verde) → paleta de la app de cambios PARKA (negro / grises)
 _COLORES = {"#2f5d3a": "#111111", "#43592d": "#111111", "#547038": "#333333", "#6a8c47": "#15803d",
             "#374a25": "#000000", "#263524": "#111111", "#f4f7f0": "#f5f5f4"}
@@ -76,9 +76,7 @@ def scanner_index(u: Usuario = Depends(acceso)):
 def scanner_archivo(archivo: str, u: Usuario = Depends(acceso)):
     if archivo not in SCANNER_ARCHIVOS or not (SCANNER_DIR / archivo).exists():
         raise HTTPException(404)
-    # la librería de la cámara lleva la versión en el nombre: el celular la guarda y no la vuelve a bajar
-    cache = "public, max-age=31536000, immutable" if archivo.startswith("html5-qrcode-") else "no-cache"
-    return FileResponse(SCANNER_DIR / archivo, headers={"Cache-Control": cache})
+    return FileResponse(SCANNER_DIR / archivo, headers={"Cache-Control": "no-cache"})
 
 
 @router.get("/lotes")

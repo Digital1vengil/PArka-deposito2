@@ -3,7 +3,7 @@
 {% block contenido %}
 <a href="/" class="text-sm text-zinc-500 hover:text-violeta">← Inicio</a>
 <h1 class="text-2xl font-bold mb-1">🔢 Conteo</h1>
-<p class="text-sm text-zinc-500 mb-5">Elegí el artículo: queda fijo y cargás la cantidad de cada color y talle. Si escaneás un código, suma 1 a esa variante.
+<p class="text-sm text-zinc-500 mb-5">Elegí el artículo, después el color y la marca, y cargás la cantidad de cada talle. Si escaneás un código, suma 1 a esa variante.
   Entran artículos <b>Parka</b>, <b>Puffers</b> y <b>No Brand</b>.</p>
 
 <div class="grid lg:grid-cols-5 gap-6">
@@ -20,7 +20,7 @@
         <span id="f-total" class="chip chip-en_curso"></span>
         <button class="btn btn-gris btn-chico" onclick="soltar()">Cambiar artículo</button>
       </div>
-      <p class="text-xs text-zinc-500 mb-4">2 · Cargá las cantidades con − / + o escribiendo el número.</p>
+      <div id="f-migas" class="migas"></div>
       <div id="f-grilla" class="flex flex-col gap-4"></div>
       <button class="btn btn-primario w-full !py-3 !text-base mt-5" onclick="listoArticulo()">✔ Listo — agregar otro artículo</button>
     </section>
@@ -69,13 +69,15 @@ async function buscar() {
   modelos = d.modelos;
   if (modelos.length === 1 && modelos[0].preseleccion) {   // escaneó un código: fija el artículo y suma 1
     fijar(0);
+    const pv = modelos[0].variantes.find(x => x.id === modelos[0].preseleccion);
+    if (pv) { selColor = pv.color; selMarca = pv.marca; }
     sumar(modelos[0].preseleccion, 1);
     beepOk(); q.value = ''; el.innerHTML = '';
     const v0 = info[modelos[0].preseleccion];
     toast(`+1 ${v0.articulo} ${v0.color} ${v0.talle}`);
     return;
   }
-  if (!modelos.length) { el.innerHTML = '<p class="text-sm text-zinc-500">Sin resultados Parka, Puffers o No Brand con código de barras.</p>'; return; }
+  if (!modelos.length) { el.innerHTML = '<p class="text-sm text-zinc-500">Sin resultados Parka, Puffers o No Brand.</p>'; return; }
   el.innerHTML = modelos.map((m, i) => {
     const colores = [...new Set(m.variantes.map(x => x.color))];
     const marcas = [...new Set(m.variantes.map(x => x.marca))];
@@ -88,6 +90,7 @@ async function buscar() {
 
 function fijar(i) {
   modelo = modelos[i];
+  selColor = selMarca = null;
   modelo.variantes.forEach(x => { info[x.id] = { articulo: modelo.articulo, color: x.color, talle: x.talle, marca: x.marca, sku: x.sku }; });
   document.getElementById('resultados').innerHTML = '';
   q.value = '';
@@ -104,7 +107,7 @@ function listoArticulo() {
 }
 function soltar() {
   clearTimeout(tBus);
-  modelo = null; modelos = [];
+  modelo = null; modelos = []; selColor = selMarca = null;
   document.getElementById('resultados').innerHTML = '';
   document.getElementById('f-grilla').innerHTML = '';
   document.getElementById('fijo').classList.add('hidden');
@@ -112,24 +115,36 @@ function soltar() {
   q.value = ''; q.focus();
 }
 
+// Pasos: 2 · color → 3 · marca → 4 · talles (si hay una sola opción se elige sola)
+let selColor = null, selMarca = null;
+const subtotal = f => modelo.variantes.filter(f).reduce((a, x) => a + (cant[x.id] || 0), 0);
+const unicos = xs => [...new Set(xs)];
+function opc(txt, activo, n, accion, extra = '') {
+  return `<button type="button" class="opc ${activo ? 'activo' : ''} ${extra}" onclick="${accion}">${esc(txt)}${n ? `<span class="n">${n}</span>` : ''}</button>`;
+}
+function elegirColor(c) { selColor = c; selMarca = null; pintarGrilla(); }
+function elegirMarca(m) { selMarca = m; pintarGrilla(); }
+
 function pintarGrilla() {
   if (!modelo) return;
-  const variasMarcas = new Set(modelo.variantes.map(x => x.marca)).size > 1;
-  const grupos = {};
-  modelo.variantes.forEach(x => {
-    const k = variasMarcas ? `${x.color}|${x.marca}` : x.color;
-    (grupos[k] = grupos[k] || { color: x.color, marca: variasMarcas ? x.marca : '', vs: [] }).vs.push(x);
-  });
-  const lista = Object.values(grupos).sort((a, b) => a.color.localeCompare(b.color) || (ORDEN_MARCA[a.marca] ?? 9) - (ORDEN_MARCA[b.marca] ?? 9));
-  document.getElementById('f-grilla').innerHTML = lista.map(g => {
-    g.vs.sort((a, b) => ordTalle(a.talle) - ordTalle(b.talle));
-    const sub = g.vs.reduce((a, x) => a + (cant[x.id] || 0), 0);
-    return `<div>
-      <div class="flex items-center gap-2 mb-2"><b>${esc(g.color)}</b>${g.marca ? `<span class="chip chip-auto">${esc(g.marca)}</span>` : ''}
-        <span class="text-xs text-zinc-500 ml-auto" id="sub-${cssId(g)}">${sub ? sub + ' u.' : ''}</span></div>
-      <div class="flex flex-wrap gap-2">${g.vs.map(x => `
+  const colores = unicos(modelo.variantes.map(x => x.color)).sort((a, b) => a.localeCompare(b));
+  if (colores.length === 1) selColor = colores[0];
+  let html = `<div class="paso"><div class="paso-tit">2 · Color</div><div class="opcs">${colores.map(c =>
+    opc(c, c === selColor, subtotal(x => x.color === c), `elegirColor(${esc(JSON.stringify(c))})`)).join('')}</div></div>`;
+  if (selColor) {
+    const marcas = unicos(modelo.variantes.filter(x => x.color === selColor).map(x => x.marca))
+      .sort((a, b) => (ORDEN_MARCA[a] ?? 9) - (ORDEN_MARCA[b] ?? 9));
+    if (marcas.length === 1) selMarca = marcas[0];
+    html += `<div class="paso"><div class="paso-tit">3 · Marca</div><div class="opcs">${marcas.map(m =>
+      opc(m, m === selMarca, subtotal(x => x.color === selColor && x.marca === m), `elegirMarca(${esc(JSON.stringify(m))})`)).join('')}</div></div>`;
+  }
+  if (selColor && selMarca) {
+    const vs = modelo.variantes.filter(x => x.color === selColor && x.marca === selMarca)
+      .sort((a, b) => ordTalle(a.talle) - ordTalle(b.talle));
+    html += `<div class="paso"><div class="paso-tit">4 · Talles — cargá las cantidades con − / + o escribiendo el número</div>
+      <div class="flex flex-wrap gap-2">${vs.map(x => `
         <div class="celda rounded-xl border ${cant[x.id] ? 'border-teal-500' : 'border-zinc-700'} p-2 flex flex-col items-center gap-1" id="c-${x.id}" style="${cant[x.id] ? 'background:#dcfce7' : ''}">
-          <span class="font-bold text-sm">${esc(x.talle)}</span>
+          <span class="font-bold text-sm">${esc(x.talle)}</span>${x.sin_codigo ? '<span class="sin-cod" title="En Odoo no tiene código de barras: la etiqueta sale con el SKU">sin código</span>' : ''}
           <div class="flex items-center gap-1">
             <button class="btn btn-gris !w-9 !h-9 !p-0 !text-xl" onclick="sumar(${x.id},-1)">−</button>
             <input class="input !w-12 !h-9 !px-1 text-center font-bold" type="number" inputmode="numeric" min="0" max="99999"
@@ -137,11 +152,13 @@ function pintarGrilla() {
             <button class="btn btn-gris !w-9 !h-9 !p-0 !text-xl" onclick="sumar(${x.id},1)">+</button>
           </div>
         </div>`).join('')}</div></div>`;
-  }).join('');
+  }
+  document.getElementById('f-grilla').innerHTML = html;
+  document.getElementById('f-migas').innerHTML = `<b>${esc(modelo.articulo)}</b>` +
+    (selColor ? ` › <b>${esc(selColor)}</b>` : ' › elegí el color') + (selColor ? (selMarca ? ` › <b>${esc(selMarca)}</b>` : ' › elegí la marca') : '');
   const t = modelo.variantes.reduce((a, x) => a + (cant[x.id] || 0), 0);
   document.getElementById('f-total').textContent = `${t} u. de este artículo`;
 }
-const cssId = g => (g.color + '_' + g.marca).replace(/[^a-z0-9]/gi, '_');
 
 function sumar(id, n) { fijarCant(id, (cant[id] || 0) + n); }
 function fijarCant(id, v) {

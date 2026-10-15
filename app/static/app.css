@@ -286,3 +286,19 @@ input[type=file]::file-selector-button { background: #111; }
 .btn-azul:hover:not(:disabled) { background: #1d4ed8; }
 .chip-plat-ml { background: #ffe600; color: #1f2937; font-weight: 700; }
 .chip-plat-tn { background: #dbeafe; color: #1d4ed8; font-weight: 700; }
+
+/* Selector por pasos (Conteo / Devoluciones): artículo → color → marca / plataforma / estado → talles */
+.paso { margin-bottom: 1rem; }
+.paso-tit { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: .4rem; }
+.opcs { display: flex; flex-wrap: wrap; gap: .5rem; }
+.opc { display: inline-flex; align-items: center; gap: .45rem; min-height: 2.75rem; padding: .45rem 1rem; border-radius: 999px;
+  border: 1.5px solid var(--line); background: #fff; font-weight: 600; font-size: .95rem; color: var(--ink); cursor: pointer; }
+.opc:hover { border-color: #111; }
+.opc.activo { background: #111; border-color: #111; color: #fff; }
+.opc .n { font-size: .7rem; font-weight: 700; background: #dcfce7; color: #166534; border-radius: 999px; padding: .05rem .45rem; }
+.opc.activo .n { background: #fff; color: #111; }
+.opc.falla.activo { background: #b91c1c; border-color: #b91c1c; }
+.opc.optimo.activo { background: #15803d; border-color: #15803d; }
+.migas { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; font-size: .85rem; color: var(--muted); margin-bottom: .8rem; }
+.migas b { color: var(--ink); }
+.sin-cod { font-size: .62rem; font-weight: 700; color: #92400e; background: #fef3c7; border-radius: 4px; padding: 0 .3rem; }

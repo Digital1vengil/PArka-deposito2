@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% block titulo %}Devoluciones · {{ APP_NOMBRE }}{% endblock %}
-{% block head %}<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>{% endblock %}
+{% block head %}<script src="/static/vendor/html5-qrcode-2.3.8.min.js?v=2.3.8"></script>{% endblock %}
 {% block contenido %}
 <a href="/" class="text-sm text-zinc-500 hover:text-violeta">← Inicio</a>
 <h1 class="text-2xl font-bold mb-1">↩️ Devoluciones</h1>
-<p class="text-sm text-zinc-500 mb-5"><b>Escaneá la etiqueta</b> de cada prenda y se suma sola (1 unidad por escaneo), o buscá el artículo a mano y elegí color, talle y cantidad. Al confirmar se guarda en Drive y salen las etiquetas con el código de barras (rollo Honeywell).
+<p class="text-sm text-zinc-500 mb-5"><b>Escaneá la etiqueta</b> de cada prenda y se suma sola (1 unidad por escaneo), o buscá el artículo a mano y elegí color, ML o TN, Óptimo o Falla y las cantidades por talle. Al confirmar se guarda en Drive y salen las etiquetas con el código de barras (rollo Honeywell).
   Solo aparecen artículos <b>Parka</b> y <b>Puffers</b>.</p>
 
 <div class="grid lg:grid-cols-5 gap-6">
@@ -39,40 +39,16 @@
     </section>
 
     <section id="elegir" class="card p-4 hidden">
-      <div class="flex items-center justify-between mb-3">
+      <div class="flex items-center justify-between mb-2">
         <h2 class="font-bold text-lg" id="e-articulo"></h2>
         <button class="text-sm text-zinc-500" onclick="cerrarElegir()">✕</button>
       </div>
-      <label class="lbl">2 · Color</label>
-      <div id="e-colores" class="flex flex-wrap gap-2 mb-4"></div>
-      <label class="lbl">3 · Talle</label>
-      <div id="e-talles" class="flex flex-wrap gap-2 mb-4"><span class="text-sm text-zinc-500">Elegí un color</span></div>
-      <div class="flex flex-wrap items-end gap-5">
-        <div>
-          <label class="lbl">4 · Cantidad</label>
-          <div class="flex items-center gap-2">
-            <button class="btn btn-gris !w-12 !h-12 !text-2xl" onclick="cambiarCant(-1)">−</button>
-            <span id="e-cant" class="w-12 text-center text-2xl font-bold">1</span>
-            <button class="btn btn-gris !w-12 !h-12 !text-2xl" onclick="cambiarCant(1)">+</button>
-          </div>
-        </div>
-        <div>
-          <label class="lbl">Estado</label>
-          <div id="estado-box" class="flex gap-2 rounded-lg transition-colors">
-            <button class="btn estado" data-e="OPTIMO" onclick="setEstado('OPTIMO')">Óptimo</button>
-            <button class="btn estado" data-e="FALLA" onclick="setEstado('FALLA')">Falla</button>
-          </div>
-        </div>
-        <div>
-          <label class="lbl">Plataforma</label>
-          <div id="plat-box" class="flex gap-2 rounded-lg transition-colors">
-            <button class="btn plat" data-p="ML" onclick="setPlataforma('ML')">ML</button>
-            <button class="btn plat" data-p="TN" onclick="setPlataforma('TN')">TN</button>
-          </div>
-        </div>
-        <button id="btn-agregar" class="btn btn-primario !py-3 !px-5 ml-auto" onclick="agregar()" disabled>+ Agregar</button>
+      <div id="e-migas" class="migas"></div>
+      <div id="e-pasos"></div>
+      <div class="flex flex-wrap items-center gap-3 mt-2">
+        <span id="e-total" class="text-sm text-zinc-500 flex-1"></span>
+        <button id="btn-agregar" class="btn btn-primario !py-3 !px-5" onclick="agregar()" disabled>+ Agregar</button>
       </div>
-      <p id="e-sel" class="text-xs text-zinc-500 mt-3"></p>
     </section>
   </div>
 
@@ -122,7 +98,7 @@
 {% endblock %}
 {% block scripts %}
 <script>
-let modelos = [], modelo = null, color = null, variante = null, cant = 1, estado = '';   // Óptimo / Falla: sin valor por defecto, hay que elegirlo
+let modelos = [], modelo = null, color = null, estado = '';   // Óptimo / Falla: sin valor por defecto, hay que elegirlo
 let items = [];   // {id, articulo, color, talle, sku, cantidad, estado, plataforma}
 // Plataforma por prenda (ML / TN), igual que Óptimo / Falla. Sin elegir no deja agregar ni escanear.
 let plataforma = '', platScan = '';
@@ -247,7 +223,7 @@ async function buscar() {
   if (v.length < 2) { el.innerHTML = ''; return; }
   const d = await api('/devoluciones/api/buscar?q=' + encodeURIComponent(v));
   modelos = d.modelos;
-  if (!modelos.length) { el.innerHTML = '<p class="text-sm text-zinc-500">Sin resultados Parka o Puffers con código de barras.</p>'; return; }
+  if (!modelos.length) { el.innerHTML = '<p class="text-sm text-zinc-500">Sin resultados Parka o Puffers.</p>'; return; }
   el.innerHTML = modelos.map((m, i) => {
     const colores = [...new Set(m.variantes.map(x => x.color))];
     const marcas = [...new Set(m.variantes.map(x => x.marca))];
@@ -259,75 +235,87 @@ async function buscar() {
   if (modelos.length === 1 && modelos[0].preseleccion) {   // SKU exacto: queda todo elegido
     elegirModelo(0);
     const v0 = modelos[0].variantes.find(x => x.id === modelos[0].preseleccion);
-    elegirColor(v0.color); elegirVariante(v0.id); beepOk();
+    color = v0.color; eCant = { [v0.id]: 1 }; pintarElegir(); beepOk();
     q.select();
   }
 }
 
-function elegirModelo(i) {
-  modelo = modelos[i]; color = null; variante = null; cant = 1; setEstado('OPTIMO');
-  document.getElementById('e-articulo').textContent = modelo.articulo;
-  const colores = [...new Set(modelo.variantes.map(x => x.color))];
-  document.getElementById('e-colores').innerHTML = colores.map(c =>
-    `<button class="btn btn-gris col-btn" data-c="${esc(c)}" onclick="elegirColor(this.dataset.c)">${esc(c)}</button>`).join('');
-  document.getElementById('e-talles').innerHTML = '<span class="text-sm text-zinc-500">Elegí un color</span>';
-  document.getElementById('e-cant').textContent = cant;
-  document.getElementById('elegir').classList.remove('hidden');
-  pintarSel();
-  if (colores.length === 1) elegirColor(colores[0]);
-}
-function cerrarElegir() { document.getElementById('elegir').classList.add('hidden'); modelo = null; }
-
+// Pasos: 2 · color → 3 · ML o TN → 4 · Óptimo o Falla → 5 · talles con cantidad (una sola opción se elige sola)
+let eCant = {};   // id variante -> cantidad (del artículo elegido)
 const ORDEN_TALLE = ['XXXS','XXS','XS','S','M','L','XL','XXL','XXXL','XXXXL','U','UNICO','ÚNICO'];
 const ordTalle = t => { const i = ORDEN_TALLE.indexOf(String(t).toUpperCase()); return i >= 0 ? i : (parseInt(t) || 100); };
-function elegirColor(c) {
-  color = c; variante = null;
-  document.querySelectorAll('.col-btn').forEach(b => { b.classList.toggle('btn-primario', b.dataset.c === c); b.classList.toggle('btn-gris', b.dataset.c !== c); });
-  const vs = modelo.variantes.filter(x => x.color === c).sort((a, b) => ordTalle(a.talle) - ordTalle(b.talle) || String(a.marca).localeCompare(b.marca));
-  const repetido = t => vs.filter(x => x.talle === t).length > 1;   // mismo talle con distinta marca
-  document.getElementById('e-talles').innerHTML = vs.map(x =>
-    `<button class="btn btn-gris tal-btn !min-w-[3.5rem] flex-col !gap-0 leading-tight" data-id="${x.id}" onclick="elegirVariante(${x.id})">
-       <span>${esc(x.talle)}</span>${repetido(x.talle) && x.marca ? `<span class="text-[10px] font-medium opacity-80">${esc(x.marca)}</span>` : ''}</button>`).join('');
-  if (vs.length === 1) elegirVariante(vs[0].id);
-  pintarSel();
+function opc(txt, activo, accion, extra = '') {
+  return `<button type="button" class="opc ${activo ? 'activo' : ''} ${extra}" onclick="${accion}">${esc(txt)}</button>`;
 }
-function elegirVariante(id) {
-  variante = modelo.variantes.find(x => x.id === id);
-  document.querySelectorAll('.tal-btn').forEach(b => { const on = +b.dataset.id === id; b.classList.toggle('btn-primario', on); b.classList.toggle('btn-gris', !on); });
-  pintarSel();
+function elegirModelo(i) {
+  modelo = modelos[i]; color = null; eCant = {}; estado = ''; plataforma = '';
+  document.getElementById('e-articulo').textContent = modelo.articulo;
+  document.getElementById('elegir').classList.remove('hidden');
+  pintarElegir();
 }
-function cambiarCant(n) { cant = Math.max(1, Math.min(999, cant + n)); document.getElementById('e-cant').textContent = cant; }
-function setEstado(e) {
-  estado = e; _marcarFalta('estado-box', false);
-  document.querySelectorAll('.estado').forEach(b => {
-    const on = b.dataset.e === e;
-    b.className = 'btn estado ' + (on ? (e === 'FALLA' ? 'btn-rojo' : 'btn-turq') : 'btn-gris');
-  });
-}
-function pintarSel() {
-  document.getElementById('btn-agregar').disabled = !variante;
-  document.getElementById('e-sel').textContent = variante ? `SKU ${variante.sku} · código ${variante.codigo_barras}${variante.marca ? ' · ' + variante.marca : ''}` : '';
+function cerrarElegir() { document.getElementById('elegir').classList.add('hidden'); modelo = null; }
+function elegirColor(c) { color = c; eCant = {}; pintarElegir(); }
+function setPlataforma(p) { plataforma = p; pintarElegir(); }
+function setEstado(e) { estado = e; pintarElegir(); }
+function sumarT(id, n) { fijarT(id, (eCant[id] || 0) + n); }
+function fijarT(id, v) { const n = Math.max(0, Math.min(999, parseInt(v) || 0)); if (n) eCant[id] = n; else delete eCant[id]; pintarElegir(); }
+function pintarElegir() {
+  if (!modelo) return;
+  const colores = [...new Set(modelo.variantes.map(x => x.color))].sort((a, b) => a.localeCompare(b));
+  if (colores.length === 1) color = colores[0];
+  let html = `<div class="paso"><div class="paso-tit">2 · Color</div><div class="opcs">${colores.map(c =>
+    opc(c, c === color, `elegirColor(${esc(JSON.stringify(c))})`)).join('')}</div></div>`;
+  if (color) html += `<div class="paso"><div class="paso-tit">3 · Plataforma</div><div class="opcs">` +
+    opc('Mercado Libre', plataforma === 'ML', "setPlataforma('ML')") + opc('Tienda Nube', plataforma === 'TN', "setPlataforma('TN')") + `</div></div>`;
+  if (color && plataforma) html += `<div class="paso"><div class="paso-tit">4 · Estado</div><div class="opcs">` +
+    opc('Óptimo', estado === 'OPTIMO', "setEstado('OPTIMO')", 'optimo') + opc('Falla', estado === 'FALLA', "setEstado('FALLA')", 'falla') + `</div></div>`;
+  if (color && plataforma && estado) {
+    const vs = modelo.variantes.filter(x => x.color === color).sort((a, b) => ordTalle(a.talle) - ordTalle(b.talle) || String(a.marca).localeCompare(b.marca));
+    const repetido = t => vs.filter(x => x.talle === t).length > 1;   // mismo talle con distinta marca
+    html += `<div class="paso"><div class="paso-tit">5 · Talles — cuántas de cada uno</div><div class="flex flex-wrap gap-2">${vs.map(x => `
+      <div class="rounded-xl border ${eCant[x.id] ? 'border-teal-500' : 'border-zinc-700'} p-2 flex flex-col items-center gap-1" style="${eCant[x.id] ? 'background:#dcfce7' : ''}">
+        <span class="font-bold text-sm">${esc(x.talle)}${repetido(x.talle) && x.marca ? ` <span class="text-[10px] font-medium opacity-80">${esc(x.marca)}</span>` : ''}</span>${x.sin_codigo ? '<span class="sin-cod" title="En Odoo no tiene código de barras: la etiqueta sale con el SKU">sin código</span>' : ''}
+        <div class="flex items-center gap-1">
+          <button class="btn btn-gris !w-9 !h-9 !p-0 !text-xl" onclick="sumarT(${x.id},-1)">−</button>
+          <input class="input !w-12 !h-9 !px-1 text-center font-bold" type="number" inputmode="numeric" min="0" max="999"
+                 value="${eCant[x.id] || ''}" placeholder="0" onchange="fijarT(${x.id}, this.value)" onfocus="this.select()">
+          <button class="btn btn-gris !w-9 !h-9 !p-0 !text-xl" onclick="sumarT(${x.id},1)">+</button>
+        </div>
+      </div>`).join('')}</div></div>`;
+  }
+  document.getElementById('e-pasos').innerHTML = html;
+  const nomPlat = { ML: 'Mercado Libre', TN: 'Tienda Nube' };
+  document.getElementById('e-migas').innerHTML = [modelo.articulo, color, nomPlat[plataforma], estado === 'FALLA' ? 'Falla' : estado ? 'Óptimo' : '']
+    .filter(Boolean).map(t => `<b>${esc(t)}</b>`).join(' › ') + (!color ? ' › elegí el color' : !plataforma ? ' › ML o TN' : !estado ? ' › Óptimo o Falla' : '');
+  const t = Object.values(eCant).reduce((a, n) => a + n, 0);
+  document.getElementById('e-total').textContent = t ? `${t} prenda${t === 1 ? '' : 's'} para agregar` : '';
+  document.getElementById('btn-agregar').disabled = !t;
 }
 function agregar() {
-  if (!variante) return;
-  if (!estado) { beepError(); toast('Elegí el estado de la prenda: Óptimo o Falla', 'warn', 4000); _marcarFalta('estado-box', true); return; }
-  if (!plataforma) { beepError(); toast('Elegí la plataforma de la prenda: ML o TN', 'warn', 4000); _marcarFalta('plat-box', true); return; }
-  const k = { id: variante.id, estado, plataforma };
-  const ya = items.find(x => clave(x) === clave(k));
-  if (ya) ya.cantidad += cant;
-  else items.push({ id: variante.id, articulo: modelo.articulo, color: variante.color, talle: variante.talle, marca: variante.marca, sku: variante.sku, cantidad: cant, estado, plataforma });
-  toast(`Agregado: ${modelo.articulo} ${variante.color} ${variante.talle} x${cant} · ${plataforma}`);
-  pintarLista(clave(k));
+  const ids = Object.keys(eCant).map(Number);
+  if (!modelo || !ids.length) return;
+  if (!plataforma) { beepError(); toast('Elegí la plataforma de la prenda: ML o TN', 'warn', 4000); return; }
+  if (!estado) { beepError(); toast('Elegí el estado de la prenda: Óptimo o Falla', 'warn', 4000); return; }
+  let ultima = '', total = 0;
+  ids.forEach(id => {
+    const v = modelo.variantes.find(x => x.id === id), n = eCant[id];
+    const k = { id, estado, plataforma };
+    const ya = items.find(x => clave(x) === clave(k));
+    if (ya) ya.cantidad += n;
+    else items.push({ id, articulo: modelo.articulo, color: v.color, talle: v.talle, marca: v.marca, sku: v.sku, cantidad: n, estado, plataforma });
+    ultima = clave(k); total += n;
+  });
+  toast(`Agregado: ${modelo.articulo} ${color} · ${total} prenda${total === 1 ? '' : 's'} · ${plataforma} · ${estado === 'FALLA' ? 'Falla' : 'Óptimo'}`);
+  pintarLista(ultima);
   limpiarBusqueda();
 }
 // Después de agregar queda todo limpio para cargar el artículo siguiente.
 function limpiarBusqueda() {
   clearTimeout(tBus);
-  cerrarElegir(); color = null; variante = null; cant = 1; setEstado(''); setPlataforma('');
-  document.getElementById('e-cant').textContent = 1;
-  document.getElementById('e-colores').innerHTML = '';
-  document.getElementById('e-talles').innerHTML = '<span class="text-sm text-zinc-500">Elegí un color</span>';
-  document.getElementById('e-sel').textContent = '';
+  cerrarElegir(); color = null; eCant = {}; estado = ''; plataforma = '';
+  document.getElementById('e-pasos').innerHTML = '';
+  document.getElementById('e-migas').innerHTML = '';
+  document.getElementById('e-total').textContent = '';
   document.getElementById('btn-agregar').disabled = true;
   modelos = []; q.value = ''; document.getElementById('resultados').innerHTML = '';
   q.focus();
@@ -439,6 +427,6 @@ function _avisarNuevos(xs) {
 }
 function _chipNuevo(x) { return _nuevos.has(x.id) ? `<span id="nuevo-PD-${x.id}" class="chip chip-alta">NUEVO</span>` : ''; }
 setInterval(() => { if (!document.hidden) historial().catch(() => {}); }, 20000);
-setEstado(''); setEstadoScan(''); setPlataforma(''); setPlatScan(''); pintarLista(); historial();
+setEstadoScan(''); setPlatScan(''); pintarLista(); historial();
 </script>
 {% endblock %}
