@@ -146,7 +146,7 @@
     var abierta = state && state.vivo && state.fecha === hoyLocal() && state.packages ? state.dispatchType : '';
     list.innerHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' + BOTONES.map(function (b) {
       var enCurso = abierta === b.tipo;
-      return '<button data-pk-iniciar="' + b.tipo + '" style="background:#111;color:#fff;border:0;border-radius:16px;padding:18px 8px;' +
+      return '<button data-pk-iniciar="' + b.tipo + '" style="background:#1A7F4B;color:#fff;border:0;border-radius:16px;padding:18px 8px;' +
         'display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;font:800 16px system-ui;box-shadow:0 2px 6px rgba(0,0,0,.15);min-height:96px">' +
         '<i data-lucide="' + b.icono + '" class="icon" style="width:26px;height:26px;"></i>' + TIPOS[b.tipo] +
         '<span style="font:600 11px system-ui;color:' + (enCurso ? '#86efac' : '#cbd5e1') + '">' + (enCurso ? 'en curso · sumar nuevas' : b.sub) + '</span></button>';

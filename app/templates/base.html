@@ -3,13 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#111111">
+  <meta name="theme-color" content="#38B475">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <title>{% block titulo %}{{ APP_NOMBRE }}{% endblock %}</title>
   <link rel="manifest" href="/manifest.json">
-  <link rel="icon" href="/static/icons/icon-192.png">
-  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+  <link rel="icon" href="/static/icons/parka.ico" sizes="any">
+  <link rel="icon" type="image/png" href="/static/icons/favicon-64.png">
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
   <link rel="stylesheet" href="/static/app.css?v={{ static_v("app.css") }}">
   {% block head %}{% endblock %}
   {# Tailwind compilado (tailwind.config.js) — va último, como lo inyectaba antes cdn.tailwindcss.com #}

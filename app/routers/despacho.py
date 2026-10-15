@@ -43,9 +43,9 @@ async def _leer(files: list[UploadFile]) -> list[tuple[str, bytes]]:
 # se sirve la misma app (app/scanner/index.html) y habla directo con el Apps Script de Drive.
 SCANNER_DIR = Path(__file__).resolve().parent.parent / "scanner"
 SCANNER_ARCHIVOS = {"despacho-vivo.js", "styles.css", "manifest.json", "icon-192.png", "icon-512.png", "tema-parka.css", "ml-semaforo.js", "control-despacho.js", "tiendanube-despacho.js", "whatsapp-despacho.js"}
-# Colores del scanner original (verde) → paleta de la app de cambios PARKA (negro / grises)
-_COLORES = {"#2f5d3a": "#111111", "#43592d": "#111111", "#547038": "#333333", "#6a8c47": "#15803d",
-            "#374a25": "#000000", "#263524": "#111111", "#f4f7f0": "#f5f5f4"}
+# Colores del scanner original (verde oscuro) → verde de la marca PARKA Supply Co.
+_COLORES = {"#2f5d3a": "#1A7F4B", "#43592d": "#1A7F4B", "#547038": "#38B475", "#6a8c47": "#38B475",
+            "#374a25": "#146a3e", "#263524": "#146a3e", "#f4f7f0": "#f5f5f4"}
 
 
 def _scanner_html() -> str:

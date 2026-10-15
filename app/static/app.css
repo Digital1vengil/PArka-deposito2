@@ -302,3 +302,47 @@ input[type=file]::file-selector-button { background: #111; }
 .migas { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; font-size: .85rem; color: var(--muted); margin-bottom: .8rem; }
 .migas b { color: var(--ink); }
 .sin-cod { font-size: .62rem; font-weight: 700; color: #92400e; background: #fef3c7; border-radius: 4px; padding: 0 .3rem; }
+
+/* ───────── Marca PARKA Supply Co.: verde #38B475 + blanco ─────────
+   --verde (marca) va en el encabezado y superficies grandes con letras blancas gruesas, como el logo.
+   --verde-osc lleva texto blanco chico (botones, menú activo): contraste ~5:1. */
+:root { --verde: #38B475; --verde-osc: #1A7F4B; --verde-hover: #146a3e; --verde-bg: #e8f7ef; --verde-linea: #bfe7d1; }
+.hdr { background: var(--verde); }
+.hdr-brand { font-weight: 800; letter-spacing: .14em; font-size: 1.15rem; }
+.hdr-sub { opacity: .9; font-weight: 700; }
+.hdr .text-white\/70 { color: #fff !important; opacity: .9; }
+.hdr-btn { border-color: rgba(255,255,255,.75); font-weight: 600; }
+.hdr-btn:hover { background: rgba(255,255,255,.18); }
+.campana { border-color: rgba(255,255,255,.75); }
+.campana:hover, .campana[aria-expanded="true"] { background: rgba(255,255,255,.18); }
+.campana-n { color: var(--verde-osc); box-shadow: 0 0 0 2px var(--verde); }
+#nav-lateral .nav-link:hover { background: var(--verde-bg); }
+#nav-lateral .nav-link.activo { background: var(--verde-osc); color: #fff; }
+a.card:hover, button.card:hover { border-color: var(--verde) !important; }
+.btn:hover:not(:disabled) { border-color: var(--verde-osc); }
+.btn-primario { background: var(--verde-osc); border-color: var(--verde-osc); color: #fff; }
+.btn-primario:hover:not(:disabled) { background: var(--verde-hover); border-color: var(--verde-hover); }
+.btn-turq { background: var(--verde-osc); border-color: var(--verde-osc); color: #fff; }
+.btn-turq:hover:not(:disabled) { background: var(--verde-hover); }
+.btn-gris:hover:not(:disabled) { background: var(--verde-bg); }
+.input:focus { outline-color: var(--verde-osc); }
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline-color: var(--verde-osc); }
+input[type=file]::file-selector-button { background: var(--verde-osc); }
+.barra > div { background: var(--verde); }
+.tab.activo { color: var(--verde-osc); border-bottom-color: var(--verde-osc); }
+.celda-ub.marcada { background: var(--verde-osc); border-color: var(--verde-osc); }
+.celda-ub.sel { outline-color: var(--verde-osc); }
+@keyframes flash { from { box-shadow: 0 0 0 4px var(--verde); } to { box-shadow: none; } }
+.parkia-p { background: var(--verde-osc); }
+.parkia-p-chico { background: #fff; color: var(--verde-osc); }
+#parkia-fab:focus-visible { outline-color: var(--verde-osc); }
+.parkia-cab { background: var(--verde); }
+.parkia-sug:hover { border-color: var(--verde); background: var(--verde-bg); }
+.parkia-msg.yo { background: var(--verde-osc); }
+.avisos-link, .aviso-det summary { color: var(--verde-osc); }
+.avisos-filtros button.activo { background: var(--verde-osc); border-color: var(--verde-osc); }
+.tile-ic { background: var(--verde-bg); color: var(--verde-osc); }
+.opc:hover { border-color: var(--verde-osc); }
+.opc.activo { background: var(--verde-osc); border-color: var(--verde-osc); }
+.opc.activo .n { color: var(--verde-osc); }
+.pinpad button:active { background: var(--verde-bg); }
