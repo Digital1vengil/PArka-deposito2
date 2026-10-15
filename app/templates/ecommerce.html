@@ -2,14 +2,36 @@
 {% block titulo %}Recolección Ecommerce · {{ APP_NOMBRE }}{% endblock %}
 {% block head %}<script src="/static/vendor/html5-qrcode-2.3.8.min.js?v=2.3.8"></script>
 <style>
-  .re-card { position: relative; border: 1.5px solid var(--line); border-radius: 12px; padding: .55rem .65rem; background: #fff; }
+  .re-card { position: relative; border: 1.5px solid #d9eee2; border-radius: 12px; padding: .5rem .6rem; background: #fff; }
   /* grilla: en pantallas anchas 2 o 3 fichas por fila */
   .re-grid { display: grid; gap: .6rem; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); align-items: start; }
   .re-grid > details, .re-grid > .otros, .re-grid > p { grid-column: 1 / -1; }
   .re-card .btn { font-size: .78rem; }
   .re-info { font-size: .7rem; color: var(--muted); margin-top: .3rem; line-height: 1.3; }
+  /* Ficha en fila (opción C): talle | nombre + SKU | botón; debajo canal, ventas, ubicación y hora. Letra verde */
+  .rf { display: flex; align-items: center; gap: .55rem; }
+  .rf-talle { flex: none; min-width: 2.1rem; text-align: center; background: var(--verde-osc); color: #fff; border-radius: 7px;
+              padding: .2rem .45rem; font-weight: 800; font-size: 1rem; line-height: 1.1; }
+  .rf-nom { font-weight: 800; font-size: .9rem; color: var(--verde-osc); line-height: 1.2; }
+  .rf-col { font-weight: 500; color: #3f7d5a; }
+  .rf-sku { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .68rem; color: #3f7d5a; word-break: break-all; }
+  .rf-ok { flex: none; width: 2.6rem; height: 2.6rem; border-radius: 10px; border: 0; background: var(--verde-osc); color: #fff;
+           font-size: 1.25rem; font-weight: 900; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+  .rf-ok:hover { background: var(--verde-hover); }
+  .rf-ok.hecho { background: var(--verde-bg); color: var(--verde-osc); cursor: default; }
+  .rf-ok.falta { background: var(--alta-bg); color: var(--alta); cursor: default; font-size: .7rem; }
+  .rf-pie { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .5rem; margin-top: .4rem; font-size: .7rem; color: #3f7d5a; }
+  .rf-pie .re-vta { font-size: .68rem; padding: 0 .35rem; }
+  .rf-hora { margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .rf-cant { font-weight: 800; color: var(--verde-osc); font-size: .8rem; }
+  .rf-acc { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .35rem; }
+  .rf-link { font-size: .7rem; font-weight: 600; border: 1px solid var(--line); border-radius: 999px; padding: .1rem .55rem; background: #fff; color: #3f7d5a; cursor: pointer; }
+  .rf-link:hover { border-color: var(--verde-osc); color: var(--verde-osc); }
+  .rf-link.rojo { color: var(--alta); border-color: #f3c2c2; }
+  .re-card.listo .rf-nom, .re-card.listo .rf-talle { opacity: .75; }
+  .re-card.listo { background: #f3fbf6; border-color: var(--verde-linea); }
   /* canal de la venta en la esquina: ML (amarillo), TN (azul), cambio (violeta) */
-  .re-canales { position: absolute; top: -.6rem; right: .6rem; display: flex; gap: .25rem; }
+  .re-canales { position: absolute; top: -.6rem; right: 3.6rem; display: flex; gap: .25rem; }
   .canal { display: inline-flex; align-items: center; justify-content: center; min-width: 1.9rem; height: 1.4rem; padding: 0 .35rem;
            border-radius: 999px; font-size: .68rem; font-weight: 900; letter-spacing: .02em; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.18); }
   .canal-ml { background: #ffe600; color: #2d3277; }
@@ -663,8 +685,8 @@ function bloqueHtml(b, activo) {
   const cant = b.gs.reduce((a, g) => a + g.cantidad, 0), bus = b.gs.reduce((a, g) => a + g.buscado, 0);
   const vc = (b.gs[0].ventas || [])[0];
   const qv = verQuien() ? `<span class="re-quien ${b.gs[0].asignado ? '' : 'nadie'}">👤 ${esc(b.gs[0].asignado ? corto(b.gs[0].asignado) : 'Sin asignar')}</span>` : '';
-  return `<div class="re-venta ${falta ? '' : 'listo'}"><div class="re-venta-cab">${qv}${vc ? canalHtml(vc.canal, true) : '🧾'} <b>Venta de ${v.prendas} prendas · van juntas</b>
-      <span class="text-xs text-zinc-500">${esc(v.tipo)} ${esc(vc ? vc.numero : v.tracking)}${v.comprador ? ' · ' + esc(v.comprador) : ''}</span>
+  return `<div class="re-venta ${falta ? '' : 'listo'}"><div class="re-venta-cab">${qv}${vc ? canalHtml(vc.canal, true) : '🧾'} <b style="color:var(--verde-osc)">Venta de ${v.prendas} prendas · van juntas</b>
+      <span class="text-xs" style="color:#3f7d5a">${esc(v.tipo)} ${esc(vc ? vc.numero : v.tracking)}${v.comprador ? ' · ' + esc(v.comprador) : ''}${vc && vc.hora ? ' · 🕒 ' + esc(vc.hora) : ''}</span>
       <span class="flex-1"></span>
       <span class="vcant ${falta ? '' : 'text-teal-600'}">${bus}<span class="text-zinc-400 text-base">/${cant}</span></span></div>
     <div class="flex flex-col gap-1.5">${b.gs.map(g => grupoHtml(g, activo && g.faltan > 0, true)).join('')}</div></div>`;
@@ -783,30 +805,35 @@ const verQuien = () => tabAct === 'todo' || tabAct === 'equipo';
 function grupoHtml(g, activo, enVenta) {
   const abierta = re.estado === 'abierto';
   const cls = g.faltante && !g.faltan ? 'faltante' : !g.vinculado ? 'sinvinc' : !g.faltan ? 'listo' : g.buscado ? 'parcial' : '';
-  const ub = g.ubicacion ? g.ubicacion.split(',').map(u => `<span class="re-ub">📍 ${esc(u.trim())}</span>`).join(' ')
-    : '<span class="text-xs text-zinc-400">sin ubicación</span>';
-  const titulo = g.vinculado
-    ? `<div class="re-nombre">${esc(g.articulo)}</div><div class="re-sku">${esc(g.sku_odoo || g.sku)}</div>
-       <div class="flex flex-wrap items-center gap-2 mt-1.5"><span class="re-talle">${esc(g.talle)}</span><span class="text-sm font-bold text-zinc-600">${esc(g.color)}</span>${ub}</div>`
-    : `<div class="re-nombre">${esc(g.producto || g.sku || '(sin título)')}</div>${g.sku ? `<div class="re-sku">${esc(g.sku)}</div>` : ''}
-       <div class="text-xs text-amber-700 font-semibold mt-1">⚠ SKU sin vincular: buscala por el título y la variante</div>`;
   const ids = JSON.stringify(g.item_ids);
+  const ub = g.ubicacion ? g.ubicacion.split(',').map(u => `<span class="re-ub">📍 ${esc(u.trim())}</span>`).join(' ') : '<span>sin ubicación</span>';
+  // botón grande de la derecha: ✓ la tengo / ya está / falta
+  const boton = g.faltante && !g.faltan ? `<span class="rf-ok falta" title="No la encontró">FALTA</span>`
+    : !g.faltan ? `<span class="rf-ok hecho" title="Ya está">✓</span>`
+    : abierta && activo ? `<button class="rf-ok" onclick='manual(${ids})' title="La tengo">✓</button>`
+    : `<span class="rf-ok hecho" style="background:var(--soft);color:var(--muted)" title="Pendiente">${g.buscado}/${g.cantidad}</span>`;
+  const cab = g.vinculado
+    ? `<span class="rf-talle">${esc(g.talle)}</span><div class="flex-1 min-w-0"><div class="rf-nom">${esc(g.articulo)} <span class="rf-col">· ${esc(g.color)}</span></div>
+        <div class="rf-sku">${esc(g.sku_odoo || g.sku)}</div></div>`
+    : `<span class="rf-talle" style="background:#f59e0b">?</span><div class="flex-1 min-w-0"><div class="rf-nom">${esc(g.producto || g.sku || '(sin título)')}</div>
+        <div class="rf-sku">${esc(g.sku || '')}</div><div class="text-xs text-amber-700 font-semibold">⚠ SKU sin vincular: buscala por el título${g.variante ? ' · ' + esc(g.variante) : ''}</div></div>`;
+  const quien = verQuien() && !enVenta ? `<div class="mb-1"><span class="re-quien ${g.asignado ? '' : 'nadie'}">👤 ${esc(g.asignado ? corto(g.asignado) : 'Sin asignar')}</span></div>` : '';
+  const ventas = enVenta ? '' : (g.ventas || []).slice(0, 3).map(v => `<span class="re-vta" title="${esc(v.tipo)} · envío ${esc(v.tracking)}">${canalHtml(v.canal, true)}${v.canal === 'tn' ? '#' : ''}${esc(v.numero)}</span>`).join('')
+    + ((g.ventas || []).length > 3 ? `<span class="re-vta">+${g.ventas.length - 3}</span>` : '');
+  const hora = g.juntada && g.buscado ? `✓ ${esc(g.juntada)}` : g.entro ? `🕒 ${esc(g.entro)}` : '';
   let acc = '';
   if (abierta && activo) {
-    acc = `<button class="btn btn-turq !py-1.5 !px-3 font-bold" onclick='manual(${ids})'>✓ La tengo${g.cantidad > 1 ? ` <span class="opacity-80 font-normal">(${g.buscado + 1}/${g.cantidad})</span>` : ''}</button>`
-      + `<button class="btn btn-rojo !py-1.5 !px-3 font-bold" style="background:var(--alta);color:#fff" onclick='faltante(${ids})'>✗ No está</button>`
-      + (g.vinculado ? `<button class="btn btn-gris btn-chico" onclick="donde(${g.item_ids[0]}, '${g.clave}')" title="¿Dónde más puede estar?">🔍 Dónde más</button>` : '');
-  }
-  if (abierta && g.buscado && !(activo && g.cantidad > 1)) acc += `<button class="btn btn-gris btn-chico" onclick='deshacer(${ids})' title="Me equivoqué: restar una">−1</button>`;
-  if (abierta && g.faltante) acc += `<button class="btn btn-gris btn-chico" onclick='quitarFaltante(${ids})'>Apareció: quitar faltante</button>`;
-  const quien = verQuien() && !enVenta ? `<div class="mb-1"><span class="re-quien ${g.asignado ? '' : 'nadie'}">👤 ${esc(g.asignado ? corto(g.asignado) : 'Sin asignar')}</span></div>` : '';
-  return `<div class="re-card ${cls}" id="g-${g.clave}">${enVenta ? '' : canalesHtml(g.canales)}${quien}
-    <div class="flex items-start gap-2"><div class="flex-1 min-w-0">${titulo}${enVenta ? '' : ventasHtml(g.ventas)}</div>
-      <div class="flex flex-col items-end gap-1"><div class="re-cuenta ${!g.faltan ? 'text-teal-600' : ''}">${g.faltante ? '<span class="text-red-700 text-xs">FALTA ' + g.faltante + '</span> ' : ''}${g.buscado}<span class="text-zinc-400 text-sm">/${g.cantidad}</span></div>
-        ${abierta && activo && g.cantidad > 1 ? `<div class="flex gap-1">${g.buscado ? `<button class="btn btn-gris !px-2 !py-0.5 font-black" onclick='deshacer(${ids})' title="Restar una">−</button>` : ''}${g.faltan ? `<button class="btn btn-turq !px-2 !py-0.5 font-black" onclick='manual(${ids})' title="Sumar una más">+</button>` : ''}</div>` : ''}</div></div>
-    <div class="re-info">${[g.variante ? 'Venta: ' + esc(g.variante) : '', g.vinculado && g.sku && g.sku !== g.sku_odoo ? 'SKU ML ' + esc(g.sku) : '',
-      g.codigo_barras ? 'cód. ' + esc(g.codigo_barras) : '', g.buscado && g.trajo && g.trajo.length ? '✓ trajo ' + esc(g.trajo.map(corto).join(', ')) : ''].filter(Boolean).join(' · ')}</div>
-    ${acc ? `<div class="flex flex-wrap gap-1.5 mt-2">${acc}</div>` : ''}<div id="extra-${g.clave}"></div></div>`;
+    if (g.cantidad > 1 && g.buscado) acc += `<button class="rf-link" onclick='deshacer(${ids})' title="Restar una">−1</button>`;
+    acc += `<button class="rf-link rojo" onclick='faltante(${ids})'>✗ No está</button>`;
+    if (g.vinculado) acc += `<button class="rf-link" onclick="donde(${g.item_ids[0]}, '${g.clave}')">🔍 Dónde más</button>`;
+  } else if (abierta && g.buscado) acc += `<button class="rf-link" onclick='deshacer(${ids})' title="Me equivoqué: restar una">−1</button>`;
+  if (abierta && g.faltante) acc += `<button class="rf-link" onclick='quitarFaltante(${ids})'>Apareció: quitar faltante</button>`;
+  const detalle = [g.vinculado && g.variante ? 'Venta: ' + g.variante : '', g.vinculado && g.sku && g.sku !== g.sku_odoo ? 'SKU ML ' + g.sku : '',
+    g.codigo_barras ? 'cód. ' + g.codigo_barras : '', g.buscado && g.trajo && g.trajo.length ? 'trajo ' + g.trajo.map(corto).join(', ') : ''].filter(Boolean).join(' · ');
+  return `<div class="re-card ${cls}" id="g-${g.clave}" title="${esc(detalle)}">${enVenta ? '' : canalesHtml(g.canales)}${quien}
+    <div class="rf">${cab}${boton}</div>
+    <div class="rf-pie">${ventas}${ub}<span class="rf-hora">${hora}${hora ? ' · ' : ''}<span class="rf-cant">${g.faltante ? `<span class="text-red-700">falta ${g.faltante} · </span>` : ''}${g.buscado}/${g.cantidad}</span></span></div>
+    ${acc ? `<div class="rf-acc">${acc}</div>` : ''}<div id="extra-${g.clave}"></div></div>`;
 }
 async function donde(iid, clave) {
   const el = document.getElementById('extra-' + clave);

@@ -31,7 +31,8 @@ def venta_corta(p: ControlPaquete) -> dict:
     """Número de venta para mostrar en la ficha: ML = nº de venta (o envío), TN = nº de orden, cambio = CAM-…"""
     canal = CANAL.get(p.tipo or "", "")
     numero = (p.venta_id or p.tracking) if canal == "ml" else p.tracking
-    return {"canal": canal, "numero": str(numero or ""), "tracking": p.tracking, "tipo": NOMBRES_TIPO.get(p.tipo, p.tipo or "")}
+    return {"canal": canal, "numero": str(numero or ""), "tracking": p.tracking, "tipo": NOMBRES_TIPO.get(p.tipo, p.tipo or ""),
+            "hora": p.creado_at.strftime("%H:%M") if p.creado_at else ""}
 
 
 # ─────────────────────────── crear ───────────────────────────
@@ -311,13 +312,21 @@ def grupos_de(c: Control, usuario_id: int | None = None, solo_pendientes: bool =
             "color": i.color, "talle": i.talle, "codigo_barras": i.codigo_barras, "sku": i.sku,
             "producto": i.producto, "variante": i.variante, "ubicacion": i.ubicacion, "vinculado": bool(i.articulo_id),
             "cantidad": 0, "buscado": 0, "faltan": 0, "faltante": 0, "paquetes": [], "en_box": 0, "boxes": [],
-            "asignado": i.asignado.nombre if i.asignado else "", "ventas": [], "canales": [], "sku_odoo": ""})
+            "asignado": i.asignado.nombre if i.asignado else "", "ventas": [], "canales": [], "sku_odoo": "",
+            "entro": "", "juntada": ""})
         g["item_ids"].append(i.id)
         vc = venta_corta(i.paquete)
         if vc["numero"] and vc["numero"] not in [v["numero"] for v in g["ventas"]]:
             g["ventas"].append(vc)
         if vc["canal"] and vc["canal"] not in g["canales"]:
             g["canales"].append(vc["canal"])
+        # hora en que entró la venta (la primera) y en que se juntó la prenda (la última)
+        if vc["hora"] and (not g["entro"] or vc["hora"] < g["entro"]):
+            g["entro"] = vc["hora"]
+        if i.buscado_at and i.buscado:
+            h = i.buscado_at.strftime("%H:%M")
+            if h > g["juntada"]:
+                g["juntada"] = h
         if i.buscado and i.buscado_por and i.buscado_por.nombre not in g["trajo"]:
             g["trajo"].append(i.buscado_por.nombre)
         g["cantidad"] += i.cantidad

@@ -296,7 +296,9 @@ def test_fichas_con_canal_ventas_y_sku_odoo():
         gs = c.get(f"/ecommerce/api/{cid}/todo").json()["grupos"]
         ml = next(g for g in gs if g["sku"] == "W-2055-BLK-S")
         assert ml["sku_odoo"] == "1-CAMP-W-02055-BLCK-S-PARK" and ml["canales"] == ["ml"]
-        assert {"canal": "ml", "numero": "2000015379915829", "tracking": "48185193093", "tipo": "Flex"} in ml["ventas"]
+        v = next(x for x in ml["ventas"] if x["tracking"] == "48185193093")
+        assert (v["canal"], v["numero"], v["tipo"]) == ("ml", "2000015379915829", "Flex")
+        assert len(v["hora"]) == 5 and ml["entro"] == min(x["hora"] for x in ml["ventas"])   # hora en que entró (HH:MM)
         tn = next(g for g in gs if "tn" in g["canales"])
         assert tn["ventas"][0]["canal"] == "tn" and tn["ventas"][0]["numero"] == tn["ventas"][0]["tracking"]
         assert c.get("/ecommerce").status_code == 200

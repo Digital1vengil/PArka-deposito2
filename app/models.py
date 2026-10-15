@@ -423,6 +423,7 @@ class ControlPaquete(Base):
     etiqueta: Mapped[str] = mapped_column(String(20), default="")   # ML: por_imprimir | lista (etiqueta ya impresa)
     cancelado: Mapped[bool] = mapped_column(Boolean, default=False)   # la venta se canceló: NO despachar
     cancelado_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    creado_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, default=ahora)  # cuándo entró la venta
     iniciado_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     controlado_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     controlado_por_id: Mapped[Optional[int]] = mapped_column(ForeignKey("usuarios.id"), nullable=True)
