@@ -30,6 +30,34 @@ def pagina(request: Request, u: Usuario = Depends(acceso), db: Session = Depends
                   est=est)
 
 
+@router.get("/sin-codigo.xlsx")
+def sin_codigo(u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    """Parka / Puffers / No Brand activos que en Odoo no tienen código de barras (para cargárselo allá)."""
+    import io
+    from fastapi.responses import Response
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    from ..services.devoluciones import color_talle, es_conteo, marca
+    arts = db.scalars(select(Articulo).where(Articulo.codigo_barras == "", Articulo.sku != "",
+                                             Articulo.inactivo.is_not(True), es_conteo())
+                      .order_by(Articulo.articulo, Articulo.sku)).all()
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sin código"
+    ws.append(["Artículo", "Color", "Talle", "Marca", "SKU (Referencia interna)", "Categoría", "ID Odoo"])
+    for c in ws[1]:
+        c.font = Font(bold=True)
+    for a in arts:
+        color, talle = color_talle(a)
+        ws.append([a.articulo, color, talle, marca(a), a.sku, a.categoria, a.odoo_id])
+    for col, ancho in zip("ABCDEFG", (24, 18, 8, 10, 34, 16, 10)):
+        ws.column_dimensions[col].width = ancho
+    buf = io.BytesIO()
+    wb.save(buf)
+    return Response(buf.getvalue(), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": 'attachment; filename="articulos_sin_codigo.xlsx"'})
+
+
 @router.get("/api/buscar")
 def buscar(q: str = "", u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
     res, exacto = catalogo.buscar(db, q, limite=100)

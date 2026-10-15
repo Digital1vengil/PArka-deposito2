@@ -5,7 +5,8 @@
 <div class="flex flex-wrap items-end gap-3 mb-5">
   <div>
     <h1 class="text-2xl font-bold">🏷️ Artículos</h1>
-    <p class="text-xs text-zinc-400">{{ total }} artículos · {{ con_codigo }} con código de barras{% if ultima %} · actualizado {{ ultima.strftime('%d/%m/%Y') }}{% endif %}</p>
+    <p class="text-xs text-zinc-400">{{ total }} artículos · {{ con_codigo }} con código de barras{% if ultima %} · actualizado {{ ultima.strftime('%d/%m/%Y') }}{% endif %}
+      · <a class="underline" href="/articulos/sin-codigo.xlsx" title="Parka, Puffers y No Brand activos sin código de barras: para cargárselo en Odoo">⬇ Sin código (Parka / Puffers / No Brand)</a></p>
   </div>
 </div>
 

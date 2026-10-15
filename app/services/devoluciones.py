@@ -85,7 +85,9 @@ def buscar_modelos(db: Session, q: str, limite: int = 30, filtro=None) -> list[d
     if not q:
         return []
     filtro = es_parka_o_puffers() if filtro is None else filtro
-    base = select(Articulo).where(Articulo.codigo_barras != "", Articulo.inactivo.is_not(True), filtro)
+    # Entran todas las variantes activas de Odoo, también las que todavía no tienen código de barras
+    # (se marcan "sin código": la etiqueta sale con el SKU y se listan para cargarles código en Odoo)
+    base = select(Articulo).where(or_(Articulo.codigo_barras != "", Articulo.sku != ""), Articulo.inactivo.is_not(True), filtro)
     if q.isdigit() and len(q) >= 8:
         from .catalogo import por_codigo
         por_codigo(db, q)  # si el código no está local, lo trae de Odoo
@@ -95,7 +97,8 @@ def buscar_modelos(db: Session, q: str, limite: int = 30, filtro=None) -> list[d
     else:
         cond = [condicion_token(p) for p in tokens_busqueda(q)]
         modelos_q = []
-        for (m,) in db.execute(select(Articulo.articulo).where(Articulo.codigo_barras != "", Articulo.inactivo.is_not(True), filtro, *cond)
+        for (m,) in db.execute(select(Articulo.articulo).where(or_(Articulo.codigo_barras != "", Articulo.sku != ""),
+                                                               Articulo.inactivo.is_not(True), filtro, *cond)
                                .distinct().order_by(Articulo.articulo).limit(limite)).all():
             modelos_q.append(m)
     salida = []
@@ -105,7 +108,7 @@ def buscar_modelos(db: Session, q: str, limite: int = 30, filtro=None) -> list[d
         for a in vs:
             color, talle = color_talle(a)
             variantes.append({"id": a.id, "color": color, "talle": talle, "marca": marca(a), "sku": a.sku,
-                              "codigo_barras": a.codigo_barras, "nombre": a.nombre})
+                              "codigo_barras": a.codigo_barras, "nombre": a.nombre, "sin_codigo": not a.codigo_barras})
         salida.append({"articulo": m, "variantes": variantes,
                        "preseleccion": exacto.id if exacto and exacto.articulo == m else None})
     return salida
@@ -119,7 +122,7 @@ def enviar(dev: Devolucion) -> dict:
         "fecha": dev.creado_at.isoformat(timespec="seconds"),
         "plataforma": dev.plataforma or "",
         # "sector" lleva la plataforma (ML / TN) para que se vea en la columna del Excel de Drive
-        "items": [{"codigo": i.codigo_barras, "articulo": i.articulo, "color": i.color, "talle": i.talle,
+        "items": [{"codigo": i.codigo_barras or i.sku, "articulo": i.articulo, "color": i.color, "talle": i.talle,
                    "estado": i.estado, "cantidad": i.cantidad, "sector": i.plataforma or "",
                    "plataforma": i.plataforma or ""} for i in dev.items],
     }

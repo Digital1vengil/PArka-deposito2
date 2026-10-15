@@ -64,8 +64,8 @@ def confirmar(body: ConfirmarIn, u: Usuario = Depends(acceso), db: Session = Dep
     db.add(c)
     for aid, cant in cantidades.items():
         a = db.get(Articulo, aid)
-        if not a or not a.codigo_barras:
-            raise HTTPException(400, "Hay un artículo que no existe o no tiene código de barras")
+        if not a or a.inactivo:
+            raise HTTPException(400, "Hay un artículo que no existe o está archivado en Odoo")
         m = svc.marca(a)
         if m not in MARCAS_CONTEO:
             raise HTTPException(400, f"{a.nombre}: el conteo es solo de artículos Parka, Puffers o No Brand")

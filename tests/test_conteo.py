@@ -43,3 +43,31 @@ def test_flujo_conteo():
         assert c.get("/conteo/api/historial").json()["conteos"][0]["id"] == ct["id"]
         assert c.post("/conteo/api/confirmar", json={"items": []}).status_code == 400
         assert "conteos hoy" in c.get("/").text
+
+
+def test_variantes_sin_codigo_de_barras():
+    """Las variantes de Odoo sin código de barras también se cuentan y se devuelven (marcadas "sin código")."""
+    from app.db import SessionLocal
+    from app.models import Articulo
+    with SessionLocal() as db:
+        db.add_all([Articulo(sku="1-BANA-M-ZZTST-BLCK-M-PARK", codigo_barras="", nombre="ZZTEST (BLACK, M, Parka)",
+                             articulo="ZZTEST", variante="BLACK, M, Parka", color="BLCK", talle="M", odoo_id=999901),
+                    Articulo(sku="1-BANA-M-ZZTST-BLCK-L-NOBR", codigo_barras="", nombre="ZZTEST (BLACK, L, no brand)",
+                             articulo="ZZTEST", variante="BLACK, L, no brand", color="BLCK", talle="L", odoo_id=999902)])
+        db.commit()
+    with TestClient(app) as c:
+        _login(c)
+        m = c.get("/conteo/api/buscar?q=zztest").json()["modelos"]
+        vs = m[0]["variantes"]
+        assert {v["marca"] for v in vs} == {"Parka", "No Brand"} and all(v["sin_codigo"] for v in vs)
+        ct = c.post("/conteo/api/confirmar", json={"items": [{"articulo_id": vs[0]["id"], "cantidad": 2}]}).json()["conteo"]
+        assert ct["total"] == 2
+        pdf = c.get(f"/conteo/{ct['id']}/etiquetas.pdf")
+        assert pdf.status_code == 200 and pdf.content[:4] == b"%PDF"
+        # devoluciones: solo Parka / Puffers, también sin código
+        d = c.get("/devoluciones/api/buscar?q=zztest").json()["modelos"]
+        assert [v["marca"] for v in d[0]["variantes"]] == ["Parka"]
+        x = c.get("/articulos/sin-codigo.xlsx")
+        assert x.status_code == 200
+        ws = load_workbook(io.BytesIO(x.content)).active
+        assert "1-BANA-M-ZZTST-BLCK-M-PARK" in [r[4] for r in ws.iter_rows(min_row=2, values_only=True)]
