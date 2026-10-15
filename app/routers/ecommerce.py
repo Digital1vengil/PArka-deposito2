@@ -453,6 +453,30 @@ class BoxCantIn(BaseModel):
     cantidad: int
 
 
+class MesaIn(BaseModel):
+    codigo: str
+    box_id: int | None = None
+    paquete_id: int | None = None
+
+
+@router.post("/api/{cid}/mesa/escanear")
+def mesa_escanear(cid: int, body: MesaIn, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    """Mesa de control por BOX, dentro de la búsqueda."""
+    c = _control(db, cid)
+    if c.estado != "abierto":
+        raise HTTPException(400, "La búsqueda está cerrada")
+    cod = body.codigo.strip()
+    if not cod:
+        raise HTTPException(400, "Código vacío")
+    r = svc.mesa_escanear(db, c, u, cod, body.box_id, body.paquete_id)
+    pq = r.get("paquete") or {}
+    if r.get("tipo") == "prenda" and r.get("ok") is False:
+        registrar(db, u, "control_error", f"{pq.get('tracking', '')}: {r.get('escaneado') or cod}", "control")
+    elif r.get("completo"):
+        registrar(db, u, "control_completo", f"{pq.get('tracking', '')} · {pq.get('comprador', '')}", "control")
+    return r
+
+
 @router.post("/api/box/cantidad")
 def box_cantidad(body: BoxCantIn, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
     """Cuántas prendas lleva cada BOX (lo cambia quien organiza)."""

@@ -448,7 +448,17 @@ def _ocupado(b: ControlBox) -> int:
 
 
 def boxes_de(c: Control, usuario_id: int) -> list[ControlBox]:
-    return sorted((b for b in c.boxes if b.usuario_id == usuario_id), key=lambda b: b.numero)
+    """Los BOX de la persona en el orden en que los armó (el último es el que está llenando)."""
+    return sorted((b for b in c.boxes if b.usuario_id == usuario_id), key=lambda b: (b.creado_at or ahora(), b.id or 0))
+
+
+def numero_libre(c: Control) -> int:
+    """El número de BOX más chico que no está usando nadie en esta búsqueda (no hay dos BOX 1)."""
+    usados = {b.numero for b in c.boxes}
+    n = 1
+    while n in usados:
+        n += 1
+    return n
 
 
 def _box_de_venta(p: ControlPaquete, usuario_id: int) -> ControlBox | None:
@@ -460,7 +470,7 @@ def _box_de_venta(p: ControlPaquete, usuario_id: int) -> ControlBox | None:
 
 
 def nombre_box(b: ControlBox) -> str:
-    return (f"{b.usuario.nombre} · " if b.usuario else "") + f"BOX {b.numero}"
+    return f"BOX {b.numero}" + (f" · {b.usuario.nombre}" if b.usuario else "")
 
 
 def en_mano(c: Control, usuario_id: int) -> list[tuple[ControlItem, int]]:
@@ -490,7 +500,8 @@ def asignar_box(db: Session, c: Control, usuario_id: int) -> list[ControlBox]:
         if box is None:
             k = sum(x.cantidad for x in p.items)
             if actual is None or _ocupado(actual) >= cap or (_ocupado(actual) and _ocupado(actual) + k > cap):
-                actual = ControlBox(numero=(actual.numero if actual else 0) + 1, usuario_id=usuario_id)
+                # número único en toda la búsqueda: no hay dos "BOX 1" en la mesa
+                actual = ControlBox(numero=numero_libre(c), usuario_id=usuario_id, creado_at=ahora())
                 c.boxes.append(actual)
             box = actual
         antes.setdefault(id(box), unidades_box(box))
@@ -536,10 +547,10 @@ def estado_box(db: Session, c: Control, usuario_id: int) -> dict:
             "boxes": [{"numero": b.numero, "unidades": unidades_box(b), "activo": box_activo(b)} for b in mios]}
 
 
-def box_json(b: ControlBox) -> dict:
+def box_json(b: ControlBox, mesa: str = "") -> dict:
     ventas = OrderedDict((bi.item.paquete_id, bi.item.paquete) for bi in b.items)
     vs = [_venta_box(p, b) for p in ventas.values()]
-    return {"id": b.id, "numero": b.numero, "activo": box_activo(b), "nombre": nombre_box(b),
+    return {"id": b.id, "numero": b.numero, "activo": box_activo(b), "nombre": nombre_box(b), "mesa": mesa,
             "usuario_id": b.usuario_id, "quien": b.usuario.nombre if b.usuario else "",
             "hora": b.creado_at.strftime("%H:%M") if b.creado_at else "",
             "unidades": unidades_box(b), "ventas": vs,
@@ -552,13 +563,98 @@ def _venta_box(p: ControlPaquete, b: ControlBox) -> dict:
     return {"paquete_id": p.id, "tracking": p.tracking, "venta_id": p.venta_id, "comprador": p.comprador,
             "tipo": NOMBRES_TIPO.get(p.tipo, p.tipo or ""), "estado": p.estado, "cancelado": bool(p.cancelado),
             "unidades": sum(bi.cantidad for bi in lineas), "total": sum(i.cantidad for i in p.items),
+            **{k: v for k, v in venta_corta(p).items() if k in ("canal", "numero")},
+            "escaneadas": sum(min(i.escaneado, i.cantidad) for i in p.items),
+            "items": [{"id": i.id, "articulo": i.articulo or (i.producto or i.sku)[:60], "color": i.color, "talle": i.talle,
+                       "vinculado": bool(i.articulo_id), "cantidad": i.cantidad, "escaneado": min(i.escaneado, i.cantidad),
+                       "faltante": bool(i.faltante)} for i in p.items],
             "prendas": [f"{bi.cantidad}× " + (f"{bi.item.articulo} {bi.item.color} {bi.item.talle}".strip()
                                               if bi.item.articulo_id else (bi.item.producto or bi.item.sku)[:60])
                         for bi in lineas]}
 
 
-def boxes(c: Control) -> list[dict]:
-    """Lista de BOX por persona (en orden de número)."""
-    out = [box_json(b) for b in c.boxes]
-    out.sort(key=lambda x: (x["quien"].lower(), x["numero"]))
+def estado_mesa(c: Control, cap: int) -> dict[int, str]:
+    """Para la mesa de control, cada BOX está:
+    llenando   es el BOX que la persona está armando (no se llenó y le quedan prendas por buscar)
+    lista      ya se puede controlar (se llenó, o la persona terminó, o ya armó otro)
+    controlado todas sus ventas están controladas (o canceladas)"""
+    pend: dict[int, int] = {}
+    for i in _items(c):
+        quien = i.asignado_id
+        if quien:
+            pend[quien] = pend.get(quien, 0) + pendiente_busqueda(i)
+    ultimo = {uid: bs[-1] for uid in {b.usuario_id for b in c.boxes if b.usuario_id} if (bs := boxes_de(c, uid))}
+    out = {}
+    for b in c.boxes:
+        if not box_activo(b):
+            out[b.id] = "controlado"
+        elif ultimo.get(b.usuario_id) is b and unidades_box(b) < cap and pend.get(b.usuario_id, 0) > 0:
+            out[b.id] = "llenando"
+        else:
+            out[b.id] = "lista"
     return out
+
+
+def boxes(c: Control, cap: int | None = None) -> list[dict]:
+    """Todos los BOX de la búsqueda en orden de número, con su estado para la mesa."""
+    if cap is None:
+        db = object_session(c)
+        cap = box_cantidad(db) if db is not None else BOX_DEFECTO
+    est = estado_mesa(c, cap)
+    out = [box_json(b, est.get(b.id, "")) for b in c.boxes]
+    out.sort(key=lambda x: x["numero"])
+    return out
+
+
+def mesa_escanear(db: Session, c: Control, u: Usuario, codigo: str, box_id: int | None,
+                  paquete_id: int | None) -> dict:
+    """Mesa de control por BOX. Con el BOX elegido alcanza con escanear las prendas: la app sabe a qué venta del
+    BOX va cada una (si la etiqueta se escanea, abre esa venta como siempre). Devuelve lo mismo que la mesa vieja
+    (tipo paquete / prenda, ok, motivo, mensaje) más el BOX actualizado."""
+    box = db.get(ControlBox, box_id) if box_id else None
+    if box is not None and box.control_id != c.id:
+        box = None
+    cap = box_cantidad(db)
+
+    def con_box(r: dict) -> dict:
+        if box is not None:
+            db.refresh(box)
+            r["box"] = box_json(box, estado_mesa(c, cap).get(box.id, ""))
+        return r
+    p = csvc.buscar_paquete(c, codigo)
+    if p is not None:
+        if p.cancelado:
+            return con_box({"tipo": "prenda", "ok": False, "motivo": "cancelado", "paquete": csvc.paquete_json(p),
+                            "mensaje": f"⛔ VENTA CANCELADA · NO DESPACHAR ({p.tracking}). Sacá las prendas y devolvelas a su lugar."})
+        en_este = box is None or any(bi.item.paquete_id == p.id for bi in box.items)
+        return con_box({"tipo": "paquete", "paquete": csvc.paquete_json(p), "en_este_box": en_este,
+                        "aviso": "" if en_este else "Esta venta no está en este BOX"})
+    actual = db.get(ControlPaquete, paquete_id) if paquete_id else None
+    if actual is not None and actual.control_id == c.id and actual.estado not in ("completo",) and not actual.cancelado:
+        r = csvc.escanear_prenda(db, actual, u, codigo)
+        return con_box({"tipo": "prenda", **r, "paquete": csvc.paquete_json(actual)})
+    art = csvc.articulo_de_codigo(db, codigo)
+    if art is None:
+        return con_box({"tipo": "prenda", "ok": False, "motivo": "desconocido",
+                        "mensaje": f"El código {codigo} no está en el catálogo de artículos. No la pongas en el paquete."})
+    if box is not None:
+        ids = {bi.item.paquete_id for bi in box.items}
+        cands = [x for x in c.paquetes if x.id in ids and not x.cancelado and x.estado in ("pendiente", "en_curso")
+                 and any(i.articulo_id and art.id in csvc._ids(i.aceptados) and i.escaneado < i.cantidad and not i.faltante
+                         for i in x.items)]
+        if cands:
+            # primero la venta que ya se empezó; después la que tiene menos prendas (se cierra antes)
+            cands.sort(key=lambda x: (x.estado != "en_curso", sum(i.cantidad for i in x.items), x.id))
+            q = cands[0]
+            r = csvc.escanear_prenda(db, q, u, codigo)
+            return con_box({"tipo": "prenda", **r, "paquete": csvc.paquete_json(q), "auto": True})
+        otros = csvc.paquetes_que_llevan(c, art)
+        donde = sorted({b.numero for x in otros for i in x.items for bi in i.box_items for b in [bi.box]})
+        return con_box({"tipo": "prenda", "ok": False, "motivo": "otro_box", "escaneado": csvc.nombre_art(art),
+                        "mensaje": (f"{csvc.nombre_art(art)} no va en este BOX"
+                                    + (f": va en el BOX {' / '.join(map(str, donde))}" if donde
+                                       else ": no está en ninguna venta pendiente"))})
+    ps = csvc.paquetes_que_llevan(c, art)
+    return {"tipo": "guia", "escaneado": csvc.nombre_art(art),
+            "paquetes": [csvc.paquete_json(x, con_items=False) for x in ps],
+            "mensaje": f"Elegí un BOX o escaneá la etiqueta: {csvc.nombre_art(art)} va en {len(ps)} venta(s)"}

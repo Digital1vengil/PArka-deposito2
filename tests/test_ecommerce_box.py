@@ -63,24 +63,24 @@ def test_venta_de_varias_prendas_va_junta_y_box():
         r = marcar(ana, g)
         assert r["box"]["actual"] == 1
 
-        # Beto también arranca en SU BOX 1
+        # Beto arranca en el BOX 2: el número es único en toda la búsqueda (no hay dos BOX 1 en la mesa)
         gb = next(x for x in beto.get(f"/ecommerce/api/{cid}/mia").json()["grupos"] if x["faltan"])
-        assert marcar(beto, gb)["box"]["actual"] == 1
+        assert marcar(beto, gb)["box"]["actual"] == 2
         bs = adm.get(f"/ecommerce/api/{cid}/boxes").json()
         assert bs["cantidad"] == 2
-        assert sorted((b["quien"], b["numero"]) for b in bs["boxes"]) == [("Ana", 1), ("Beto", 1)]
+        assert [(b["quien"], b["numero"]) for b in bs["boxes"]] == [("Ana", 1), ("Beto", 2)]
         ba = next(b for b in bs["boxes"] if b["quien"] == "Ana")
-        assert ba["nombre"] == "Ana · BOX 1" and ba["activo"] and ba["esperando"] == 1
+        assert ba["nombre"] == "BOX 1 · Ana" and ba["activo"] and ba["esperando"] == 1
         venta = ba["ventas"][0]
 
         # mesa de control: al escanear la etiqueta dice de quién y qué BOX
         p = ana.post(f"/control/api/{cid}/escanear", json={"codigo": venta["tracking"]}).json()
         assert p["tipo"] == "paquete" and p["paquete"]["boxes"] == [1]
-        assert p["paquete"]["boxes_det"][0]["nombre"] == "Ana · BOX 1"
+        assert p["paquete"]["boxes_det"][0]["nombre"] == "BOX 1 · Ana"
 
 
 def test_box_por_persona_se_llena_solo_y_no_parte_ventas():
-    """Servicio: de a N prendas por BOX, numerados por persona, una venta entera en el mismo BOX."""
+    """Servicio: de a N prendas por BOX, número único en la búsqueda, una venta entera en el mismo BOX."""
     from app.db import SessionLocal
     from app.models import Control, ControlItem, ControlPaquete, Usuario
     from app.services import ajustes
@@ -115,10 +115,10 @@ def test_box_por_persona_se_llena_solo_y_no_parte_ventas():
         assert marcar(items[3], u) == []
         assert marcar(items[4], u) == [2]                # BOX 2 lleno con la venta entera
         assert marcar(items[5], u) == []                 # T3 → BOX 3 (el 1 quedó con 2, la venta no entraba)
-        assert marcar(items[6], otro) == []              # la otra persona arranca en SU BOX 1
+        assert marcar(items[6], otro) == []              # la otra persona: el próximo número libre (BOX 4)
         mios = svc.boxes_de(c, u.id)
         assert [(b.numero, svc.unidades_box(b)) for b in mios] == [(1, 2), (2, 3), (3, 1)]
-        assert [(b.numero, svc.unidades_box(b)) for b in svc.boxes_de(c, otro.id)] == [(1, 1)]
+        assert [(b.numero, svc.unidades_box(b)) for b in svc.boxes_de(c, otro.id)] == [(4, 1)]
         assert svc.estado_box(db, c, u.id)["actual"] == 3
 
         # −1 de la única prenda del BOX 3 → el BOX 3 desaparece
@@ -140,3 +140,39 @@ def test_box_por_persona_se_llena_solo_y_no_parte_ventas():
     finally:
         ajustes.guardar(db, "re_box_cant", "5")
         db.close()
+
+
+def test_mesa_por_box_detecta_la_venta_sola():
+    """Mesa de control por BOX: con el BOX elegido alcanza con escanear las prendas (sin la etiqueta)."""
+    from app.db import SessionLocal
+    from app.models import Articulo
+    with TestClient(app) as adm:
+        _login(adm)
+        cid = _crear(adm)
+        assert adm.post(f"/ecommerce/api/{cid}/sumarme").json()["ok"]
+        assert adm.post("/ecommerce/api/box/cantidad", json={"cantidad": 50}).json()["ok"]
+        gs = [g for g in adm.get(f"/ecommerce/api/{cid}/mia").json()["grupos"] if g["vinculado"] and g["codigo_barras"]]
+        uno = next(g for g in gs if not g["venta"] and g["cantidad"] == 1)
+        assert adm.post(f"/ecommerce/api/{cid}/la-tengo", json={"item_ids": uno["item_ids"]}).json()["ok"]
+        bs = adm.get(f"/ecommerce/api/{cid}/boxes").json()["boxes"]
+        assert len(bs) == 1 and bs[0]["numero"] == 1
+        box = bs[0]
+        # el BOX se está llenando (quedan prendas por buscar y no llegó a 50)
+        assert box["mesa"] == "llenando" and box["ventas"][0]["items"][0]["escaneado"] == 0
+        # una prenda que no está en este BOX
+        otra = next(g for g in gs if g["item_ids"] != uno["item_ids"] and g["codigo_barras"] != uno["codigo_barras"])
+        r = adm.post(f"/ecommerce/api/{cid}/mesa/escanear", json={"codigo": otra["codigo_barras"], "box_id": box["id"]}).json()
+        assert r["ok"] is False and r["motivo"] == "otro_box"
+        # la prenda del BOX: encuentra sola la venta y la controla
+        r = adm.post(f"/ecommerce/api/{cid}/mesa/escanear", json={"codigo": uno["codigo_barras"], "box_id": box["id"]}).json()
+        assert r["ok"] and r["auto"] and r["completo"] and r["paquete"]["estado"] == "completo"
+        assert r["box"]["controladas"] == 1 and r["box"]["mesa"] == "controlado"
+        # otra vez la misma: ya no hay venta pendiente en el BOX que la lleve
+        r = adm.post(f"/ecommerce/api/{cid}/mesa/escanear", json={"codigo": uno["codigo_barras"], "box_id": box["id"]}).json()
+        assert r["ok"] is False
+        # la etiqueta de una venta abre la venta (como la mesa de antes)
+        r = adm.post(f"/ecommerce/api/{cid}/mesa/escanear", json={"codigo": r.get("paquete", {}).get("tracking") or box["ventas"][0]["tracking"],
+                                                               "box_id": box["id"]}).json()
+        assert r["tipo"] == "paquete" and r["en_este_box"]
+        with SessionLocal() as db:
+            assert db.query(Articulo).count() > 0

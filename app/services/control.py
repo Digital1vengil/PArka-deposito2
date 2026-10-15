@@ -297,8 +297,8 @@ def paquete_json(p: ControlPaquete, con_items: bool = True) -> dict:
         for bi in i.box_items:
             b = bi.box
             det.setdefault(b.id, {"numero": b.numero, "quien": b.usuario.nombre if b.usuario else "",
-                                  "nombre": (f"{b.usuario.nombre} · " if b.usuario else "") + f"BOX {b.numero}"})
-    bx = sorted(det.values(), key=lambda x: (x["quien"], x["numero"]))
+                                  "nombre": f"BOX {b.numero}" + (f" · {b.usuario.nombre}" if b.usuario else "")})
+    bx = sorted(det.values(), key=lambda x: x["numero"])
     d["boxes"] = [x["numero"] for x in bx]
     d["boxes_det"] = bx
     d["sin_box"] = total - sum(bi.cantidad for i in p.items for bi in i.box_items) if bx else total
