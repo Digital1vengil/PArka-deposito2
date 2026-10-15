@@ -396,3 +396,15 @@ def test_fecha_de_despacho_y_ventas_que_pasan_a_manana(monkeypatch):
             assert not db.scalar(select(ControlPaquete).where(ControlPaquete.control_id == cid, ControlPaquete.tracking == "101"))
         finally:
             db.close()
+
+
+def test_crear_a_mano_solo_envios_de_hoy(monkeypatch):
+    """Crear la búsqueda a mano: las ventas de "Próximos días" no entran (solo los envíos de hoy)."""
+    _mocks(monkeypatch)
+    with TestClient(app) as c:
+        _login(c)
+        r = c.post("/ecommerce/api/crear/ventas", json={"claves": ["ml:108"], "nombre": "mañana"})
+        assert r.status_code == 400 and "otro día" in r.json()["detail"]
+        r = c.post("/ecommerce/api/crear/ventas", json={"claves": ["ml:101", "ml:108"], "nombre": "mezcla"}).json()
+        trks = {p for g in c.get(f"/ecommerce/api/{r['busqueda']['id']}/todo").json()["grupos"] for p in g["paquetes"]}
+        assert any("101" in t for t in trks) and not any("108" in t for t in trks)

@@ -837,8 +837,15 @@ function despHtml(desp, limite) {
   return `<span class="desp desp-prox" title="ML pide despacharla el ${ddmm}">📅 Sale ${ddmm}</span>`;
 }
 // ───────── canal y números de venta ─────────
-const CANAL_TXT = { ml: 'ML', tn: 'TN', cambio: '🔁' }, CANAL_NOM = { ml: 'Mercado Libre', tn: 'Tienda Nube', cambio: 'Cambio' };
-function canalHtml(c, mini) { return c ? `<span class="canal canal-${c} ${mini ? 'mini' : ''}" title="${CANAL_NOM[c] || c}">${CANAL_TXT[c] || esc(c)}</span>` : ''; }
+// ML se separa en Flex y Colecta (como en el panel de Mercado Libre)
+const CANAL_TXT = { 'ml-flex': 'ML · Flex', 'ml-colecta': 'ML · Colecta', ml: 'ML', tn: 'TN', cambio: '🔁' };
+const CANAL_MINI = { 'ml-flex': 'Flex', 'ml-colecta': 'Colecta' };
+const CANAL_NOM = { 'ml-flex': 'Mercado Libre · Flex', 'ml-colecta': 'Mercado Libre · Colecta', ml: 'Mercado Libre', tn: 'Tienda Nube', cambio: 'Cambio' };
+function canalHtml(c, mini) {
+  if (!c) return '';
+  const base = String(c).split('-')[0], txt = (mini && CANAL_MINI[c]) || CANAL_TXT[c] || esc(c);
+  return `<span class="canal canal-${base} ${mini ? 'mini' : ''}" title="${CANAL_NOM[c] || c}">${txt}</span>`;
+}
 function canalesHtml(cs) { return cs && cs.length ? `<div class="re-canales">${cs.map(c => canalHtml(c)).join('')}</div>` : ''; }
 function ventasHtml(vs) {
   if (!vs || !vs.length) return '';
@@ -877,7 +884,7 @@ function grupoHtml(g, activo, enVenta) {
     g.codigo_barras ? 'cód. ' + g.codigo_barras : '', g.buscado && g.trajo && g.trajo.length ? 'trajo ' + g.trajo.map(corto).join(', ') : ''].filter(Boolean).join(' · ');
   return `<div class="re-card ${cls}" id="g-${g.clave}" title="${esc(detalle)}">${enVenta ? '' : canalesHtml(g.canales)}${quien}
     <div class="rf">${cab}${boton}</div>
-    <div class="rf-pie">${despHtml(g.despacho, g.limite)}${ventas}${ub}<span class="rf-hora">${hora}${hora ? ' · ' : ''}<span class="rf-cant">${g.faltante ? `<span class="text-red-700">falta ${g.faltante} · </span>` : ''}${g.buscado}/${g.cantidad}</span></span></div>
+    <div class="rf-pie">${g.despacho ? despHtml(g.despacho, g.limite) : (g.canales || []).some(c => c.startsWith('ml')) ? '<span class="desp" style="background:var(--soft);color:var(--muted)" title="Mercado Libre no informó el día de despacho">📅 sin fecha</span>' : ''}${ventas}${ub}<span class="rf-hora">${hora}${hora ? ' · ' : ''}<span class="rf-cant">${g.faltante ? `<span class="text-red-700">falta ${g.faltante} · </span>` : ''}${g.buscado}/${g.cantidad}</span></span></div>
     ${acc ? `<div class="rf-acc">${acc}</div>` : ''}<div id="extra-${g.clave}"></div></div>`;
 }
 async function donde(iid, clave) {

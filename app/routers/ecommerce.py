@@ -231,6 +231,9 @@ def crear_ventas(body: VentasIn, u: Usuario = Depends(acceso), db: Session = Dep
     extra = ventas_api.por_claves(body.claves)
     if not extra:
         raise HTTPException(400, "Esas ventas ya no están pendientes: tocá ↻ Actualizar")
+    extra = [p for p in extra if p.get("hoy")]      # la búsqueda es solo de los envíos de hoy
+    if not extra:
+        raise HTTPException(400, "Esas ventas son de otro día: la búsqueda lleva solo los envíos de hoy")
     return _crear(db, u, [], body.nombre, "api", extra)
 
 

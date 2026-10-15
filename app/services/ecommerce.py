@@ -24,13 +24,13 @@ MODO = "ecommerce"
 NOMBRES_TIPO = {"flex": "Flex", "colecta": "Colecta", "tiendanube": "Tienda Nube", "ml": "Mercado Libre",
                 "full": "Full", "cambio": "Cambio"}
 # Canal de cada venta, para el ícono de la ficha: Mercado Libre, Tienda Nube o cambio
-CANAL = {"flex": "ml", "colecta": "ml", "ml": "ml", "full": "ml", "tiendanube": "tn", "cambio": "cambio"}
+CANAL = {"flex": "ml-flex", "colecta": "ml-colecta", "ml": "ml", "full": "ml", "tiendanube": "tn", "cambio": "cambio"}
 
 
 def venta_corta(p: ControlPaquete) -> dict:
     """Número de venta para mostrar en la ficha: ML = nº de venta (o envío), TN = nº de orden, cambio = CAM-…"""
     canal = CANAL.get(p.tipo or "", "")
-    numero = (p.venta_id or p.tracking) if canal == "ml" else p.tracking
+    numero = (p.venta_id or p.tracking) if canal.startswith("ml") else p.tracking
     return {"canal": canal, "numero": str(numero or ""), "tracking": p.tracking, "tipo": NOMBRES_TIPO.get(p.tipo, p.tipo or ""),
             "hora": p.creado_at.strftime("%H:%M") if p.creado_at else "",
             "despacho": p.despacho.isoformat() if p.despacho else "", "limite": p.limite or ""}
