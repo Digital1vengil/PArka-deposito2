@@ -304,6 +304,15 @@
   {% endif %}
 </div>
 
+<dialog id="sv-dlg" style="border:0;border-radius:14px;padding:0;max-width:min(40rem,94vw);width:100%">
+  <div class="p-4">
+    <div class="flex items-center gap-2 mb-2"><b class="flex-1" style="color:var(--verde-osc)">⚠ SKU sin vincular a Odoo</b>
+      <button type="button" class="btn btn-gris btn-chico" onclick="document.getElementById('sv-dlg').close()">Cerrar</button></div>
+    <p class="text-sm text-zinc-500 mb-2">Copiá la lista y pasásela a Claude: con el SKU, el título y la variante se ajusta la fórmula para que crucen solos.</p>
+    <div id="sv-lista" class="text-sm max-h-[50vh] overflow-y-auto"></div>
+    <button type="button" class="btn btn-primario w-full mt-3" onclick="copiarSinVincular(this)">📋 Copiar lista</button>
+  </div>
+</dialog>
 <div id="re-ok"><div><div class="tilde">✔</div><div id="ok-txt" class="text-3xl font-black mt-2">OK</div><div id="ok-sub" class="text-lg mt-2 opacity-90"></div></div></div>
 <div id="re-alerta"><div class="max-w-lg w-full">
   <div class="cruz">✖</div>
@@ -524,7 +533,7 @@ function pintarCabecera() {
   document.getElementById('re-chips').innerHTML = `<span class="chip ${abierta ? 'chip-en_curso' : 'chip-hecha'}">${abierta ? 'ABIERTA' : 'CERRADA'}</span>`
     + `<span class="chip chip-en_curso" title="Total de ventas de la salida (incluye las ya buscadas y controladas)">🧾 ${re.paquetes} ventas</span>`
     + Object.entries(re.tipos).map(([t, n]) => `<span class="chip chip-auto">${esc(t)} ${n}</span>`).join('')
-    + (re.sin_vincular ? `<span class="chip chip-pendiente" title="SKU que no se encontró en el catálogo">${re.sin_vincular} sin vincular</span>` : '')
+    + (re.sin_vincular ? `<button type="button" class="chip chip-pendiente" style="cursor:pointer" onclick="verSinVincular()" title="Ver y copiar los SKU que no se encontraron en Odoo">⚠ ${re.sin_vincular} sin vincular · ver</button>` : '')
     + (b.faltantes ? `<span class="chip chip-vencida">${b.faltantes} faltantes</span>` : '');
   document.getElementById('re-prog-b').textContent = `${b.buscadas} / ${b.unidades} prendas`;
   document.getElementById('re-barra-b').style.width = (b.unidades ? 100 * b.buscadas / b.unidades : 0) + '%';
@@ -790,6 +799,29 @@ async function traje(ids, quien, desdeEscaneo) {
     const r = await api(`/ecommerce/api/${re.id}/la-tengo`, { json: { item_ids: ids, ajena: true } });
     okGrande('LA TRAJISTE VOS', `queda a tu nombre${quien ? ' (era de ' + corto(quien) + ')' : ''}`); cargarTab(); refrescar();
   } catch (e) { toast(e.message, 'error'); }
+}
+// ───────── SKU sin vincular: lista para copiar y pasar ─────────
+let svTexto = '';
+async function verSinVincular() {
+  let gs; try { gs = (await api(`/ecommerce/api/${re.id}/todo`)).grupos; } catch (e) { toast(e.message, 'error'); return; }
+  const vistos = new Map();
+  gs.filter(g => !g.vinculado).forEach(g => {
+    const k = String(g.sku || g.producto || '').toUpperCase();
+    const x = vistos.get(k) || { sku: g.sku || '(sin SKU)', producto: g.producto || '', variante: g.variante || '', ventas: [] };
+    (g.ventas || []).forEach(v => { if (!x.ventas.includes(v.numero)) x.ventas.push(v.numero); });
+    vistos.set(k, x);
+  });
+  const xs = [...vistos.values()];
+  svTexto = xs.map(x => `${x.sku} | ${x.producto}${x.variante ? ' | ' + x.variante : ''}`).join('\n');
+  document.getElementById('sv-lista').innerHTML = xs.length ? xs.map(x => `<div class="py-2 border-b last:border-0" style="border-color:var(--line)">
+      <div class="font-mono font-semibold">${esc(x.sku)}</div><div>${esc(x.producto)}</div>
+      <div class="text-xs text-zinc-500">${esc(x.variante)}${x.ventas.length ? ' · venta ' + x.ventas.map(esc).join(', ') : ''}</div></div>`).join('')
+    : '<p class="text-zinc-500">No hay SKU sin vincular en esta búsqueda.</p>';
+  document.getElementById('sv-dlg').showModal();
+}
+async function copiarSinVincular(b) {
+  try { await navigator.clipboard.writeText(svTexto); b.textContent = '✓ Copiada'; setTimeout(() => b.textContent = '📋 Copiar lista', 1800); }
+  catch { prompt('Copiá la lista:', svTexto); }
 }
 // ───────── canal y números de venta ─────────
 const CANAL_TXT = { ml: 'ML', tn: 'TN', cambio: '🔁' }, CANAL_NOM = { ml: 'Mercado Libre', tn: 'Tienda Nube', cambio: 'Cambio' };

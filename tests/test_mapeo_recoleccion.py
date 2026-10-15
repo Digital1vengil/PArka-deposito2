@@ -100,7 +100,8 @@ def test_sku_viejo_de_ml_cruza_solo_con_odoo():
     skus = ["1-CAMP-M-00114-BLCK-S-NOBR", "1-CAMP-M-00114-BLCK-S-PARK", "1-CAMP-M-00114-GREN-S-PARK",
             "1-CAMP-M-00114-GREY-S-PARK", "1-CAMP-W-02038-BEIG-S-PARK", "1-CAMP-W-02038-BLCK-S-PARK",
             "1-CAMP-W-02038-MGRN-S-PARK", "1-CAMP-W-02038-MGRN-M-PARK", "1-CAMP-W-02079-OFWH-M-PARK",
-            "1-CAMP-M-PUFCO-BLCK-M-NOBR", "1-CAMP-M-PUFCO-BLCK-M-PARK", "1-CAMP-M-PUFCO-BLCK-S-PARK"]
+            "1-CAMP-M-PUFCO-BLCK-M-NOBR", "1-CAMP-M-PUFCO-BLCK-M-PARK", "1-CAMP-M-PUFCO-BLCK-S-PARK",
+            "1-CAMP-M-WORKJ-GREN-L-PARK"]
     with SessionLocal() as db:
         for i, s in enumerate(skus):
             if not db.query(Articulo).filter(Articulo.sku == s).first():
@@ -114,7 +115,8 @@ def test_sku_viejo_de_ml_cruza_solo_con_odoo():
                  "w-2038-military-green-m": "1-CAMP-W-02038-MGRN-M-PARK", "w_2038_blk_s": "1-CAMP-W-02038-BLCK-S-PARK",
                  "W-2079-OFFW-M": "1-CAMP-W-02079-OFWH-M-PARK",            # Off White: OFFW ~ OFWH
                  "PUFCOMBI-BLK-M": "1-CAMP-M-PUFCO-BLCK-M-PARK",           # modelo con nombre y sin género
-                 "PUFCOMBI-BLK-S": "1-CAMP-M-PUFCO-BLCK-S-PARK"}
+                 "PUFCOMBI-BLK-S": "1-CAMP-M-PUFCO-BLCK-S-PARK",
+                 "WORKJAC2-GRN-L": "1-CAMP-M-WORKJ-GREN-L-PARK"}           # ORIGIN 00002: nombre con número
         for viejo, odoo in casos.items():
             a = articulo_por_sku(db, viejo)
             assert a is not None and a.sku == odoo, (viejo, a.sku if a else None)

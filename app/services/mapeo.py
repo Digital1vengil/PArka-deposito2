@@ -101,7 +101,8 @@ _TALLE_SKU = re.compile(r"^(XXXS|XXS|XS|S|M|L|XL|XXL|XXXL|XXXXL|[2-6]XL|U|UNI|UN
 def partes_sku_ml(sku: str) -> tuple[str, str, str, str] | None:
     """SKU viejo de ML → (género o "", modelo como en Odoo, color, talle).
     - con número: "m-114-blk-s" → ("M", "00114", "BLK", "S"); "W 2038 beige S", "w-2038-military-green-s"
-    - con nombre y sin género: "PUFCOMBI-BLK-M" → ("", "PUFCO", "BLK", "M") (Odoo usa las 5 primeras letras)
+    - con nombre y sin género: "PUFCOMBI-BLK-M" → ("", "PUFCO", "BLK", "M"), "WORKJAC2-GRN-L" → ("", "WORKJ", …)
+      (Odoo usa las 5 primeras letras)
     Acepta minúsculas, espacios o _ en vez de guiones y colores de varias palabras."""
     t = re.sub(r"[\s_./]+", "-", (sku or "").strip().upper()).strip("-")
     p = [x for x in t.split("-") if x]
@@ -112,7 +113,8 @@ def partes_sku_ml(sku: str) -> tuple[str, str, str, str] | None:
     modelo = resto[0]
     if modelo.isdigit() and len(modelo) <= 5:
         modelo = modelo.lstrip("0").zfill(5)
-    elif modelo.isalnum() and len(modelo) >= 4 and not modelo.isdigit() and genero or (modelo.isalpha() and len(modelo) >= 5):
+    elif (modelo.isalnum() and len(modelo) >= 4 and not modelo.isdigit() and genero) or re.match(r"^[A-Z]{5}[A-Z0-9]*$", modelo):
+        # con nombre: Odoo guarda las 5 primeras letras (PUFCOMBI → PUFCO, WORKJAC2 → WORKJ)
         modelo = modelo[:5]
     else:
         return None

@@ -105,7 +105,7 @@ def test_flujo_completo():
         cid = b["id"]
         assert b["paquetes"] == 17 and b["busqueda"]["unidades"] == 18
         assert b["tipos"] == {"Flex": 7, "Colecta": 5, "Tienda Nube": 5}
-        assert b["busqueda"]["sin_asignar"] == 18 and b["sin_vincular"] == 2  # WORKJAC2 ×2 (PUFCOMBI ya cruza: DUNE PUFCOMBI)
+        assert b["busqueda"]["sin_asignar"] == 18 and b["sin_vincular"] == 0  # WORKJAC2 → ORIGIN 00002 y PUFCOMBI → DUNE PUFCOMBI ya cruzan
 
         # se suman: la ruta se reparte en dos tramos parejos
         assert ana.post(f"/ecommerce/api/{cid}/sumarme").json()["busqueda"]["me_sume"]
@@ -138,8 +138,8 @@ def test_flujo_completo():
             assert not r["ok"]
         # sumar a mano una prenda vinculada: no (se escanea)
         assert ana.post(f"/ecommerce/api/{cid}/la-tengo", json={"item_ids": g["item_ids"]}).status_code == 400
-        # sin vincular: sí
-        sv = next((x for x in mia_ana + mia_beto if not x["vinculado"]), None)
+        # a mano ("✓ La tengo") con una que falta buscar: sí (los datos de prueba ya cruzan todos con Odoo)
+        sv = next((x for x in mia_ana + mia_beto if x["faltan"] and x["clave"] != g["clave"]), None)
         quien = ana if sv in mia_ana else beto
         assert quien.post(f"/ecommerce/api/{cid}/la-tengo", json={"item_ids": sv["item_ids"]}).json()["ok"]
         # −1
