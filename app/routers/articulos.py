@@ -122,3 +122,70 @@ async def importar(archivo: UploadFile = File(...), reemplazar: bool = Form(Fals
 @router.get("/api/importar/estado")
 def importar_estado(u: Usuario = Depends(acceso)):
     return IMPORT
+
+
+# ─────────────── Cruce de SKU (ML / TN ↔ Odoo) ───────────────
+from pydantic import BaseModel  # noqa: E402
+
+from ..services import cruce_sku  # noqa: E402
+
+
+@router.get("/cruce-sku")
+def cruce_pagina(request: Request, u: Usuario = Depends(acceso)):
+    return render(request, "cruce_sku.html", u=u)
+
+
+@router.get("/api/cruce-sku")
+def cruce_listar(u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    return cruce_sku.listar(db)
+
+
+class CruceIn(BaseModel):
+    sku: str
+    articulo_id: int
+
+
+@router.post("/api/cruce-sku/confirmar")
+def cruce_confirmar(body: CruceIn, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    try:
+        n = cruce_sku.confirmar(db, body.sku, body.articulo_id, u)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    registrar(db, u, "sku_vinculado", f"Cruce SKU {body.sku.upper()} → artículo {body.articulo_id}", "articulos")
+    return {"ok": True, "aplicados": n}
+
+
+class SkuIn(BaseModel):
+    sku: str
+
+
+@router.post("/api/cruce-sku/quitar")
+def cruce_quitar(body: SkuIn, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    if not cruce_sku.quitar(db, body.sku):
+        raise HTTPException(404, "Ese SKU no tenía cruce confirmado")
+    registrar(db, u, "sku_vinculado", f"Cruce SKU quitado: {body.sku.upper()}", "articulos")
+    return {"ok": True}
+
+
+@router.post("/api/cruce-sku/automaticos")
+def cruce_automaticos(u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    n = cruce_sku.confirmar_automaticos(db, u)
+    registrar(db, u, "sku_vinculado", f"Cruce SKU: {n} automáticos confirmados", "articulos")
+    return {"ok": True, "confirmados": n}
+
+
+@router.get("/cruce-sku.xlsx")
+def cruce_excel(u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    from fastapi.responses import Response
+    return Response(cruce_sku.excel(db), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": 'attachment; filename="cruce_sku.xlsx"'})
+
+
+@router.post("/api/cruce-sku/importar")
+async def cruce_importar(archivo: UploadFile = File(...), u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    try:
+        r = cruce_sku.importar(db, await archivo.read(), u)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    registrar(db, u, "sku_vinculado", f"Cruce SKU importado: {r['confirmados']} filas", "articulos")
+    return {"ok": True, **r}

@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% block titulo %}Cruce de SKU · {{ APP_NOMBRE }}{% endblock %}
+{% block main_class %}max-w-7xl mx-auto px-4 py-6{% endblock %}
+{% block contenido %}
+<a href="/articulos" class="text-sm text-zinc-500 hover:text-violeta">← Artículos</a>
+<h1 class="text-2xl font-bold mb-1">🔗 Cruce de SKU · Mercado Libre / Tienda Nube ↔ Odoo</h1>
+<p class="text-sm text-zinc-500 mb-4">Cada SKU que llegó en las ventas y la variante de Odoo que le corresponde. La Recolección usa los
+  <b>confirmados</b>; los <b>automáticos</b> la app los cruzó sola por el formato (género-número-color-talle) y los <b>sugeridos</b> salen del título
+  de la publicación: revisalos antes de confirmar. No se cambia nada en Mercado Libre ni en Odoo.</p>
+
+<section class="card p-4 mb-4">
+  <div class="flex flex-wrap items-center gap-2">
+    <div id="filtros" class="opcs"></div>
+    <div class="ml-auto flex flex-wrap gap-2">
+      <button id="btn-auto" class="btn btn-primario btn-chico" onclick="confirmarAutomaticos(this)">✔ Confirmar todos los automáticos</button>
+      <a class="btn btn-gris btn-chico" href="/articulos/cruce-sku.xlsx">⬇ Excel</a>
+      <label class="btn btn-gris btn-chico cursor-pointer">⬆ Importar Excel<input type="file" accept=".xlsx" class="hidden" onchange="importar(this)"></label>
+    </div>
+  </div>
+  <input id="q" class="input mt-3" placeholder="Buscar por SKU de ML, SKU de Odoo, título o artículo…" autocomplete="off">
+  <p class="text-xs text-zinc-500 mt-2">Importar: un Excel con las columnas <b>SKU ML / TN</b> y <b>SKU Odoo</b> (o <b>Código de barras</b>); el mismo formato que baja "Excel".</p>
+</section>
+
+<section class="card p-0 overflow-hidden">
+  <div id="lista" class="flex flex-col"><p class="p-6 text-center text-zinc-500">Cargando…</p></div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+const NOM = { todos: 'Todos', vinculado: 'Confirmados', igual: 'Igual a Odoo', automatico: 'Automáticos', sugerido: 'Sugeridos', sin_cruce: 'Sin cruce' };
+const CHIP = { vinculado: 'chip-hecha', igual: 'chip-hecha', automatico: 'chip-en_curso', sugerido: 'chip-pendiente', sin_cruce: 'chip-alta' };
+let D = { filas: [], cuentas: {}, total: 0 }, filtro = 'todos', abierto = null, tQ = null, tBus = null;
+const q = document.getElementById('q');
+q.addEventListener('input', () => { clearTimeout(tQ); tQ = setTimeout(pintar, 200); });
+
+async function cargar() {
+  D = await api('/articulos/api/cruce-sku');
+  if (filtro === 'todos') filtro = D.cuentas.sin_cruce ? 'sin_cruce' : D.cuentas.sugerido ? 'sugerido' : D.cuentas.automatico ? 'automatico' : 'todos';
+  pintar();
+}
+function elegirFiltro(f) { filtro = f; abierto = null; pintar(); }
+const artTxt = a => a ? `${esc(a.articulo)} · ${esc(a.color)} · ${esc(a.talle)} · ${esc(a.marca)}` : '';
+
+function pintar() {
+  document.getElementById('filtros').innerHTML = ['todos', 'sin_cruce', 'sugerido', 'automatico', 'vinculado', 'igual'].map(f =>
+    `<button type="button" class="opc ${f === filtro ? 'activo' : ''}" onclick="elegirFiltro('${f}')">${NOM[f]}<span class="n">${f === 'todos' ? D.total : (D.cuentas[f] || 0)}</span></button>`).join('');
+  document.getElementById('btn-auto').disabled = !D.cuentas.automatico;
+  const t = q.value.trim().toUpperCase();
+  let xs = D.filas.filter(f => filtro === 'todos' || f.estado === filtro);
+  if (t) xs = xs.filter(f => [f.sku, f.producto, f.variante, f.articulo?.sku, f.articulo?.articulo].some(v => String(v || '').toUpperCase().includes(t)));
+  const total = xs.length;
+  xs = xs.slice(0, 300);
+  document.getElementById('lista').innerHTML = !total ? '<p class="p-6 text-center text-zinc-500">No hay SKU en esta lista.</p>' :
+    xs.map(fila).join('') + (total > xs.length ? `<p class="p-3 text-center text-xs text-zinc-500">Se muestran 300 de ${total}: usá el buscador.</p>` : '');
+}
+function fila(f) {
+  const a = f.articulo, i = D.filas.indexOf(f);
+  const confirmable = a && (f.estado === 'automatico' || f.estado === 'sugerido');
+  return `<div class="p-3 border-b border-zinc-700 last:border-0">
+    <div class="flex flex-wrap items-start gap-3">
+      <div class="min-w-[220px] flex-1">
+        <div class="flex items-center gap-2"><b class="font-mono text-sm">${esc(f.sku)}</b><span class="chip ${CHIP[f.estado]}">${NOM[f.estado]}</span>
+          ${f.ventas ? `<span class="text-xs text-zinc-500">${f.ventas} venta${f.ventas === 1 ? '' : 's'}</span>` : ''}</div>
+        <div class="text-xs text-zinc-500 truncate" title="${esc(f.producto)}">${esc(f.producto) || '—'}${f.variante ? ' · ' + esc(f.variante) : ''}</div>
+      </div>
+      <div class="min-w-[260px] flex-1">
+        ${a ? `<div class="font-mono text-xs">${esc(a.sku)}</div><div class="text-sm">${artTxt(a)}</div>
+               ${!a.codigo_barras ? '<span class="sin-cod">sin código</span>' : ''}`
+            : '<div class="text-sm text-red-600">Sin artículo de Odoo</div>'}
+        ${f.estado === 'vinculado' && f.por ? `<div class="text-xs text-zinc-500">Confirmó ${esc(f.por)} · ${esc(f.fecha)}</div>` : ''}
+      </div>
+      <div class="flex flex-wrap gap-2">
+        ${confirmable ? `<button class="btn btn-primario btn-chico" onclick="confirmar(${i}, ${a.id}, this)">✔ Confirmar</button>` : ''}
+        <button class="btn btn-gris btn-chico" onclick="abrir(${i})">${a ? 'Cambiar' : 'Elegir artículo'}</button>
+        ${f.estado === 'vinculado' ? `<button class="btn btn-gris btn-chico" onclick="quitar(${i}, this)" title="Vuelve al cruce automático">Quitar</button>` : ''}
+      </div>
+    </div>
+    ${abierto === i ? panel(f, i) : ''}
+  </div>`;
+}
+function panel(f, i) {
+  const otros = (f.otros || []).map(o => `<button class="opc" onclick="confirmar(${i}, ${o.id}, this)">${artTxt(o)}</button>`).join('');
+  return `<div class="mt-3 p-3 rounded-xl bg-zinc-800">
+    ${otros ? `<div class="paso-tit">Otras opciones</div><div class="opcs mb-3">${otros}</div>` : ''}
+    <div class="paso-tit">Buscar en el catálogo de Odoo</div>
+    <input id="bus-${i}" class="input" placeholder="Artículo, SKU de Odoo o código de barras" oninput="buscarArt(${i})" autocomplete="off">
+    <div id="res-${i}" class="flex flex-col gap-1 mt-2 max-h-64 overflow-y-auto"></div>
+  </div>`;
+}
+function abrir(i) {
+  abierto = abierto === i ? null : i; pintar();
+  if (abierto !== null) {
+    const el = document.getElementById('bus-' + i), f = D.filas[i];
+    el.value = f.articulo ? f.articulo.articulo : ''; el.focus(); if (el.value) buscarArt(i);
+  }
+}
+function buscarArt(i) {
+  clearTimeout(tBus);
+  tBus = setTimeout(async () => {
+    const v = document.getElementById('bus-' + i)?.value.trim();
+    const el = document.getElementById('res-' + i);
+    if (!el) return;
+    if (!v || v.length < 2) { el.innerHTML = ''; return; }
+    const d = await Catalogo.buscar(v, { limite: 60 });
+    const rs = (d.resultados || d.articulos || []).filter(a => !a.inactivo);
+    el.innerHTML = rs.length ? rs.map(a => `<button class="text-left p-2 rounded-lg border border-zinc-700 hover:bg-zinc-800 text-sm" onclick="confirmar(${i}, ${a.id}, this)">
+        <span class="font-mono text-xs">${esc(a.sku)}</span> · ${esc(a.articulo)} · ${esc(a.color_nombre || a.color)} · ${esc(a.talle)} · ${esc(a.marca)}</button>`).join('')
+      : '<p class="text-sm text-zinc-500">Sin resultados</p>';
+  }, 250);
+}
+async function confirmar(i, aid, btn) {
+  const f = D.filas[i];
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api('/articulos/api/cruce-sku/confirmar', { json: { sku: f.sku, articulo_id: aid } });
+    toast(`Confirmado ${f.sku}` + (r.aplicados ? ` · se actualizó en ${r.aplicados} línea(s) de la recolección abierta` : ''), 'ok');
+    abierto = null; await cargar();
+  } catch (e) { toast(e.message, 'error', 6000); if (btn) btn.disabled = false; }
+}
+async function quitar(i, btn) {
+  const f = D.filas[i];
+  if (!confirm(`¿Quitar el cruce confirmado de ${f.sku}? Vuelve al cruce automático.`)) return;
+  btn.disabled = true;
+  try { await api('/articulos/api/cruce-sku/quitar', { json: { sku: f.sku } }); toast('Cruce quitado'); await cargar(); }
+  catch (e) { toast(e.message, 'error'); btn.disabled = false; }
+}
+async function confirmarAutomaticos(btn) {
+  if (!confirm(`¿Confirmar los ${D.cuentas.automatico} cruces automáticos? Conviene mirar antes algunos de la lista.`)) return;
+  btn.disabled = true;
+  try { const r = await api('/articulos/api/cruce-sku/automaticos', { method: 'POST' }); toast(`${r.confirmados} confirmados`, 'ok'); filtro = 'todos'; await cargar(); }
+  catch (e) { toast(e.message, 'error'); }
+  btn.disabled = false;
+}
+async function importar(inp) {
+  if (!inp.files.length) return;
+  const fd = new FormData(); fd.append('archivo', inp.files[0]); inp.value = '';
+  try {
+    const r = await api('/articulos/api/cruce-sku/importar', { method: 'POST', body: fd });
+    toast(`${r.confirmados} cruces importados` + (r.errores.length ? ` · ${r.errores.length} con error` : ''), r.errores.length ? 'warn' : 'ok', 6000);
+    if (r.errores.length) console.warn(r.errores);
+    filtro = 'todos'; await cargar();
+  } catch (e) { toast(e.message, 'error', 6000); }
+}
+cargar().catch(e => { document.getElementById('lista').innerHTML = `<p class="p-6 text-center text-red-600">${esc(e.message)}</p>`; });
+</script>
+{% endblock %}
