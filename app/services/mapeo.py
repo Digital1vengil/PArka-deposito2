@@ -90,7 +90,7 @@ _ALIAS_COLOR = {
     "GREY": ("GRAY", "GRIS", "GRY"), "GREN": ("GREEN", "GRN", "VERDE"), "BRWN": ("BROWN", "BRN", "MARRON", "MARRÓN"),
     "BEIG": ("BEIGE", "BGE"), "NAVY": ("NVY", "MARINO"), "OLIV": ("OLIVE", "OLIVA"), "REDD": ("RED", "ROJO"),
     "PINK": ("ROSA",), "BLUE": ("AZUL", "BLU"), "KHAK": ("KHAKI", "CAQUI"), "CHOC": ("CHOCOLATE",),
-    "UNIC": ("UNICO", "ÚNICO", "UNICA"),
+    "UNIC": ("UNICO", "ÚNICO", "UNICA"), "OFWH": ("OFFW", "OFFWHITE", "OFFWHT", "OWHT", "OFWT", "CRUDO", "HUESO"),
 }
 _CANON = {a: k for k, alias in _ALIAS_COLOR.items() for a in alias + (k,)}
 _TALLE_EQ = {"XXXL": "3XL", "XXL": "XXL", "2XL": "XXL", "XXXXL": "4XL"}
@@ -99,20 +99,28 @@ _TALLE_SKU = re.compile(r"^(XXXS|XXS|XS|S|M|L|XL|XXL|XXXL|XXXXL|[2-6]XL|U|UNI|UN
 
 
 def partes_sku_ml(sku: str) -> tuple[str, str, str, str] | None:
-    """SKU viejo de ML → (género, número de 5 dígitos, color, talle). Acepta minúsculas, espacios o _ en vez de
-    guiones y colores de varias palabras: "m-114-blk-s", "W 2038 beige S", "w-2038-military-green-s"."""
+    """SKU viejo de ML → (género o "", modelo como en Odoo, color, talle).
+    - con número: "m-114-blk-s" → ("M", "00114", "BLK", "S"); "W 2038 beige S", "w-2038-military-green-s"
+    - con nombre y sin género: "PUFCOMBI-BLK-M" → ("", "PUFCO", "BLK", "M") (Odoo usa las 5 primeras letras)
+    Acepta minúsculas, espacios o _ en vez de guiones y colores de varias palabras."""
     t = re.sub(r"[\s_./]+", "-", (sku or "").strip().upper()).strip("-")
-    t = re.sub(r"-{2,}", "-", t)
-    m = _SKU_ML.match(t)
-    if m:
-        return m.group(1), m.group(2).zfill(5), m.group(3), m.group(4) or ""
-    p = t.split("-")
-    if len(p) >= 4 and re.fullmatch(r"[MWUB]", p[0]) and p[1].isdigit() and len(p[1]) <= 5:
-        resto = p[2:]
-        talle = resto.pop() if len(resto) > 1 and _TALLE_SKU.match(resto[-1]) else ""
-        if all(x.isalpha() for x in resto):
-            return p[0], p[1].lstrip("0").zfill(5), "".join(resto)[:20], talle
-    return None
+    p = [x for x in t.split("-") if x]
+    if len(p) < 2:
+        return None
+    genero = p[0] if p[0] in ("M", "W", "U", "B") and len(p) >= 3 else ""
+    resto = p[1:] if genero else p
+    modelo = resto[0]
+    if modelo.isdigit() and len(modelo) <= 5:
+        modelo = modelo.lstrip("0").zfill(5)
+    elif modelo.isalnum() and len(modelo) >= 4 and not modelo.isdigit() and genero or (modelo.isalpha() and len(modelo) >= 5):
+        modelo = modelo[:5]
+    else:
+        return None
+    resto = resto[1:]
+    talle = resto.pop() if len(resto) > 1 and _TALLE_SKU.match(resto[-1]) else ""
+    if not resto or not all(x.isalpha() for x in resto):
+        return None
+    return genero, modelo, "".join(resto)[:20], talle
 
 
 def _talle_norm(t: str) -> str:
@@ -150,11 +158,12 @@ def candidatos_por_sku_ml(db: Session, sku: str) -> list[Articulo]:
     if genero == "B":  # mochilas / bolsos: en Odoo son unisex y sin talle (4-MOCH-U-03014-BLCK-PARK)
         genero = "U"
     talle = _talle_norm(talle)
-    filas = db.scalars(select(Articulo).where(Articulo.sku.like(f"%-{genero}-{num}-%"))).all()
+    patron = f"%-{genero}-{num}-%" if genero else f"%-{num}-%"   # sin género en el SKU viejo: cualquiera
+    filas = db.scalars(select(Articulo).where(Articulo.sku.like(patron))).all()
     out = []
     for a in filas:
         partes = (a.sku or "").upper().split("-")
-        if len(partes) < 6 or partes[2] != genero or partes[3] != num:
+        if len(partes) < 6 or (genero and partes[2] != genero) or partes[3] != num:
             continue
         if not talle:  # sin talle: SKU de 6 partes (…-COLOR-MARCA)
             if len(partes) == 6 and colores_equivalentes(partes[4], color):

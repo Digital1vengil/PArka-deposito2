@@ -105,7 +105,7 @@ def test_flujo_completo():
         cid = b["id"]
         assert b["paquetes"] == 17 and b["busqueda"]["unidades"] == 18
         assert b["tipos"] == {"Flex": 7, "Colecta": 5, "Tienda Nube": 5}
-        assert b["busqueda"]["sin_asignar"] == 18 and b["sin_vincular"] == 3  # WORKJAC2 ×2 y PUFCOMBI
+        assert b["busqueda"]["sin_asignar"] == 18 and b["sin_vincular"] == 2  # WORKJAC2 ×2 (PUFCOMBI ya cruza: DUNE PUFCOMBI)
 
         # se suman: la ruta se reparte en dos tramos parejos
         assert ana.post(f"/ecommerce/api/{cid}/sumarme").json()["busqueda"]["me_sume"]

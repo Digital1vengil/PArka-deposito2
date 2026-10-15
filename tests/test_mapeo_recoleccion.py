@@ -99,7 +99,8 @@ def test_sku_viejo_de_ml_cruza_solo_con_odoo():
     from app.services.mapeo import articulo_por_sku
     skus = ["1-CAMP-M-00114-BLCK-S-NOBR", "1-CAMP-M-00114-BLCK-S-PARK", "1-CAMP-M-00114-GREN-S-PARK",
             "1-CAMP-M-00114-GREY-S-PARK", "1-CAMP-W-02038-BEIG-S-PARK", "1-CAMP-W-02038-BLCK-S-PARK",
-            "1-CAMP-W-02038-MGRN-S-PARK", "1-CAMP-W-02038-MGRN-M-PARK"]
+            "1-CAMP-W-02038-MGRN-S-PARK", "1-CAMP-W-02038-MGRN-M-PARK", "1-CAMP-W-02079-OFWH-M-PARK",
+            "1-CAMP-M-PUFCO-BLCK-M-NOBR", "1-CAMP-M-PUFCO-BLCK-M-PARK", "1-CAMP-M-PUFCO-BLCK-S-PARK"]
     with SessionLocal() as db:
         for i, s in enumerate(skus):
             if not db.query(Articulo).filter(Articulo.sku == s).first():
@@ -110,7 +111,10 @@ def test_sku_viejo_de_ml_cruza_solo_con_odoo():
         casos = {"m-114-blk-s": "1-CAMP-M-00114-BLCK-S-PARK", "M-114-BLACK-S": "1-CAMP-M-00114-BLCK-S-PARK",
                  "m-114-green-s": "1-CAMP-M-00114-GREN-S-PARK", "m-114-gray-s": "1-CAMP-M-00114-GREY-S-PARK",
                  "w-2038-beige-s": "1-CAMP-W-02038-BEIG-S-PARK", "W 2038 BEIGE S": "1-CAMP-W-02038-BEIG-S-PARK",
-                 "w-2038-military-green-m": "1-CAMP-W-02038-MGRN-M-PARK", "w_2038_blk_s": "1-CAMP-W-02038-BLCK-S-PARK"}
+                 "w-2038-military-green-m": "1-CAMP-W-02038-MGRN-M-PARK", "w_2038_blk_s": "1-CAMP-W-02038-BLCK-S-PARK",
+                 "W-2079-OFFW-M": "1-CAMP-W-02079-OFWH-M-PARK",            # Off White: OFFW ~ OFWH
+                 "PUFCOMBI-BLK-M": "1-CAMP-M-PUFCO-BLCK-M-PARK",           # modelo con nombre y sin género
+                 "PUFCOMBI-BLK-S": "1-CAMP-M-PUFCO-BLCK-S-PARK"}
         for viejo, odoo in casos.items():
             a = articulo_por_sku(db, viejo)
             assert a is not None and a.sku == odoo, (viejo, a.sku if a else None)
