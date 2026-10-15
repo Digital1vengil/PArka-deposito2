@@ -31,6 +31,7 @@ CACHE_SEG = 110
 ETIQUETAS = {"por_imprimir": "Etiqueta por imprimir", "lista": "Lista para despachar"}
 
 _lock = threading.Lock()
+_lock_pedido = threading.Lock()   # una sola consulta completa a ML + TN a la vez
 _cache: dict = {"ts": 0.0, "data": None}
 _finales: set[str] = set()   # envíos que ya no van a volver a estar pendientes (salieron, cancelados, otra logística)
 _estado: dict[str, str] = {}  # envío ML → último status visto (cancelled, shipped…)
@@ -151,13 +152,17 @@ def ml_pendientes(dias: int = 10, max_ordenes: int = 600) -> list[dict]:
     out = []
     envios = {}
     antes = len(_finales)
+    fallas: list[Exception] = []
     for sid, sh, err in _envios(list(por_envio)):
         if err is not None:
             if getattr(err, "status", None) == 404:
                 _finales.add(sid)
                 continue
-            raise err
+            fallas.append(err)   # un envío que falla no tira abajo todas las ventas de ML: vuelve en la próxima vuelta
+            continue
         envios[sid] = sh
+    if fallas and not envios:
+        raise fallas[0]
     for sid, ordenes in por_envio.items():
         sh = envios.get(sid)
         if sh is None:
@@ -341,11 +346,23 @@ def _ml() -> tuple[list[dict], list[dict]]:
 
 
 def todas(refrescar: bool = False) -> dict:
-    """{'tn': {'ok', 'error', 'paquetes'}, 'ml': {...}, 'hora'} — cacheado CACHE_SEG segundos."""
+    """{'tn': {'ok', 'error', 'paquetes'}, 'ml': {...}, 'hora'} — cacheado CACHE_SEG segundos.
+
+    Una sola consulta a la vez: si otro (la revisión automática, otro scanner) ya está pidiendo, se espera
+    y se usa ese resultado en vez de repetir todo el pedido a ML y TN."""
+    pedido = time.monotonic()
     with _lock:
         if not refrescar and _cache["data"] and time.monotonic() - _cache["ts"] < CACHE_SEG:
             return _cache["data"]
+    with _lock_pedido:
+        with _lock:
+            # mientras esperaba, otro trajo datos nuevos (empezados después de este pedido): sirven
+            if _cache["data"] and _cache["ts"] >= pedido:
+                return _cache["data"]
+        return _pedir_todas()
 
+
+def _pedir_todas() -> dict:
     def correr(fn, conectado):
         if not conectado:
             return {"ok": False, "conectado": False, "error": "", "paquetes": [], "canceladas": []}
@@ -355,12 +372,13 @@ def todas(refrescar: bool = False) -> dict:
         except (tn.TNError, meli.MeliError) as e:
             return {"ok": False, "conectado": True, "error": str(e), "paquetes": [], "canceladas": []}
 
+    inicio = time.monotonic()
     with ThreadPoolExecutor(2) as ex:
         f_tn = ex.submit(correr, _tn, tn.configurado())
         f_ml = ex.submit(correr, _ml, meli.configurado())
         data = {"tn": f_tn.result(), "ml": f_ml.result(), "hora": ahora().strftime("%H:%M")}
     with _lock:
-        _cache.update(ts=time.monotonic(), data=data)
+        _cache.update(ts=inicio, data=data)
     return data
 
 

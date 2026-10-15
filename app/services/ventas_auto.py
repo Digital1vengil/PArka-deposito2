@@ -1,6 +1,6 @@
 """Búsqueda automática de Recolección Ecommerce + avisos (novedades).
 
-Cada N minutos (Conexiones/ajuste re_auto_min, por defecto 3) revisa Mercado Libre y Tienda Nube:
+Cada N minutos (Conexiones/ajuste re_auto_min, por defecto 2) revisa Mercado Libre y Tienda Nube:
   • Una búsqueda POR DÍA, sin arrastre: lo que quedó pendiente de días anteriores no pasa a la de hoy (la de
     ayer se cierra como está) y las ventas que ya estuvieron en la búsqueda de otro día no se vuelven a sumar.
     Una venta de ML hecha ayer después del corte que ML pide despachar hoy va a la de hoy.
@@ -22,7 +22,7 @@ import json
 import re
 import logging
 import threading
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -79,14 +79,14 @@ def activo(db=None) -> bool:
     return (ajustes.leer("re_auto", db) or "1").strip() not in ("0", "no", "false", "")
 
 
-MINUTOS_OPCIONES = (3, 5, 10)
+MINUTOS_OPCIONES = (1, 2, 3, 5, 10)
 
 
 def minutos(db=None) -> int:
     try:
-        return max(1, int(ajustes.leer("re_auto_min", db) or 3))
+        return max(1, int(ajustes.leer("re_auto_min", db) or 2))
     except ValueError:
-        return 3
+        return 2
 
 
 def estado(db) -> dict:
@@ -417,6 +417,7 @@ def sincronizar(db: Session, forzar: bool = False) -> dict:
     if not (tn.configurado(db) or meli.configurado() or cambios_svc.configurado(db)):
         return {"ok": False, "motivo": "sin conexiones"}
     with _lock:
+        inicio = ahora()   # la vuelta se cuenta desde que empieza: cada N minutos de verdad, no N + lo que tarda
         abrir = forzar or puede_abrir(db)
         _cerrar_dias_anteriores(db)
         d = ventas_api.todas(refrescar=True)
@@ -513,7 +514,8 @@ def sincronizar(db: Session, forzar: bool = False) -> dict:
         res = {"hora": ahora().strftime("%H:%M"), "nuevas": len(nuevas) + len(traidas), "canceladas": n_cancel, "juntadas": juntadas,
                "pendientes": len(pendientes), "errores": errores, "busqueda": c.id if c else None}
         ajustes.guardar(db, "re_auto_estado", json.dumps(res))   # hace commit
-        _ultima[0] = ahora()
+        # si ML o TN fallaron, se reintenta en el próximo minuto en vez de esperar la vuelta entera
+        _ultima[0] = inicio - timedelta(minutes=minutos(db) - 1) if errores else inicio
         return {"ok": True, **res}
 
 

@@ -16,7 +16,7 @@
 
   var TIPOS = { colecta: 'Colecta', flex: 'Flex', tiendanube: 'Tienda Nube', cambios: 'Cambios' };
   var FUENTE = { tiendanube: 'Tienda Nube', cambios: 'la app de cambios' };
-  var CANC_MS = 60 * 1000, LISTA_MS = 2 * 60 * 1000;
+  var CANC_MS = 60 * 1000, LISTA_MS = 60 * 1000;
   var ultimaLista = 0, revisando = false, avisoDia = '', horaRevision = '';
 
   function hoyLocal() {
@@ -341,6 +341,13 @@
     revisando = false;
   }
   setInterval(function () { revisar(false); }, CANC_MS);
+  // el celular bloqueado frena los timers: al volver a la pantalla se revisa enseguida
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible' && Date.now() - ultimaLista >= 20 * 1000) {
+      ultimaLista = 0;
+      revisar(false);
+    }
+  });
   window.pkBuscarNuevas = function () { revisar(true); };
 
   // ───────────── 5. Escaneo: tiene que coincidir con la lista del día ─────────────
@@ -410,8 +417,17 @@
     }
     var p = buscar(state.packages, id);
     if (p) return interno(norm(p.trackingId) === norm(id) ? raw : String(p.trackingId));
-    if (state.dispatchType === 'tiendanube' && typeof findTnPackage === 'function' && findTnPackage(id)) return interno(raw);
+    // Flex también lleva órdenes de Tienda Nube (SmartPost): sus etiquetas se buscan igual que en Tienda Nube
+    var conTn = state.dispatchType === 'tiendanube' ||
+      (state.dispatchType === 'flex' && state.packages.some(function (x) { return x.tn; }));
+    var ptn = conTn && typeof findTnPackage === 'function' ? findTnPackage(id) : null;
+    if (ptn) return interno(state.dispatchType === 'tiendanube' ? raw : String(ptn.trackingId));
     var ahora = Date.now();
+    if (state.dispatchType === 'flex' && conTn) {
+      // guía de SmartPost ya vista hoy → su orden de Tienda Nube en la lista (si no, el servidor la resuelve abajo)
+      var gf = state.spGuias && state.spGuias[norm(id)];
+      if (gf && buscar(state.packages, gf)) return interno(String(buscar(state.packages, gf).trackingId));
+    }
     if (state.dispatchType === 'tiendanube') {
       // Etiqueta de SmartPost: el nº de guía no es el nº de orden → se consulta la guía y se busca la orden
       var g = state.spGuias && state.spGuias[norm(id)];

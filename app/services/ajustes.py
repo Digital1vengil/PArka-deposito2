@@ -35,7 +35,7 @@ CLAVES = {
     "re_token": ("RE_TOKEN", "", True),
     # Búsqueda automática: revisa ML + TN cada N minutos, suma las ventas nuevas y avisa cancelaciones
     "re_auto": ("RE_AUTO", "1", False),
-    "re_auto_min": ("RE_AUTO_MIN", "3", False),
+    "re_auto_min": ("RE_AUTO_MIN", "2", False),
     "re_auto_estado": ("RE_AUTO_ESTADO", "", False),
     "re_fix_arrastre": ("RE_FIX_ARRASTRE", "", False),   # 1 = ya se deshizo el arrastre de días anteriores
     "re_box_cant": ("RE_BOX_CANT", "5", False),            # BOX: prendas por caja (se habilita al juntar esa cantidad)
