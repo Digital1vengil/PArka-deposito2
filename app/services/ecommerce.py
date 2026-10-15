@@ -74,7 +74,7 @@ def sumar_archivos(db: Session, c: Control, archivos: list[tuple[str, bytes]],
     nombres = [n for n, _ in archivos] + (["API"] if extra else [])
     c.archivos = (((c.archivos + ", ") if c.archivos else "") + ", ".join(nombres))[:2000]
     db.flush()
-    repartir(db, c)
+    asignar_nuevas(db, c)   # lo que ya tiene cada uno no se mueve
     db.commit()
     return nuevos, act, errores
 
@@ -145,7 +145,7 @@ def salir(db: Session, c: Control, usuario_id: int) -> None:
         return
     p.activo, p.salio_at = False, ahora()
     db.flush()
-    repartir(db, c)
+    asignar_nuevas(db, c)   # lo suyo pasa a los demás; lo que ya tenía cada uno no se mueve
     db.commit()
 
 
@@ -235,6 +235,57 @@ def repartir(db: Session, c: Control) -> None:
         for i in lista:
             i.asignado_id = gente[k]
         carga[gente[k]] += unidades
+
+
+def asignar_nuevas(db: Session, c: Control) -> int:
+    """Ventas que entraron con la búsqueda en marcha: lo que ya tiene cada persona NO se reajusta.
+    Solo se asigna lo que no tiene dueño activo (ventas nuevas, o de alguien que salió):
+      - la misma prenda (mismo artículo) que ya tiene alguien → se le suma a esa persona
+      - una prenda de una venta de varias que ya tiene alguien → a esa persona (la venta va junta)
+      - lo demás → a quien tenga menos prendas pendientes
+    Devuelve cuántas líneas se asignaron."""
+    gente = [p.usuario_id for p in activos(c)]
+    todos = _items(c)
+    nuevos = [i for i in todos if pendiente_busqueda(i) > 0 and i.asignado_id not in gente]
+    if not gente:
+        for i in nuevos:
+            i.asignado_id = None
+        return 0
+    if not nuevos:
+        return 0
+    carga = {g: 0 for g in gente}
+    por_venta: dict[int, int] = {}
+    por_prenda: dict[str, dict[int, int]] = {}
+    for i in todos:
+        if i.asignado_id not in carga:
+            continue
+        carga[i.asignado_id] += pendiente_busqueda(i)
+        if es_multi(i.paquete):
+            por_venta.setdefault(i.paquete_id, i.asignado_id)
+        d = por_prenda.setdefault(clave_grupo(i), {})
+        d[i.asignado_id] = d.get(i.asignado_id, 0) + i.cantidad
+    fichas: "OrderedDict[str, list[ControlItem]]" = OrderedDict()
+    for i in sorted(nuevos, key=_orden):
+        fichas.setdefault(clave_ficha(i), []).append(i)
+    for lista in fichas.values():
+        p0 = lista[0].paquete
+        dueno = por_venta.get(p0.id) if es_multi(p0) else None
+        if dueno is None:
+            for i in lista:
+                d = por_prenda.get(clave_grupo(i))
+                if d:
+                    dueno = max(d, key=lambda g: (d[g], -gente.index(g)))
+                    break
+        if dueno is None:
+            dueno = min(gente, key=lambda g: (carga[g], gente.index(g)))
+        for i in lista:
+            i.asignado_id = dueno
+            carga[dueno] += pendiente_busqueda(i)
+            d = por_prenda.setdefault(clave_grupo(i), {})
+            d[dueno] = d.get(dueno, 0) + i.cantidad
+        if es_multi(p0):
+            por_venta[p0.id] = dueno
+    return sum(len(x) for x in fichas.values())
 
 
 # ─────────────────────────── búsqueda (operario) ───────────────────────────

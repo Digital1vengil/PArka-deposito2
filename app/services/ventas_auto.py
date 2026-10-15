@@ -298,7 +298,7 @@ def reparar_arrastre(db: Session) -> int:
         db.delete(n)
         if movidos:
             db.flush()
-            svc.repartir(db, c)
+            svc.asignar_nuevas(db, c)
     ajustes.guardar(db, "re_fix_arrastre", "1")
     return movidos
 
@@ -462,7 +462,7 @@ def sincronizar(db: Session, forzar: bool = False) -> dict:
             csvc.agregar_paquetes(db, c, nuevas)
         if nuevas or juntadas or traidas:
             db.flush()
-            svc.repartir(db, c)
+            svc.asignar_nuevas(db, c)
         if creada:
             total = len(c.paquetes)
             avisar(db, "nueva", f"🛍️ Se abrió la búsqueda del día ({hoy().strftime('%d/%m')}): {total} venta(s) en total"
@@ -493,7 +493,7 @@ def sincronizar(db: Session, forzar: bool = False) -> dict:
         for cid in tocadas_vinc:
             cc = db.get(Control, cid)
             if cc:
-                svc.repartir(db, cc)
+                svc.asignar_nuevas(db, cc)
         # la etiqueta de ML se imprimió después → se actualiza en la búsqueda
         por_trk = {p["tracking"]: p for p in pendientes}
         for trk, cp in en_busqueda.items():
@@ -521,7 +521,7 @@ def sincronizar(db: Session, forzar: bool = False) -> dict:
         for cid in tocadas:
             cc = db.get(Control, cid)
             if cc:
-                svc.repartir(db, cc)
+                svc.asignar_nuevas(db, cc)
         # las canceladas que no estaban en la búsqueda no generan aviso: se ven en "Canceladas · No despachar"
         if c is not None and not creada:
             _actualizar_apertura(db, c)

@@ -2,20 +2,25 @@
 {% block titulo %}Recolección Ecommerce · {{ APP_NOMBRE }}{% endblock %}
 {% block head %}<script src="/static/vendor/html5-qrcode-2.3.8.min.js?v=2.3.8"></script>
 <style>
-  .re-card { position: relative; border: 2px solid var(--line); border-radius: 14px; padding: .8rem; background: #fff; }
+  .re-card { position: relative; border: 1.5px solid var(--line); border-radius: 12px; padding: .55rem .65rem; background: #fff; }
+  /* grilla: en pantallas anchas 2 o 3 fichas por fila */
+  .re-grid { display: grid; gap: .6rem; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); align-items: start; }
+  .re-grid > details, .re-grid > .otros, .re-grid > p { grid-column: 1 / -1; }
+  .re-card .btn { font-size: .78rem; }
+  .re-info { font-size: .7rem; color: var(--muted); margin-top: .3rem; line-height: 1.3; }
   /* canal de la venta en la esquina: ML (amarillo), TN (azul), cambio (violeta) */
-  .re-canales { position: absolute; top: -.7rem; right: .7rem; display: flex; gap: .25rem; }
+  .re-canales { position: absolute; top: -.6rem; right: .6rem; display: flex; gap: .25rem; }
   .canal { display: inline-flex; align-items: center; justify-content: center; min-width: 1.9rem; height: 1.4rem; padding: 0 .35rem;
            border-radius: 999px; font-size: .68rem; font-weight: 900; letter-spacing: .02em; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.18); }
   .canal-ml { background: #ffe600; color: #2d3277; }
   .canal-tn { background: #2563eb; color: #fff; }
   .canal-cambio { background: #7c3aed; color: #fff; }
   .canal.mini { min-width: 1.6rem; height: 1.15rem; font-size: .6rem; border-width: 1px; box-shadow: none; }
-  .re-sku { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; color: var(--muted); margin-top: .15rem; word-break: break-all; }
-  .re-ventas { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .45rem; }
-  .re-vta { display: inline-flex; align-items: center; gap: .3rem; font-size: .78rem; font-weight: 600; background: var(--soft);
+  .re-sku { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .7rem; color: var(--muted); margin-top: .1rem; word-break: break-all; }
+  .re-ventas { display: flex; flex-wrap: wrap; gap: .25rem; margin-top: .35rem; }
+  .re-vta { display: inline-flex; align-items: center; gap: .25rem; font-size: .7rem; font-weight: 600; background: var(--soft);
             border: 1px solid var(--line); border-radius: 8px; padding: .1rem .45rem; font-variant-numeric: tabular-nums; }
-  .re-quien { display: inline-flex; align-items: center; gap: .3rem; font-size: .8rem; font-weight: 700; color: #fff; background: #111;
+  .re-quien { display: inline-flex; align-items: center; gap: .3rem; font-size: .72rem; font-weight: 700; color: #fff; background: #111;
               border-radius: 999px; padding: .15rem .6rem; }
   .re-quien.nadie { background: #f59e0b; }
   .eq-fila { display: flex; align-items: center; gap: .6rem; padding: .5rem .2rem; border-top: 1px solid var(--line); font-size: .85rem; }
@@ -30,11 +35,11 @@
   .re-card.sinvinc { border-style: dashed; border-color: #f59e0b; }
   .re-card.flash { animation: reFlash .9s ease-out; }
   @keyframes reFlash { from { box-shadow: 0 0 0 6px rgba(20,184,166,.55) } to { box-shadow: none } }
-  .re-talle { display: inline-block; font-size: 1.9rem; font-weight: 900; color: #fff; background: #111; line-height: 1;
-              border-radius: 10px; padding: .2rem .65rem; min-width: 3rem; text-align: center; }
-  .re-nombre { font-size: 1.15rem; font-weight: 800; color: var(--ink); line-height: 1.2; }
-  .re-cuenta { font-size: 1.8rem; font-weight: 900; white-space: nowrap; }
-  .re-ub { display: inline-flex; align-items: center; gap: .3rem; font-weight: 800; font-size: 1.05rem; color: var(--violeta);
+  .re-talle { display: inline-block; font-size: 1.2rem; font-weight: 900; color: #fff; background: #111; line-height: 1;
+              border-radius: 8px; padding: .15rem .5rem; min-width: 2.2rem; text-align: center; }
+  .re-nombre { font-size: .95rem; font-weight: 800; color: var(--ink); line-height: 1.2; }
+  .re-cuenta { font-size: 1.3rem; font-weight: 900; white-space: nowrap; line-height: 1; }
+  .re-ub { display: inline-flex; align-items: center; gap: .2rem; font-weight: 800; font-size: .8rem; color: var(--violeta);
            background: var(--violeta-bg); border-radius: 10px; padding: .2rem .6rem; }
   .re-persona { border: 1px solid var(--line); border-radius: 12px; padding: .6rem .8rem; background: #fff; }
   #re-ok, #re-alerta { position: fixed; inset: 0; z-index: 90; display: none; align-items: center; justify-content: center;
@@ -60,10 +65,10 @@
   @keyframes reTiembla { 0%,100% { transform: translateX(0) } 20%,60% { transform: translateX(-12px) } 40%,80% { transform: translateX(12px) } }
   .sumarme { font-size: 1.25rem; padding: 1rem 1.5rem; }
   /* ventas de 2 o más prendas: una sola ficha */
-  .re-venta { border: 2px solid var(--ink); border-radius: 16px; padding: .6rem; background: var(--soft); }
+  .re-venta { border: 1.5px solid var(--ink); border-radius: 14px; padding: .45rem; background: var(--soft); }
   .re-venta.listo { border-color: #bbf7d0; }
-  .re-venta-cab { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; font-size: .9rem; margin: 0 .2rem .5rem; }
-  .re-venta-cab .vcant { font-size: 1.3rem; font-weight: 900; }
+  .re-venta-cab { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; font-size: .8rem; margin: 0 .15rem .4rem; }
+  .re-venta-cab .vcant { font-size: 1.1rem; font-weight: 900; }
   /* Escáner: solo el botón acompaña el scroll (encima de ParkIA); la cámara se abre flotando arriba */
   #scan-fab { position: fixed; right: 1.25rem; bottom: calc(1.25rem + 3.5rem + .75rem + env(safe-area-inset-bottom)); z-index: 44;
               width: 3.5rem; height: 3.5rem; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center;
@@ -198,7 +203,7 @@
       </div>
       <div id="mia-info" class="text-sm mt-2"></div>
     </div>
-    <div id="mia-lista" class="flex flex-col gap-3"></div>
+    <div id="mia-lista" class="re-grid"></div>
   </section>
   <div id="cam-box" class="hidden"><div class="cam-cab"><span>📷 Apuntá al código de barras</span><button type="button" onclick="pararCam()" aria-label="Cerrar cámara">✕</button></div>
     <div id="qr-reader" class="w-full min-h-[200px] bg-black overflow-hidden"></div></div>
@@ -637,7 +642,7 @@ function pintarMia() {
     : '✅ <b>¡Terminaste tu tramo!</b> Llevá las prendas a la mesa de control.';
   el.innerHTML = pend.map(b => bloqueHtml(b, true)).join('')
     + (listos.length ? `<details class="card p-3"><summary class="font-bold cursor-pointer">✔ Ya juntadas o faltantes (${listos.length})</summary>
-        <div class="flex flex-col gap-2 mt-2">${listos.map(b => bloqueHtml(b, false)).join('')}</div></details>` : '')
+        <div class="re-grid mt-2">${listos.map(b => bloqueHtml(b, false)).join('')}</div></details>` : '')
     + otrosHtml();
 }
 // ───────── ventas de 2 o más prendas: una sola ficha ─────────
@@ -662,7 +667,7 @@ function bloqueHtml(b, activo) {
       <span class="text-xs text-zinc-500">${esc(v.tipo)} ${esc(vc ? vc.numero : v.tracking)}${v.comprador ? ' · ' + esc(v.comprador) : ''}</span>
       <span class="flex-1"></span>
       <span class="vcant ${falta ? '' : 'text-teal-600'}">${bus}<span class="text-zinc-400 text-base">/${cant}</span></span></div>
-    <div class="flex flex-col gap-2">${b.gs.map(g => grupoHtml(g, activo && g.faltan > 0, true)).join('')}</div></div>`;
+    <div class="flex flex-col gap-1.5">${b.gs.map(g => grupoHtml(g, activo && g.faltan > 0, true)).join('')}</div></div>`;
 }
 
 // ───────── Mesa de control: etiqueta del envío → cada prenda (verde si coincide) ─────────
@@ -778,31 +783,30 @@ const verQuien = () => tabAct === 'todo' || tabAct === 'equipo';
 function grupoHtml(g, activo, enVenta) {
   const abierta = re.estado === 'abierto';
   const cls = g.faltante && !g.faltan ? 'faltante' : !g.vinculado ? 'sinvinc' : !g.faltan ? 'listo' : g.buscado ? 'parcial' : '';
+  const ub = g.ubicacion ? g.ubicacion.split(',').map(u => `<span class="re-ub">📍 ${esc(u.trim())}</span>`).join(' ')
+    : '<span class="text-xs text-zinc-400">sin ubicación</span>';
   const titulo = g.vinculado
     ? `<div class="re-nombre">${esc(g.articulo)}</div><div class="re-sku">${esc(g.sku_odoo || g.sku)}</div>
-       <div class="flex items-center gap-3 mt-2"><span class="re-talle">${esc(g.talle)}</span><span class="text-base font-bold text-zinc-600">${esc(g.color)}</span></div>`
+       <div class="flex flex-wrap items-center gap-2 mt-1.5"><span class="re-talle">${esc(g.talle)}</span><span class="text-sm font-bold text-zinc-600">${esc(g.color)}</span>${ub}</div>`
     : `<div class="re-nombre">${esc(g.producto || g.sku || '(sin título)')}</div>${g.sku ? `<div class="re-sku">${esc(g.sku)}</div>` : ''}
-       <div class="text-sm text-amber-700 font-semibold mt-1">⚠ SKU sin vincular al catálogo: buscala por el título y la variante</div>`;
-  const ub = g.ubicacion ? g.ubicacion.split(',').map(u => `<span class="re-ub">📍 ${esc(u.trim())}</span>`).join(' ')
-    : '<span class="text-xs text-zinc-500">Sin ubicación cargada</span>';
+       <div class="text-xs text-amber-700 font-semibold mt-1">⚠ SKU sin vincular: buscala por el título y la variante</div>`;
   const ids = JSON.stringify(g.item_ids);
   let acc = '';
   if (abierta && activo) {
-    acc = `<button class="btn btn-turq !py-2.5 !px-4 font-bold" onclick='manual(${ids})'>✓ La tengo${g.cantidad > 1 ? ` <span class="opacity-80 font-normal">(${g.buscado + 1} de ${g.cantidad})</span>` : ''}</button>`
-      + `<button class="btn btn-rojo !py-2.5 !px-4 font-bold" style="background:var(--alta);color:#fff" onclick='faltante(${ids})'>✗ No la encontré</button>`
-      + (g.vinculado ? `<button class="btn btn-gris btn-chico" onclick="donde(${g.item_ids[0]}, '${g.clave}')">🔍 ¿Dónde más puede estar?</button>` : '');
+    acc = `<button class="btn btn-turq !py-1.5 !px-3 font-bold" onclick='manual(${ids})'>✓ La tengo${g.cantidad > 1 ? ` <span class="opacity-80 font-normal">(${g.buscado + 1}/${g.cantidad})</span>` : ''}</button>`
+      + `<button class="btn btn-rojo !py-1.5 !px-3 font-bold" style="background:var(--alta);color:#fff" onclick='faltante(${ids})'>✗ No está</button>`
+      + (g.vinculado ? `<button class="btn btn-gris btn-chico" onclick="donde(${g.item_ids[0]}, '${g.clave}')" title="¿Dónde más puede estar?">🔍 Dónde más</button>` : '');
   }
   if (abierta && g.buscado && !(activo && g.cantidad > 1)) acc += `<button class="btn btn-gris btn-chico" onclick='deshacer(${ids})' title="Me equivoqué: restar una">−1</button>`;
   if (abierta && g.faltante) acc += `<button class="btn btn-gris btn-chico" onclick='quitarFaltante(${ids})'>Apareció: quitar faltante</button>`;
-  const quien = verQuien() && !enVenta ? `<div class="mb-2"><span class="re-quien ${g.asignado ? '' : 'nadie'}">👤 ${esc(g.asignado ? corto(g.asignado) : 'Sin asignar')}</span></div>` : '';
+  const quien = verQuien() && !enVenta ? `<div class="mb-1"><span class="re-quien ${g.asignado ? '' : 'nadie'}">👤 ${esc(g.asignado ? corto(g.asignado) : 'Sin asignar')}</span></div>` : '';
   return `<div class="re-card ${cls}" id="g-${g.clave}">${enVenta ? '' : canalesHtml(g.canales)}${quien}
-    <div class="flex items-start gap-3"><div class="flex-1 min-w-0">${titulo}${enVenta ? '' : ventasHtml(g.ventas)}</div>
-      <div class="flex flex-col items-end gap-1"><div class="re-cuenta ${!g.faltan ? 'text-teal-600' : ''}">${g.faltante ? '<span class="text-red-700 text-base">FALTA ' + g.faltante + '</span> ' : ''}${g.buscado}<span class="text-zinc-400 text-xl">/${g.cantidad}</span></div>
-        ${abierta && activo && g.cantidad > 1 ? `<div class="flex gap-1">${g.buscado ? `<button class="btn btn-gris !px-3 !py-1 text-lg font-black" onclick='deshacer(${ids})' title="Restar una">−</button>` : ''}${g.faltan ? `<button class="btn btn-turq !px-3 !py-1 text-lg font-black" onclick='manual(${ids})' title="Sumar una más">+</button>` : ''}</div>` : ''}</div></div>
-    <div class="flex flex-wrap gap-2 mt-2">${ub}</div>
-    <div class="text-xs text-zinc-500 mt-2">${g.variante ? 'En la venta: ' + esc(g.variante) : ''}${g.vinculado && g.sku && g.sku !== g.sku_odoo ? (g.variante ? ' · ' : '') + 'SKU ML ' + esc(g.sku) : ''}${g.codigo_barras ? ' · cód. ' + esc(g.codigo_barras) : ''}</div>
-    <div class="text-xs text-zinc-400">${g.buscado && g.trajo && g.trajo.length ? '✓ trajo ' + esc(g.trajo.join(', ')) : ''}</div>
-    <div class="flex flex-wrap gap-2 mt-2">${acc}</div><div id="extra-${g.clave}"></div></div>`;
+    <div class="flex items-start gap-2"><div class="flex-1 min-w-0">${titulo}${enVenta ? '' : ventasHtml(g.ventas)}</div>
+      <div class="flex flex-col items-end gap-1"><div class="re-cuenta ${!g.faltan ? 'text-teal-600' : ''}">${g.faltante ? '<span class="text-red-700 text-xs">FALTA ' + g.faltante + '</span> ' : ''}${g.buscado}<span class="text-zinc-400 text-sm">/${g.cantidad}</span></div>
+        ${abierta && activo && g.cantidad > 1 ? `<div class="flex gap-1">${g.buscado ? `<button class="btn btn-gris !px-2 !py-0.5 font-black" onclick='deshacer(${ids})' title="Restar una">−</button>` : ''}${g.faltan ? `<button class="btn btn-turq !px-2 !py-0.5 font-black" onclick='manual(${ids})' title="Sumar una más">+</button>` : ''}</div>` : ''}</div></div>
+    <div class="re-info">${[g.variante ? 'Venta: ' + esc(g.variante) : '', g.vinculado && g.sku && g.sku !== g.sku_odoo ? 'SKU ML ' + esc(g.sku) : '',
+      g.codigo_barras ? 'cód. ' + esc(g.codigo_barras) : '', g.buscado && g.trajo && g.trajo.length ? '✓ trajo ' + esc(g.trajo.map(corto).join(', ')) : ''].filter(Boolean).join(' · ')}</div>
+    ${acc ? `<div class="flex flex-wrap gap-1.5 mt-2">${acc}</div>` : ''}<div id="extra-${g.clave}"></div></div>`;
 }
 async function donde(iid, clave) {
   const el = document.getElementById('extra-' + clave);
@@ -851,12 +855,12 @@ function pintarTodo() {
     + (sin ? ` · <span class="text-amber-700 font-semibold">${sin} sin asignar</span>` : '');
   const el = document.getElementById('todo');
   if (!gs.length) { el.innerHTML = '<p class="text-zinc-500">Sin prendas en esta lista.</p>'; return; }
-  if (todoM === 'ruta') { el.innerHTML = bloques(gs).map(b => bloqueHtml(b, false)).join(''); return; }
+  if (todoM === 'ruta') { el.innerHTML = `<div class="re-grid">${bloques(gs).map(b => bloqueHtml(b, false)).join('')}</div>`; return; }
   const porPersona = {};
   gs.forEach(g => (porPersona[g.asignado || 'Sin asignar'] = porPersona[g.asignado || 'Sin asignar'] || []).push(g));
   el.innerHTML = Object.entries(porPersona).map(([p, xs]) =>
     `<details class="card p-3" open><summary class="font-bold cursor-pointer">👤 ${esc(p)} · ${xs.reduce((a, g) => a + g.buscado, 0)}/${xs.reduce((a, g) => a + g.cantidad, 0)}</summary>
-     <div class="flex flex-col gap-3 mt-3">${bloques(xs).map(b => bloqueHtml(b, false)).join('')}</div></details>`).join('');
+     <div class="re-grid mt-3">${bloques(xs).map(b => bloqueHtml(b, false)).join('')}</div></details>`).join('');
 }
 
 // ───────── escaneo en la búsqueda: pantalla verde / roja ─────────

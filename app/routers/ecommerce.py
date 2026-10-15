@@ -534,7 +534,7 @@ def quitar_faltante(cid: int, body: FaltanteIn, u: Usuario = Depends(acceso), db
         i = db.get(ControlItem, iid)
         if i and i.paquete.control_id == c.id and i.faltante:
             csvc.quitar_faltante(db, i, u)
-    svc.repartir(db, c)
+    svc.asignar_nuevas(db, c)
     db.commit()
     return {"ok": True}
 

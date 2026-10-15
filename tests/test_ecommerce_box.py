@@ -203,3 +203,51 @@ def test_mesa_simple_etiqueta_y_prendas():
                      json={"codigo": v["items"][0]["codigo_barras"], "paquete_id": v["id"]}).json()
         assert r["ok"] and r["completo"]
         assert adm.get(f"/ecommerce/api/{cid}/mesa").json()["controladas"] == 1
+
+
+def test_ventas_nuevas_no_reajustan_lo_asignado():
+    """Con la búsqueda en marcha, lo que ya tiene cada persona no se mueve: la misma prenda nueva va a quien ya
+    la tiene y lo demás a quien tenga menos pendientes."""
+    from app.db import SessionLocal
+    from app.models import Articulo, Control, ControlItem, ControlPaquete, ControlParticipante, Usuario
+    from app.services import ecommerce as svc
+    from sqlalchemy import select
+    db = SessionLocal()
+    try:
+        u = db.scalar(select(Usuario).where(Usuario.nombre == "Vengil"))
+        otro = db.scalar(select(Usuario).where(Usuario.id != u.id))
+        arts = db.scalars(select(Articulo).where(Articulo.codigo_barras != "").limit(6)).all()
+        c = Control(fecha=svc.hoy(), usuario_id=u.id, modo=svc.MODO, nombre="test reparto")
+        db.add(c)
+        for k in range(4):
+            p = ControlPaquete(tracking=f"R{k}", tipo="flex")
+            p.items.append(ControlItem(sku=arts[k].sku, articulo_id=arts[k].id, cantidad=1, orden_ruta=k * 10))
+            c.paquetes.append(p)
+        c.participantes += [ControlParticipante(usuario_id=u.id), ControlParticipante(usuario_id=otro.id)]
+        db.flush()
+        svc.repartir(db, c)
+        db.commit()
+        antes = {i.id: i.asignado_id for p in c.paquetes for i in p.items}
+        assert set(antes.values()) == {u.id, otro.id}
+        de_otro = next(i for p in c.paquetes for i in p.items if i.asignado_id == otro.id)
+        # entran 2 ventas: la misma prenda que ya tiene "otro" y una prenda nueva
+        p1 = ControlPaquete(tracking="N1", tipo="flex")
+        p1.items.append(ControlItem(sku=de_otro.sku, articulo_id=de_otro.articulo_id, cantidad=1, orden_ruta=0))
+        p2 = ControlPaquete(tracking="N2", tipo="tiendanube")
+        p2.items.append(ControlItem(sku=arts[5].sku, articulo_id=arts[5].id, cantidad=1, orden_ruta=5))
+        c.paquetes += [p1, p2]
+        db.flush()
+        assert svc.asignar_nuevas(db, c) == 2
+        db.commit()
+        assert {i.id: i.asignado_id for p in c.paquetes[:4] for i in p.items} == antes   # nada se movió
+        assert p1.items[0].asignado_id == otro.id                                       # misma prenda → a quien la tiene
+        cargas = {g: sum(svc.pendiente_busqueda(i) for p in c.paquetes for i in p.items if i.asignado_id == g)
+                  for g in (u.id, otro.id)}
+        assert abs(cargas[u.id] - cargas[otro.id]) <= 1                                 # lo nuevo, a quien tenía menos
+        # si alguien sale, lo suyo pasa al otro y lo del otro no se mueve
+        de_u = [i.id for p in c.paquetes for i in p.items if i.asignado_id == u.id]
+        svc.salir(db, c, otro.id)
+        assert all(i.asignado_id == u.id for p in c.paquetes for i in p.items if svc.pendiente_busqueda(i))
+        assert all(db.get(ControlItem, iid).asignado_id == u.id for iid in de_u)
+    finally:
+        db.close()
