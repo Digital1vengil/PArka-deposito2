@@ -89,3 +89,29 @@ def test_mapeo_y_recoleccion():
         assert c.get("/recoleccion/api/lista").json()["recolecciones"][0]["id"] == nueva["id"]
         assert "búsqueda" in c.get("/").text  # la tarjeta ahora es Recolección Ecommerce
         assert c.delete(f"/recoleccion/api/{nueva['id']}").json()["ok"]
+
+
+def test_sku_viejo_de_ml_cruza_solo_con_odoo():
+    """SKU viejo de ML (m-114-blk-s / w-2038-beige-s) → variante de Odoo por fórmula: género, número con
+    ceros, color equivalente y talle. Parka primero. Sin pantalla de cruce."""
+    from app.db import SessionLocal
+    from app.models import Articulo
+    from app.services.mapeo import articulo_por_sku
+    skus = ["1-CAMP-M-00114-BLCK-S-NOBR", "1-CAMP-M-00114-BLCK-S-PARK", "1-CAMP-M-00114-GREN-S-PARK",
+            "1-CAMP-M-00114-GREY-S-PARK", "1-CAMP-W-02038-BEIG-S-PARK", "1-CAMP-W-02038-BLCK-S-PARK",
+            "1-CAMP-W-02038-MGRN-S-PARK", "1-CAMP-W-02038-MGRN-M-PARK"]
+    with SessionLocal() as db:
+        for i, s in enumerate(skus):
+            if not db.query(Articulo).filter(Articulo.sku == s).first():
+                p = s.split("-")
+                db.add(Articulo(sku=s, codigo_barras=f"29880000{i:05d}", articulo=f"T {p[3]}", color=p[4], talle=p[5],
+                                variante=f"{p[4]}, {p[5]}, {'Parka' if p[6] == 'PARK' else 'no brand'}", odoo_id=770000 + i))
+        db.commit()
+        casos = {"m-114-blk-s": "1-CAMP-M-00114-BLCK-S-PARK", "M-114-BLACK-S": "1-CAMP-M-00114-BLCK-S-PARK",
+                 "m-114-green-s": "1-CAMP-M-00114-GREN-S-PARK", "m-114-gray-s": "1-CAMP-M-00114-GREY-S-PARK",
+                 "w-2038-beige-s": "1-CAMP-W-02038-BEIG-S-PARK", "W 2038 BEIGE S": "1-CAMP-W-02038-BEIG-S-PARK",
+                 "w-2038-military-green-m": "1-CAMP-W-02038-MGRN-M-PARK", "w_2038_blk_s": "1-CAMP-W-02038-BLCK-S-PARK"}
+        for viejo, odoo in casos.items():
+            a = articulo_por_sku(db, viejo)
+            assert a is not None and a.sku == odoo, (viejo, a.sku if a else None)
+        assert articulo_por_sku(db, "w-2038-blue-s") is None   # color que no existe: no inventa

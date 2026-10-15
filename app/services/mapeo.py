@@ -94,7 +94,25 @@ _ALIAS_COLOR = {
 }
 _CANON = {a: k for k, alias in _ALIAS_COLOR.items() for a in alias + (k,)}
 _TALLE_EQ = {"XXXL": "3XL", "XXL": "XXL", "2XL": "XXL", "XXXXL": "4XL"}
-_SKU_ML = re.compile(r"^([MWUB])-0*(\d{1,5})-([A-Z]{2,12})(?:-([A-Z0-9]{1,5}))?$")
+_SKU_ML = re.compile(r"^([MWUB])-0*(\d{1,5})-([A-Z]{2,20})(?:-([A-Z0-9]{1,5}))?$")
+_TALLE_SKU = re.compile(r"^(XXXS|XXS|XS|S|M|L|XL|XXL|XXXL|XXXXL|[2-6]XL|U|UNI|UNICO|\d{1,3})$")
+
+
+def partes_sku_ml(sku: str) -> tuple[str, str, str, str] | None:
+    """SKU viejo de ML → (género, número de 5 dígitos, color, talle). Acepta minúsculas, espacios o _ en vez de
+    guiones y colores de varias palabras: "m-114-blk-s", "W 2038 beige S", "w-2038-military-green-s"."""
+    t = re.sub(r"[\s_./]+", "-", (sku or "").strip().upper()).strip("-")
+    t = re.sub(r"-{2,}", "-", t)
+    m = _SKU_ML.match(t)
+    if m:
+        return m.group(1), m.group(2).zfill(5), m.group(3), m.group(4) or ""
+    p = t.split("-")
+    if len(p) >= 4 and re.fullmatch(r"[MWUB]", p[0]) and p[1].isdigit() and len(p[1]) <= 5:
+        resto = p[2:]
+        talle = resto.pop() if len(resto) > 1 and _TALLE_SKU.match(resto[-1]) else ""
+        if all(x.isalpha() for x in resto):
+            return p[0], p[1].lstrip("0").zfill(5), "".join(resto)[:20], talle
+    return None
 
 
 def _talle_norm(t: str) -> str:
@@ -125,13 +143,13 @@ def _orden_marca(a: Articulo) -> int:
 def candidatos_por_sku_ml(db: Session, sku: str) -> list[Articulo]:
     """Variantes del catálogo (todas las marcas) que corresponden a un SKU con formato de ML:
     género-número-color-talle. Primero Parka, después Puffers y No Brand."""
-    m = _SKU_ML.match((sku or "").strip().upper())
-    if not m:
+    partes_ml = partes_sku_ml(sku)
+    if not partes_ml:
         return []
-    genero, num, color = m.group(1), m.group(2).zfill(5), m.group(3)
+    genero, num, color, talle = partes_ml
     if genero == "B":  # mochilas / bolsos: en Odoo son unisex y sin talle (4-MOCH-U-03014-BLCK-PARK)
         genero = "U"
-    talle = _talle_norm(m.group(4) or "")
+    talle = _talle_norm(talle)
     filas = db.scalars(select(Articulo).where(Articulo.sku.like(f"%-{genero}-{num}-%"))).all()
     out = []
     for a in filas:
