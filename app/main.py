@@ -15,7 +15,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from . import config
 from .auth import NoAutenticado, SinPermiso
 from .db import Base, engine, SessionLocal, migrar
-from .routers import auth as r_auth, inicio, despacho, tareas, supervision, admin, articulos, smartpost, devoluciones, conteo, asistente, mercadolibre, mapeo, recoleccion, control, catalogo, ecommerce, etiquetas, tiendanube, cambios, recolecciones_odoo, importar
+from .routers import auth as r_auth, inicio, despacho, tareas, supervision, admin, articulos, smartpost, devoluciones, conteo, asistente, mercadolibre, mapeo, recoleccion, control, catalogo, ecommerce, etiquetas, tiendanube, cambios, recolecciones_odoo, importar, rotulos
 from .seed import sembrar
 from .templating import render
 
@@ -125,6 +125,19 @@ def _iniciar_scheduler():
         finally:
             db.close()
     sch.add_job(job_odoo, "interval", minutes=5, id="odoo", next_run_time=(ahora() + __import__("datetime").timedelta(seconds=30)).replace(tzinfo=config.TZ))
+
+    # 3b) Rótulos: anota la fecha de llegada de los pedidos nuevos de Magontex (Recolectar / Órdenes de entrega)
+    def job_rotulos():
+        from .services import odoo, rotulos
+        db = SessionLocal()
+        try:
+            if odoo.configurado(db):
+                rotulos.revisar_nuevos(db)
+        except odoo.OdooError as e:
+            log.warning("Rótulos: no se pudo leer Odoo: %s", e)
+        finally:
+            db.close()
+    sch.add_job(job_rotulos, "interval", minutes=2, id="rotulos")
 
     # 4) Tienda Nube: reintenta marcar como enviadas las órdenes que fallaron al despachar
     def job_tn():
@@ -239,7 +252,7 @@ app.mount("/etiquetas-fonts", StaticFiles(directory=str(Path(__file__).parent / 
 for r in (r_auth.router, inicio.router, despacho.router, tareas.router, supervision.router, admin.router,
           articulos.router, smartpost.router, devoluciones.router, conteo.router,
           asistente.router, mercadolibre.router, mapeo.router, recoleccion.router, control.router,
-          catalogo.router, ecommerce.router, etiquetas.router, tiendanube.router, cambios.router, recolecciones_odoo.router, importar.router):
+          catalogo.router, ecommerce.router, etiquetas.router, tiendanube.router, cambios.router, recolecciones_odoo.router, importar.router, rotulos.router):
     app.include_router(r)
 
 

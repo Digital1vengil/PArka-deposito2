@@ -38,6 +38,12 @@ SECCIONES_BASE = [
     dict(slug="pick_odoo", nombre="Recolecciones Odoo", icono="📋", orden=9, activa=True,
          roles="admin,deposito",
          descripcion="Recolecciones abiertas de Odoo (WH/PICK) con aviso de las nuevas, y sus etiquetas en rollo Honeywell"),
+    dict(slug="rotulos", nombre="Rótulos de entrega", icono="📦", orden=10, activa=True,
+         roles="admin,deposito",   # el rol Recolector se suma solo (como a Depósito)
+         descripcion="Pedidos nuevos de Magontex en Odoo (Recolectar y Órdenes de entrega) y su rótulo Zebra 10x15 por bulto"),
+    dict(slug="clientes", nombre="Códigos de clientes", icono="🏷️", orden=11, activa=True,
+         roles="admin,deposito",   # el rol Recolector se suma solo (como a Depósito)
+         descripcion="Clientes de Odoo con su código de barras y QR, ficha del cliente y rótulo de envío"),
 ]
 
 
@@ -110,6 +116,10 @@ def sembrar(db: Session) -> None:
     pick = next((s for s in secs if s.slug == "pick_odoo"), None)
     if pick and "recolector" not in (pick.roles or "").split(","):
         pick.roles = ",".join([r for r in (pick.roles or "").split(",") if r] + ["recolector"])
+    # v2026.10.16: Rótulos de entrega y Códigos de clientes — el Recolector las ve igual que Depósito (solo al crearlas)
+    for s in secs:
+        if s.slug in ("rotulos", "clientes") and s.roles == "admin,deposito":
+            s.roles = "admin,deposito,recolector"
     # El orden de las secciones lo maneja el admin (Secciones → arrastrar). Ya no se reordena solo al arrancar.
     if not db.scalar(select(Usuario).where(Usuario.rol == "admin")):
         db.add(Usuario(nombre=ADMIN_NOMBRE, rol="admin", pin_hash=hash_pin(ADMIN_PIN)))

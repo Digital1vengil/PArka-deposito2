@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block titulo %}Códigos de clientes · {{ APP_NOMBRE }}{% endblock %}
+{% block contenido %}
+<a href="/" class="text-sm text-zinc-500 hover:text-violeta">← Inicio</a>
+<h1 class="text-2xl font-bold mb-1">🏷️ Códigos de clientes</h1>
+<p class="text-sm text-zinc-500 mb-5">Los clientes de Odoo (contactos con ventas). Cada uno tiene su <b>código de barras</b> (CLI- y el número de
+  Odoo, no cambia nunca) y su <b>QR</b>, que abre la ficha del cliente. Escaneá o escribí un código en el buscador para ir directo a la ficha.
+  Marcá clientes y tocá <b>Imprimir códigos</b> para sacar la planilla A4 (24 por hoja).</p>
+
+{% if not conectado %}
+<section class="card p-4 mb-4" style="background:#fef3c7;color:#92400e">Falta conectar Odoo:
+  {% if u.es_admin %}<a class="underline" href="/admin/conexiones">Conexiones → Odoo</a> (usuario y API key){% else %}pedíselo al admin{% endif %}.</section>
+{% endif %}
+
+<section class="card p-4 mb-4">
+  <div class="flex flex-wrap items-center gap-2 mb-3">
+    <h2 class="font-bold flex-1">Clientes <span id="n" class="chip"></span></h2>
+    <select id="filtro" class="input !w-auto !py-1 text-sm" onchange="pintar()">
+      <option value="">Todos</option>
+      <option value="con">Con expreso</option>
+      <option value="sin">Sin expreso</option>
+      <option value="empresa">Solo empresas</option>
+      <option value="sintel">Sin teléfono</option>
+      <option value="sincp">Sin CP</option>
+    </select>
+    <input id="q" class="input !w-64 !py-1 text-sm" placeholder="Nombre, CUIT, localidad o código CLI-…" oninput="pintar()"
+      onkeydown="if (event.key === 'Enter') irCodigo()" autofocus>
+    <button class="btn btn-gris btn-chico" onclick="cargar(true)">↻ Actualizar</button>
+  </div>
+  <div class="flex flex-wrap items-center gap-2 mb-3 text-sm">
+    <label><input type="checkbox" id="todos" onchange="marcarTodos(this.checked)"> Marcar los que se ven</label>
+    <span id="sel" class="text-zinc-500"></span><span class="flex-1"></span>
+    <button id="btn-imp" class="btn btn-chico" style="background:#7c3aed;color:#fff" onclick="imprimirCodigos(this)" disabled>🖨 Imprimir códigos</button>
+  </div>
+  <div id="lista" class="flex flex-col text-sm"><p class="text-zinc-500">Cargando…</p></div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+let _data = [], _vis = [];
+const _sel = new Set(), MAX = 300;
+
+function idDeCodigo(t) { const m = /^\s*(?:cli-?)?(\d{1,9})\s*$/i.exec(t || ''); return m ? +m[1] : null; }
+function irCodigo() {
+  const t = document.getElementById('q').value, id = idDeCodigo(t);
+  if (id && (/cli/i.test(t) || _data.some(c => c.id === id))) location.href = '/clientes/' + id;
+  else if (_vis.length === 1) location.href = '/clientes/' + _vis[0].id;
+}
+
+function fila(c) {
+  const dir = [c.localidad, c.provincia].filter(Boolean).join(', ');
+  return `<label class="flex items-center gap-3 py-2 border-b" style="border-color:var(--line)">
+    <input type="checkbox" ${_sel.has(c.id) ? 'checked' : ''} onchange="marcar(${c.id}, this.checked)">
+    <span class="font-mono text-xs w-24">${esc(c.codigo)}</span>
+    <span class="flex-1 min-w-0"><a class="font-semibold hover:text-violeta" href="/clientes/${c.id}">${esc(c.nombre)}</a>
+      <span class="text-xs text-zinc-500">${esc([c.cuit, dir].filter(Boolean).join(' · '))}</span></span>
+    ${c.telefono ? '' : '<span class="chip text-xs" style="color:#b91c1c">sin tel.</span>'}${c.cp ? '' : '<span class="chip text-xs" style="color:#b45309">sin CP</span>'}
+    <span class="text-xs ${c.expreso ? '' : 'text-zinc-400'}">🚚 ${esc(c.expreso || 'sin expreso')}</span>
+  </label>`;
+}
+
+function pintar() {
+  const f = document.getElementById('filtro').value, q = document.getElementById('q').value.trim().toLowerCase();
+  let cs = _data;
+  if (f === 'con') cs = cs.filter(c => c.expreso);
+  else if (f === 'sin') cs = cs.filter(c => !c.expreso);
+  else if (f === 'empresa') cs = cs.filter(c => c.empresa);
+  else if (f === 'sintel') cs = cs.filter(c => !c.telefono);
+  else if (f === 'sincp') cs = cs.filter(c => !c.cp);
+  if (q) {
+    const id = idDeCodigo(q);
+    cs = cs.filter(c => (id && c.id === id) || [c.nombre, c.codigo, c.cuit, c.localidad, c.provincia, c.expreso].join(' ').toLowerCase().includes(q));
+  }
+  _vis = cs;
+  document.getElementById('n').textContent = cs.length;
+  document.getElementById('lista').innerHTML = cs.slice(0, MAX).map(fila).join('')
+    + (cs.length > MAX ? `<p class="text-xs text-zinc-500 mt-2">Se muestran ${MAX} de ${cs.length}: buscá para achicar la lista.</p>` : '')
+    || '<p class="text-zinc-500">No hay clientes para mostrar.</p>';
+  contar();
+}
+
+function contar() {
+  document.getElementById('sel').textContent = _sel.size ? `${_sel.size} marcado${_sel.size === 1 ? '' : 's'}` : '';
+  document.getElementById('btn-imp').disabled = !_sel.size;
+}
+function marcar(id, si) { si ? _sel.add(id) : _sel.delete(id); contar(); }
+function marcarTodos(si) { _vis.slice(0, MAX).forEach(c => si ? _sel.add(c.id) : _sel.delete(c.id)); pintar(); }
+
+async function imprimirCodigos(btn) { await imprimirHTML('/clientes/codigos.html?ids=' + [..._sel].join(','), btn); }
+
+async function cargar(refrescar) {
+  try {
+    const d = await api('/clientes/api/lista' + (refrescar ? '?refrescar=1' : ''));
+    _data = d.clientes; pintar();
+  } catch (e) {
+    document.getElementById('lista').innerHTML = `<p style="color:#b91c1c">No se pudo leer Odoo: ${esc(e.message)}</p>`;
+  }
+}
+cargar(false);
+</script>
+{% endblock %}

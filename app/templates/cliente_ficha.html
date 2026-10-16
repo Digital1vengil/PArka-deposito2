@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block titulo %}{{ c.nombre }} · {{ APP_NOMBRE }}{% endblock %}
+{% block contenido %}
+<a href="/clientes" class="text-sm text-zinc-500 hover:text-violeta">← Códigos de clientes</a>
+<h1 class="text-2xl font-bold mb-1">{{ c.nombre }}</h1>
+<p class="text-sm text-zinc-500 mb-5"><span class="font-mono">{{ c.codigo }}</span>{% if c.cuit %} · CUIT {{ c.cuit }}{% endif %}
+  {% if c.empresa %} · Empresa{% endif %}</p>
+
+<div class="grid md:grid-cols-3 gap-4 mb-4">
+  <section class="card p-4 md:col-span-2 text-sm">
+    <h2 class="font-bold mb-2">Datos de Odoo</h2>
+    <div class="grid sm:grid-cols-2 gap-x-4 gap-y-2">
+      <div><div class="lbl">Dirección</div>{{ c.calle or '—' }}<br>{{ [c.localidad, ('CP ' ~ c.cp) if c.cp else '']|select|join(' ') }}{% if c.provincia %}, {{ c.provincia }}{% endif %}</div>
+      <div><div class="lbl">Teléfono</div>{{ c.telefono or '—' }}{% if c.email %}<br><span class="text-zinc-500">{{ c.email }}</span>{% endif %}</div>
+      <div><div class="lbl">Expreso (Transportista por defecto)</div>{% if c.expreso %}<b>{{ c.expreso }}</b>{% else %}<span style="color:#b91c1c">Sin cargar en Odoo</span>{% endif %}</div>
+    </div>
+    {% if c.entregas %}
+    <h3 class="font-bold mt-4 mb-1">Direcciones de entrega</h3>
+    <ul class="list-disc pl-5">{% for e in c.entregas %}<li>{{ e.calle }} · {{ [e.localidad, e.provincia]|select|join(', ') }}</li>{% endfor %}</ul>
+    {% endif %}
+  </section>
+  <section class="card p-4 flex flex-col items-center gap-2">
+    <div style="line-height:0">{{ barcode|safe }}</div>
+    <div class="font-mono font-bold">{{ c.codigo }}</div>
+    <div style="line-height:0" class="mt-2">{{ qr|safe }}</div>
+    <button class="btn btn-gris btn-chico mt-2" onclick="imprimirHTML('/clientes/codigos.html?ids={{ c.id }}', this)">🖨 Imprimir código</button>
+  </section>
+</div>
+
+<section class="card p-4 mb-4 text-sm">
+  <h2 class="font-bold mb-2">Rótulo de envío (Zebra 10×15)</h2>
+  <div class="flex flex-wrap items-end gap-3">
+    <label>Bultos<br><input id="bultos" type="number" min="1" max="99" value="1" class="input !w-20 !py-1"></label>
+    {% if c.entregas %}<label>Dirección<br><select id="entrega" class="input !w-auto !py-1">
+      <option value="0">Principal: {{ c.calle }}</option>
+      {% for e in c.entregas %}<option value="{{ e.id }}">{{ e.calle }} · {{ e.localidad }}</option>{% endfor %}
+    </select></label>{% endif %}
+    <button class="btn btn-chico" style="background:#7c3aed;color:#fff" onclick="rotulo(this)">🖨 Imprimir rótulos</button>
+    <button class="btn btn-gris btn-chico" onclick="location.href='/clientes/{{ c.id }}/rotulo.zpl?' + qs()">ZPL</button>
+  </div>
+  <p class="text-xs text-zinc-500 mt-2">Para los pedidos de Odoo usá <a class="underline" href="/rotulos">Rótulos de entrega</a>: ahí el rótulo lleva el número de pedido y los bultos de Odoo.</p>
+</section>
+
+{% if c.pedidos %}
+<section class="card p-4 text-sm">
+  <h2 class="font-bold mb-2">Últimos pedidos de Magontex</h2>
+  {% for p in c.pedidos %}<div class="flex flex-wrap gap-2 py-1 border-b" style="border-color:var(--line)">
+    <b>{{ p.nombre }}</b><span class="text-zinc-500">{{ p.origen }}</span><span class="chip">{{ p.estado_txt }}</span>
+    <span class="flex-1"></span><span class="text-xs text-zinc-500">{{ p.creado }} · {{ p.bultos }} bulto{{ '' if p.bultos == 1 else 's' }}</span></div>{% endfor %}
+</section>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+function qs() {
+  const e = document.getElementById('entrega');
+  return 'bultos=' + Math.max(1, +document.getElementById('bultos').value || 1) + (e ? '&entrega=' + e.value : '');
+}
+function rotulo(btn) { imprimirHTML('/clientes/{{ c.id }}/rotulo.html?' + qs(), btn); }
+</script>
+{% endblock %}

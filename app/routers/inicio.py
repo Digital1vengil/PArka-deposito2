@@ -78,6 +78,8 @@ def ir_a_seccion(slug: str, request: Request, u: Usuario = Depends(usuario_actua
         raise SinPermiso()
     if s.activa and slug == "pick_odoo":
         return RedirectResponse("/recolecciones-odoo", status_code=303)
+    if s.activa and slug in ("rotulos", "clientes"):
+        return RedirectResponse(f"/{slug}", status_code=303)
     if s.activa and slug in ("despacho", "devoluciones", "conteo", "tareas", "articulos", "asistente", "ml",
                                   "recoleccion", "mapeo", "ecommerce", "cambios"):
         return RedirectResponse(f"/{slug}", status_code=303)

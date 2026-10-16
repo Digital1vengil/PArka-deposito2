@@ -606,3 +606,17 @@ class OdooPickImpresion(Base):
     usuario_id: Mapped[Optional[int]] = mapped_column(ForeignKey("usuarios.id"), nullable=True)
     etiquetas: Mapped[int] = mapped_column(Integer, default=0)
     at: Mapped[datetime] = mapped_column(DateTime, default=ahora)
+
+
+class OdooRotulo(Base):
+    """Pedidos de Odoo (Magontex: Recolectar y Órdenes de entrega) que vio la app: cuándo llegaron y si se imprimió
+    el rótulo de entrega. Sin impresión = NUEVO."""
+    __tablename__ = "odoo_rotulos"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    picking_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
+    nombre: Mapped[str] = mapped_column(String(40), default="")
+    detectado_at: Mapped[datetime] = mapped_column(DateTime, default=ahora)
+    impreso_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    impreso_por: Mapped[Optional[int]] = mapped_column(ForeignKey("usuarios.id"), nullable=True)
+    bultos: Mapped[int] = mapped_column(Integer, default=0)      # bultos del último rótulo impreso
+    veces: Mapped[int] = mapped_column(Integer, default=0)

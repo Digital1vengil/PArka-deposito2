@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block titulo %}Rótulos de entrega · {{ APP_NOMBRE }}{% endblock %}
+{% block contenido %}
+<a href="/" class="text-sm text-zinc-500 hover:text-violeta">← Inicio</a>
+<h1 class="text-2xl font-bold mb-1">📦 Rótulos de entrega</h1>
+<p class="text-sm text-zinc-500 mb-5">Los pedidos de Magontex en Odoo (<b>Recolectar</b> y <b>Órdenes de entrega</b>). Cuando llega uno nuevo,
+  la app anota la fecha y lo marca <span class="chip chip-alta">NUEVO</span> hasta que se imprime su rótulo.
+  Los <b>bultos</b> salen del campo "Cantidad de Bultos" del pedido en Odoo (podés corregirlos antes de imprimir) y el <b>expreso</b>,
+  del "Transportista por defecto" del cliente. Sale un rótulo Zebra 10×15 por bulto. Se actualiza solo cada minuto.</p>
+
+{% if not conectado %}
+<section class="card p-4 mb-4" style="background:#fef3c7;color:#92400e">Falta conectar Odoo:
+  {% if u.es_admin %}<a class="underline" href="/admin/conexiones">Conexiones → Odoo</a> (usuario y API key){% else %}pedíselo al admin{% endif %}.</section>
+{% endif %}
+
+<section class="card p-4 mb-4">
+  <div class="flex flex-wrap items-center gap-2 mb-3">
+    <h2 class="font-bold flex-1">Pedidos <span id="n" class="chip"></span> <span id="nn"></span></h2>
+    <select id="filtro" class="input !w-auto !py-1 text-sm" onchange="cambiarFiltro()">
+      <option value="abiertos">Abiertos</option>
+      <option value="nuevos">Solo NUEVOS</option>
+      <option value="Recolectar">Recolectar</option>
+      <option value="Órdenes de entrega">Órdenes de entrega</option>
+      <option value="">Todos (también hechos y cancelados)</option>
+    </select>
+    <input id="q" class="input !w-56 !py-1 text-sm" placeholder="Buscar pedido, cliente o expreso" oninput="pintar()">
+    <button class="btn btn-gris btn-chico" onclick="cargar(true)">↻ Actualizar</button>
+  </div>
+  <div id="lista" class="flex flex-col gap-3 text-sm"><p class="text-zinc-500">Cargando…</p></div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+let _data = [], _vistas = null, _todos = false;
+const _bultos = {};   // bultos corregidos a mano (por pedido) mientras la pantalla está abierta
+const COLOR = { assigned: 'chip-hecha', confirmed: 'chip-pendiente', waiting: 'chip-pendiente', draft: '', done: '', cancel: '' };
+const dmy = f => f ? f.slice(8, 10) + '/' + f.slice(5, 7) + ' ' + f.slice(11) : '';
+
+function cambiarFiltro() {
+  const quiere = document.getElementById('filtro').value === '';
+  if (quiere !== _todos) { _todos = quiere; document.getElementById('lista').innerHTML = '<p class="text-zinc-500">Cargando…</p>'; cargar(false); }
+  else pintar();
+}
+
+function fila(p) {
+  const c = p.cliente, nuevo = p.abierto && !p.impreso;
+  const b = _bultos[p.id] || p.bultos;
+  const imp = p.impreso ? `<span class="text-xs text-zinc-500">🖨 ${esc(p.impreso.usuario)} · ${esc(p.impreso.at)} · ${p.impreso.bultos} rótulo${p.impreso.bultos === 1 ? '' : 's'}${p.impreso.veces > 1 ? ` (${p.impreso.veces} veces)` : ''}</span>` : '';
+  const cli = c ? `<div class="mt-1"><b>${esc(c.nombre)}</b> <a class="text-xs text-violeta underline" href="/clientes/${c.id}">${esc(c.codigo)}</a>
+      ${c.telefono ? `<span class="text-xs text-zinc-500">· ${esc(c.telefono)}</span>` : ''}</div>
+      <div class="text-zinc-600">${esc([c.calle, [c.localidad, c.cp ? '(CP ' + c.cp + ')' : ''].filter(Boolean).join(' '), c.provincia].filter(Boolean).join(' · ')) || '<span style="color:#b91c1c">sin dirección en Odoo</span>'}</div>
+      <div class="mt-1">🚚 ${c.expreso ? `<b>${esc(c.expreso)}</b>` : '<b style="color:#b91c1c">Sin transportista por defecto en Odoo</b>'}</div>`
+    : '<div class="mt-1" style="color:#b91c1c">El pedido no tiene cliente en Odoo</div>';
+  return `<div class="rounded-xl p-3 border" style="border-color:${nuevo ? 'var(--violeta, #7c3aed)' : 'var(--line)'}">
+    <div class="flex flex-wrap items-center gap-2">
+      <b class="text-base">${esc(p.nombre)}</b>${nuevo ? '<span class="chip chip-alta">NUEVO</span>' : ''}
+      <span class="chip">${esc(p.tipo)}</span><span class="chip ${COLOR[p.estado] || ''}">${esc(p.estado_txt)}</span>
+      <span class="text-zinc-500">${esc(p.origen)}</span><span class="flex-1"></span>
+      <span class="text-xs text-zinc-500">${p.detectado ? 'llegó ' + esc(dmy(p.detectado)) : 'creado ' + esc(dmy(p.creado))}</span>
+    </div>
+    ${cli}
+    <div class="mt-2 flex flex-wrap items-center gap-2">
+      <label class="text-sm">Bultos <input type="number" min="1" max="99" value="${b}" class="input !w-16 !py-1 text-sm" onchange="_bultos[${p.id}] = Math.max(1, +this.value || 1)"></label>
+      ${c ? `<button class="btn btn-chico" style="background:#7c3aed;color:#fff" onclick="imprimir(${p.id}, this)">🖨 Imprimir rótulos</button>
+      <button class="btn btn-gris btn-chico" onclick="imprimir(${p.id}, this, true)">Prueba (1)</button>
+      <a class="btn btn-gris btn-chico" href="/rotulos/${p.id}/rotulo.zpl?bultos=${b}" onclick="this.href='/rotulos/${p.id}/rotulo.zpl?bultos=' + (_bultos[${p.id}] || ${p.bultos})">ZPL</a>` : ''}
+      ${imp}
+    </div></div>`;
+}
+
+function pintar() {
+  const f = document.getElementById('filtro').value, q = document.getElementById('q').value.trim().toLowerCase();
+  let ps = _data;
+  if (f === 'nuevos') ps = ps.filter(p => p.abierto && !p.impreso);
+  else if (f === 'abiertos') ps = ps.filter(p => p.abierto);
+  else if (f) ps = ps.filter(p => p.abierto && p.tipo === f);
+  if (q) ps = ps.filter(p => [p.nombre, p.origen, p.cliente?.nombre, p.cliente?.codigo, p.cliente?.expreso].join(' ').toLowerCase().includes(q));
+  document.getElementById('n').textContent = ps.length;
+  document.getElementById('lista').innerHTML = ps.map(fila).join('') || '<p class="text-zinc-500">No hay pedidos para mostrar.</p>';
+}
+
+async function cargar(refrescar) {
+  try {
+    const pedidoTodos = _todos;
+    const d = await api('/rotulos/api/lista?todos=' + (pedidoTodos ? 1 : 0) + (refrescar ? '&refrescar=1' : ''));
+    if (pedidoTodos !== _todos) return;
+    const ids = new Set(d.pedidos.filter(p => p.abierto).map(p => p.id));
+    if (_vistas) {
+      const llegaron = d.pedidos.filter(p => p.abierto && !_vistas.has(p.id));
+      if (llegaron.length) {
+        toast(`📦 Pedido nuevo en Odoo: ${llegaron.map(p => p.nombre + ' (' + (p.cliente?.nombre || '') + ')').join(', ')}`, 'ok', 8000);
+        try { beepOk(); } catch (e) {}
+      }
+    }
+    _vistas = new Set([...(_vistas || []), ...ids]); _data = d.pedidos;
+    document.getElementById('nn').innerHTML = d.nuevos ? `<span class="chip chip-alta">${d.nuevos} NUEVO${d.nuevos === 1 ? '' : 'S'}</span>` : '';
+    pintar();
+  } catch (e) {
+    document.getElementById('lista').innerHTML = `<p style="color:#b91c1c">No se pudo leer Odoo: ${esc(e.message)}</p>`;
+  }
+}
+
+async function imprimir(id, btn, prueba = false) {
+  const p = _data.find(x => x.id === id), b = _bultos[id] || p.bultos;
+  await imprimirHTML(`/rotulos/${id}/rotulo.html?bultos=${b}${prueba ? '&prueba=1' : ''}`, btn);
+  if (!prueba) setTimeout(() => cargar(false), 1500);
+}
+
+cargar(false);
+setInterval(() => { if (!document.hidden) cargar(false); }, 60000);
+</script>
+{% endblock %}

@@ -30,6 +30,11 @@ CLAVES = {
     "odoo_usuario": ("ODOO_USUARIO", "", False),
     "odoo_api_key": ("ODOO_API_KEY", "", True),
     "odoo_sync_minutos": ("ODOO_SYNC_MINUTOS", "60", False),
+    # Rótulos de entrega (Zebra 10x15, 300 dpi): el remitente sale de la compañía en Odoo; el teléfono se carga acá
+    "rotulo_remitente_tel": ("ROTULO_REMITENTE_TEL", "", False),
+    "rotulo_desplaz_x": ("ROTULO_DESPLAZ_X", "0", False),   # mm, corrimiento del ZPL si la Zebra imprime corrido
+    "rotulo_desplaz_y": ("ROTULO_DESPLAZ_Y", "0", False),
+    "rotulo_oscuridad": ("ROTULO_OSCURIDAD", "0", False),   # ^MD de la Zebra (-30 a 30)
     # Recolección Ecommerce: Apps Script "Recolección Ecommerce — Backend Drive" (carpeta del día)
     "re_url": ("RE_URL", "", False),
     "re_token": ("RE_TOKEN", "", True),
