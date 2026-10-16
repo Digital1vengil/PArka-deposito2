@@ -70,7 +70,7 @@
   })();
 
   var BOTONES = [
-    { tipo: 'colecta', icono: 'qr-code', sub: 'Mercado Libre' },
+    { tipo: 'colecta', icono: 'barcode', sub: 'Mercado Libre' },
     { tipo: 'flex', icono: 'qr-code', sub: 'ML + Tienda Nube' },
     { tipo: 'cambios', icono: 'repeat', sub: 'App de cambios' }
   ];
