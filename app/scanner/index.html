@@ -3423,19 +3423,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 2. Enviar cierre del dia
   async function enviarCierreDelDia() {
-    var url = (typeof getGDriveUrl === 'function') ? getGDriveUrl() : '';
-    if (!url) { toast('Conecta primero el Apps Script', 'warn', 3500); return; }
     var btn = document.getElementById('btn-cierre-dia');
     var prev = btn ? btn.innerHTML : '';
     if (btn) { btn.disabled = true; btn.innerHTML = 'Enviando cierre...'; }
     try {
-      var r = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ action: 'cerrarDia' }),
-        redirect: 'follow'
-      });
+      // el cierre lo manda PARKA Depósito (DEPOSITO PARKA), ya no el Apps Script viejo
+      var r = await fetch('/despacho/api/cierre-mail', { method: 'POST', credentials: 'same-origin' });
       var data = await r.json();
+      if (!r.ok) { toast((data && data.detail) || 'No se pudo enviar el cierre', 'error', 5000); if (btn) { btn.disabled = false; btn.innerHTML = prev; } return; }
       if (data && data.ok && data.count === 0) {
         toast('No hay despachos registrados hoy', 'info', 4000);
       } else if (data && data.ok) {
@@ -3724,11 +3719,11 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function enviarCierre() {
-    if (!url()) { aviso('Conecta primero el Apps Script', 'warn', 3500); return; }
     var b = document.getElementById('sp-cierre');
     var prev = b.innerHTML;
     b.disabled = true; b.innerHTML = 'Enviando...';
-    var d = await post('cerrarDia', null);
+    var d = null;  // el cierre lo manda PARKA Depósito (DEPOSITO PARKA), ya no el Apps Script viejo
+    try { var r = await fetch('/despacho/api/cierre-mail', { method: 'POST', credentials: 'same-origin' }); d = await r.json(); if (!r.ok) d = null; } catch (e) {}
     b.disabled = false; b.innerHTML = prev;
     if (d && d.ok && d.count === 0) aviso('No hay despachos registrados hoy', 'info', 4000);
     else if (d && d.ok) aviso('Cierre enviado a ' + (d.mail || 'gerencia') + ' - ' + d.despachados + ' despachados / ' + d.noDespachados + ' no despachados', 'ok', 6000);

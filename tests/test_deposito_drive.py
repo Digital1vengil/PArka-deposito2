@@ -135,3 +135,20 @@ def test_cierre_por_mail(monkeypatch):
         r = c.post("/admin/api/deposito-drive/mail", json={})
         assert r.status_code == 502 and "enviarMail" in r.json()["detail"]
         assert "gerencia@magontex.com.ar" in c.get("/admin/cierre").text
+
+
+def test_botones_manuales_usan_el_cierre_nuevo(monkeypatch):
+    from app.services import drive
+    llamadas = []
+    monkeypatch.setattr(re_drive, "configurado", lambda db=None: True)
+    monkeypatch.setattr(re_drive, "guardar_deposito", lambda db, fecha, archivos: {"archivos": []})
+    monkeypatch.setattr(re_drive, "enviar_mail", lambda db, para, asunto, html, adjuntos=None, copia="":
+                        llamadas.append(("mail_nuevo", para)) or {})
+    monkeypatch.setattr(drive, "informar_dia", lambda db, u=None: {"despachados": [], "pendientes": []})
+    monkeypatch.setattr(drive, "gas_post", lambda action, *a, **k: llamadas.append(("gas", action)) or {"ok": True})
+    with TestClient(app) as c:
+        _login(c)
+        r = c.post("/despacho/api/cierre-mail").json()
+        assert r["ok"] and r["mail"] == "gerencia@magontex.com.ar" and r["despachados"] >= 4
+        assert c.post("/admin/api/google/cerrar").json()["ok"]
+    assert llamadas == [("mail_nuevo", "gerencia@magontex.com.ar")] * 2   # nunca el cerrarDia viejo

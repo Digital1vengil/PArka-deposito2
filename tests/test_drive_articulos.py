@@ -71,7 +71,12 @@ def _login(c, nombre="Vengil", pin="1234"):
     assert c.post("/login", data={"usuario_id": uid, "pin": pin}).json()["ok"]
 
 
-def test_drive_de_punta_a_punta(gas):
+def test_drive_de_punta_a_punta(gas, monkeypatch):
+    from app.services import re_drive
+    mails = []
+    monkeypatch.setattr(re_drive, "configurado", lambda db=None: True)
+    monkeypatch.setattr(re_drive, "guardar_deposito", lambda db, fecha, archivos: {"archivos": []})
+    monkeypatch.setattr(re_drive, "enviar_mail", lambda db, para, *a, **k: mails.append(para) or {})
     with TestClient(app) as c:
         _login(c)
         d = c.get("/despacho/api/drive/archivos?tipo=flex").json()
@@ -94,13 +99,13 @@ def test_drive_de_punta_a_punta(gas):
         assert all(i["Estado"] == "despachado" for _, _, d in env for i in d["datos"])
         assert c.get("/despacho/api/estado").json()["sin_drive"] == 0
 
-        # cierre por Google: informa pendientes una sola vez y pide el mail
+        # cierre manual: informa pendientes al Sheet una sola vez y manda el mail NUEVO (nunca el cerrarDia viejo)
         gas.posts.clear()
         r = c.post("/admin/api/google/cerrar").json()
-        assert r["ok"] and r["despachados"] == 2
+        assert r["ok"] and r["despachados"] == 2 and mails == ["gerencia@magontex.com.ar"]
         pend = [p for p in gas.posts if p[0] == "procesarExcel"]
         assert pend and all(i["Estado"] == "pendiente" for _, _, d in pend for i in d["datos"])
-        assert gas.posts[-1][0] == "cerrarDia"
+        assert "cerrarDia" not in [p[0] for p in gas.posts]
         gas.posts.clear()
         c.post("/admin/api/google/informar")
         assert not [p for p in gas.posts if p[0] == "procesarExcel"]  # no se duplican en LogDia

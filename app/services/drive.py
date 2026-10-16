@@ -4,7 +4,7 @@ Se usan las mismas acciones que ya usaba la PWA:
   GET  listFiles?tipo=flex|colecta|tiendanube   → archivos del día en PARKA Despacho/<tipo>/<fecha>
   GET  getFile?fileId=…                         → contenido del archivo
   POST procesarExcel {data:{datos,fecha}, tipo} → guarda el .xlsx del despacho en Drive y lo anota en LogDia
-  POST cerrarDia                                → arma el archivo único del día y lo manda por mail
+  (cerrarDia ya no se usa: el mail del cierre lo manda DEPOSITO PARKA, ver services/deposito_drive.py)
   POST getConfig                                → mail de gerencia, copia y hora del cierre automático
 """
 from __future__ import annotations
@@ -173,12 +173,24 @@ def informar_dia(db: Session, usuario: Usuario | None = None, fecha: date | None
 
 
 def cerrar_dia(db: Session, usuario: Usuario | None = None) -> dict:
-    """Informa todo lo del día y le pide a Google que arme el archivo único y mande el mail."""
-    info = informar_dia(db, usuario)
-    r = gas_post("cerrarDia", timeout=180)
-    registrar(db, usuario, "cierre_google",
-              f"{r.get('despachados', 0)} despachados / {r.get('noDespachados', 0)} no despachados → {r.get('mail', 'gerencia')}")
-    return {**r, "informado": info}
+    """Cierre manual (botones del scanner, SmartPost y Cierre diario). El mail viejo del Apps Script del scanner
+    (cerrarDia) ya no se usa: se pasan los datos del día a su Sheet como siempre y sale el cierre nuevo de
+    DEPOSITO PARKA (el mismo que el automático de las 17 hs). Devuelve las claves que esperan esas pantallas."""
+    from . import deposito_drive
+    try:
+        info = informar_dia(db, usuario)
+    except DriveError as e:  # el Sheet viejo es secundario: el mail sale igual
+        log.warning("No se pudo informar al Apps Script del scanner: %s", e)
+        info = {"error": str(e)}
+    fecha = hoy()
+    r = deposito_drive.enviar_cierre_mail(db, fecha, usuario)
+    if not r.ok:
+        raise DriveError(r.error)
+    desp = len(deposito_drive.despachos_del_dia(db, fecha)) + len(deposito_drive.smartpost_del_dia(db, fecha))
+    pend = sum(1 for l in db.scalars(select(Lote).where(or_(Lote.fecha == fecha, and_(Lote.fecha < fecha,
+               Lote.cerrado.is_(False))))).all() for p in l.paquetes if p.estado == "pendiente")
+    return {"ok": True, "mail": r.destinatario, "despachados": desp, "noDespachados": pend, "count": desp + pend,
+            "informado": info}
 
 
 def leer_config() -> dict:

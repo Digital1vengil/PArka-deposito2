@@ -21,15 +21,15 @@
 </section>
 {% if google %}
 <section class="card p-5 mb-6 border-teal-700">
-  <h2 class="font-bold mb-1">☁ Cierre por Google (el mismo del scanner)</h2>
-  <p class="text-sm text-zinc-400 mb-3">Google arma el archivo único del día en <b>PARKA Despacho / Cierre del día</b> y lo manda por mail.
+  <h2 class="font-bold mb-1">☁ Sheet del scanner (PARKA Despacho)</h2>
+  <p class="text-sm text-zinc-400 mb-3">El mail viejo del scanner está apagado: el cierre que llega a gerencia es el de <b>DEPOSITO PARKA</b> (arriba).
+    "Enviar cierre del día ahora" manda ese mismo cierre nuevo.
     Todos los días, <b>{{ gas_minutos }} min antes</b> de la hora de cierre de Google, la app le pasa los despachados y los que quedaron sin despachar{% if not gas_auto %} <span class="text-amber-400">(apagado: GAS_AUTO=0)</span>{% endif %}.</p>
   <p class="text-sm mb-3" id="g-config">Leyendo configuración de Google…</p>
   <div class="flex flex-wrap gap-2">
     <button class="btn btn-gris" onclick="gInformar(this)">Pasar datos a Drive (sin mandar mail)</button>
     <button class="btn btn-primario" onclick="gCerrar(this)">Enviar cierre del día ahora</button>
   </div>
-  <p class="text-xs text-zinc-500 mt-3">El mail y la hora se cambian en la hoja CONFIG del Google Sheet del scanner.</p>
 </section>
 <h2 class="font-bold mb-2 text-zinc-400">Resumen propio de la app (opcional, por SMTP)</h2>
 {% endif %}
@@ -106,7 +106,7 @@ async function gInformar(b) {
   b.disabled = false;
 }
 async function gCerrar(b) {
-  if (!confirm('¿Enviar ahora el cierre del día por mail a gerencia?')) return;
+  if (!confirm('¿Enviar ahora el cierre del día (DEPOSITO PARKA) por mail a gerencia?')) return;
   b.disabled = true; b.textContent = 'Enviando…';
   try { const d = await api('/admin/api/google/cerrar', { method: 'POST' });
     if (d.count === 0) toast('No hay despachos registrados hoy', 'info', 5000);

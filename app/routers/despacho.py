@@ -574,6 +574,16 @@ def vivo_escaneado_quitar(body: EscaneoVivo, u: Usuario = Depends(acceso), db: S
     return {"ok": True}
 
 
+# ─────────────── Cierre del día por mail (botones "Cierre" del scanner) ───────────────
+@router.post("/api/cierre-mail")
+def cierre_mail(u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    """El scanner ya no le pide el cierre al Apps Script viejo: sale el cierre nuevo de DEPOSITO PARKA."""
+    try:
+        return drive.cerrar_dia(db, u)
+    except drive.DriveError as e:
+        raise HTTPException(502, str(e))
+
+
 # ─────────────── Aviso por WhatsApp: totales despachados hoy ───────────────
 class WhatsappDespacho(BaseModel):
     numero: str

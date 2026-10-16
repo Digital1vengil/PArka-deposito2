@@ -245,13 +245,9 @@ def google_informar(u: Usuario = Depends(acceso_cierre), db: Session = Depends(g
 @router.post("/api/google/cerrar")
 def google_cerrar(u: Usuario = Depends(acceso_cierre), db: Session = Depends(get_db)):
     try:
-        r = drive.cerrar_dia(db, u)
+        return drive.cerrar_dia(db, u)  # el registro en "Envíos anteriores" lo deja enviar_cierre_mail
     except drive.DriveError as e:
         raise HTTPException(502, str(e))
-    db.add(Cierre(fecha=hoy(), ok=bool(r.get("ok")), destinatario=str(r.get("mail", "")), automatico=False,
-                  error="" if r.get("ok") else str(r)[:500]))
-    db.commit()
-    return r
 
 
 @router.get("/cierre/vista", response_class=HTMLResponse)
