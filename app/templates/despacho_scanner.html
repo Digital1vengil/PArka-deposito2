@@ -8,7 +8,7 @@
   <button class="btn btn-primario btn-chico ml-auto" onclick="cotejar(false)">🔎 Cotejar con ML</button>
 </div>
 {% endif %}
-<iframe id="scanner" src="/despacho/scanner/" title="Despacho" class="w-full border-0 block"
+<iframe id="scanner" src="/despacho/scanner/?v={{ VERSION }}" title="Despacho" class="w-full border-0 block"
         style="height: calc(100dvh - 56px); background:#f5f5f4"
         allow="camera; microphone; clipboard-read; clipboard-write; fullscreen"></iframe>
 <script>

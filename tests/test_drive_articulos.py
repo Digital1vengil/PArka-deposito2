@@ -146,7 +146,7 @@ def test_despacho_es_el_scanner():
         assert r.status_code == 200 and "AKfycbwP_qnW67" in r.text  # misma URL del Apps Script
         assert c.get("/despacho/scanner/styles.css").status_code == 200
         assert c.get("/despacho/scanner/../main.py").status_code == 404
-        assert 'src="/despacho/scanner/"' in c.get("/despacho").text
+        assert 'src="/despacho/scanner/?v=' in c.get("/despacho").text   # con la versión: sin copias viejas
         assert c.get("/despacho/lotes", follow_redirects=False).headers["location"] == "/despacho"
         assert "beta" not in c.get("/despacho").text
     with TestClient(app) as op:

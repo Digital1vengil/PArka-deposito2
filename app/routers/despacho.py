@@ -1,5 +1,6 @@
 import io
 import json
+import re
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile, HTTPException
 from pathlib import Path
@@ -53,7 +54,10 @@ def _scanner_html() -> str:
     for viejo, nuevo in _COLORES.items():
         html = html.replace(viejo, nuevo).replace(viejo.upper(), nuevo)
     tema = '<link rel="stylesheet" href="tema-parka.css">\n<script src="ml-semaforo.js"></script>\n<script src="control-despacho.js"></script>\n<script src="tiendanube-despacho.js"></script>\n<script src="despacho-vivo.js"></script>\n<script src="whatsapp-despacho.js"></script>'
-    return html.replace("</body>", tema + "\n</body>", 1) if "</body>" in html else html + tema
+    html = html.replace("</body>", tema + "\n</body>", 1) if "</body>" in html else html + tema
+    # cada versión con su propia dirección: el celular no puede quedarse con un script o estilo viejo
+    from ..templating import VERSION
+    return re.sub(r'((?:src|href)=")([\w.-]+\.(?:js|css))"', lambda m: f'{m.group(1)}{m.group(2)}?v={VERSION}"', html)
 
 
 @router.get("")

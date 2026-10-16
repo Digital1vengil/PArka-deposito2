@@ -70,7 +70,7 @@ def test_semaforo_cotejo_y_seccion_ml(monkeypatch):
         assert c.get("/despacho/api/ml/verificar?codigo=44000000001").json() == {"ok": False, "sin_conexion": True}
         assert "Cotejar con ML" not in c.get("/despacho").text
         html = c.get("/despacho/scanner/").text
-        assert '<script src="ml-semaforo.js"></script>' in html
+        assert '<script src="ml-semaforo.js?v=' in html
         assert "processScan" in c.get("/despacho/scanner/ml-semaforo.js").text
 
         from app.db import SessionLocal
