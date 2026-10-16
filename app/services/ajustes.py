@@ -33,6 +33,8 @@ CLAVES = {
     # Recolección Ecommerce: Apps Script "Recolección Ecommerce — Backend Drive" (carpeta del día)
     "re_url": ("RE_URL", "", False),
     "re_token": ("RE_TOKEN", "", True),
+    # DEPOSITO PARKA en Drive (mismo Apps Script): Despachos / Devoluciones / Conteos / Cierre, un Excel por día
+    "deposito_drive_auto": ("DEPOSITO_DRIVE_AUTO", "1", False),   # 1 = se actualizan solos cada 15 min
     # Búsqueda automática: revisa ML + TN cada N minutos, suma las ventas nuevas y avisa cancelaciones
     "re_auto": ("RE_AUTO", "1", False),
     "re_auto_min": ("RE_AUTO_MIN", "2", False),

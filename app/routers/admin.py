@@ -12,7 +12,7 @@ from ..auth import solo_admin, requiere, hash_pin, pin_valido, verificar_pin, ac
 acceso_cierre = requiere("cierre")
 from ..db import get_db, hoy
 from ..models import Cierre, Seccion, Usuario, ROLES
-from ..services import drive
+from ..services import deposito_drive, drive, re_drive
 from ..services.cierre import datos_cierre, excel_cierre, html_cierre, enviar_cierre, mail_configurado
 from ..templating import render
 
@@ -185,7 +185,29 @@ def cierre_page(request: Request, u: Usuario = Depends(acceso_cierre), db: Sessi
     return render(request, "admin_cierre.html", u=u, fecha=fecha, historial=historial,
                   mail_ok=mail_configurado(), mail_to=config.MAIL_TO,
                   automatico=config.CIERRE_AUTOMATICO, hora=config.CIERRE_HORA, dias=config.CIERRE_DIAS,
-                  google=drive.configurado(), gas_minutos=config.GAS_MINUTOS_ANTES, gas_auto=config.GAS_AUTO)
+                  google=drive.configurado(), gas_minutos=config.GAS_MINUTOS_ANTES, gas_auto=config.GAS_AUTO,
+                  deposito_ok=deposito_drive.configurado(db), deposito_auto=deposito_drive.automatico(db))
+
+
+class DepositoIn(BaseModel):
+    fecha: date | None = None
+
+
+@router.post("/api/deposito-drive/guardar")
+def deposito_guardar(body: DepositoIn, u: Usuario = Depends(acceso_cierre), db: Session = Depends(get_db)):
+    """Arma y sube (reemplazando) los 4 Excel del día a DEPOSITO PARKA en Drive."""
+    try:
+        return {"ok": True, **deposito_drive.sincronizar(db, body.fecha or hoy(), u, forzar=True)}
+    except deposito_drive.DepositoDriveError as e:
+        raise HTTPException(502, str(e))
+
+
+@router.get("/api/deposito-drive/estado")
+def deposito_estado(fecha: date | None = None, u: Usuario = Depends(acceso_cierre), db: Session = Depends(get_db)):
+    try:
+        return {"ok": True, **re_drive.deposito(db, (fecha or hoy()).isoformat())}
+    except re_drive.REDriveError as e:
+        raise HTTPException(502, str(e))
 
 
 @router.get("/api/google/config")

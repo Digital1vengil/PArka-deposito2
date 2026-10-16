@@ -62,6 +62,8 @@ ACCIONES = {
     "drive_guardado": "Guardó despacho en Drive",
     "drive_pendientes": "Informó pendientes a Drive",
     "drive_error": "Error con Google Drive",
+    "drive_deposito": "Guardó los Excel del día en DEPOSITO PARKA",
+    "drive_deposito_error": "Error al guardar en DEPOSITO PARKA",
     "articulos_importados": "Importó artículos",
     "panel_iniciado": "Inició el Panel PARKA",
     "envio_manual": "Cargó envío SmartPost",

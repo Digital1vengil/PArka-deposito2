@@ -2,6 +2,21 @@
 {% block titulo %}Cierre diario · {{ APP_NOMBRE }}{% endblock %}
 {% block contenido %}
 <h1 class="text-2xl font-bold mb-2">📧 Cierre diario</h1>
+<section class="card p-5 mb-6 border-emerald-700">
+  <h2 class="font-bold mb-1">📁 DEPOSITO PARKA en Drive</h2>
+  {% if deposito_ok %}
+  <p class="text-sm text-zinc-400 mb-3">Un Excel por día en cada carpeta: <b>Despachos</b> (Flex, Colecta y Tienda Nube), <b>Devoluciones</b>,
+    <b>Conteos</b> y <b>Cierre</b> (todo lo del día). Si se vuelve a guardar un día, el archivo se reemplaza.
+    {% if deposito_auto %}Se actualizan solos cada 15 minutos cuando hay cambios.{% else %}<span class="text-amber-400">La actualización automática está apagada (deposito_drive_auto=0).</span>{% endif %}</p>
+  <div class="flex flex-wrap gap-2 items-center">
+    <button class="btn btn-primario" onclick="dGuardar(this)">Guardar el día en Drive ahora</button>
+    <span class="text-xs text-zinc-500">Usa el día elegido abajo.</span>
+  </div>
+  <div id="d-archivos" class="text-sm mt-3"></div>
+  {% else %}
+  <p class="text-sm text-amber-300">Falta conectar el Apps Script de Drive: Conexiones → Recolección Ecommerce (URL y TOKEN).</p>
+  {% endif %}
+</section>
 {% if google %}
 <section class="card p-5 mb-6 border-teal-700">
   <h2 class="font-bold mb-1">☁ Cierre por Google (el mismo del scanner)</h2>
@@ -45,6 +60,28 @@
 {% endblock %}
 {% block scripts %}
 <script>
+const SECC = { despachos: 'Despachos', devoluciones: 'Devoluciones', conteos: 'Conteos', cierre: 'Cierre' };
+function dPintar(secciones) {
+  const el = document.getElementById('d-archivos'); if (!el) return;
+  el.innerHTML = Object.entries(SECC).map(([k, n]) => {
+    const s = secciones[k] || {}, a = s.archivo;
+    return `<div>📂 <a class="underline" target="_blank" href="${esc(s.url || '#')}">${n}</a> · ` +
+      (a ? `<a class="underline text-emerald-400" target="_blank" href="${esc(a.url)}">${esc(a.nombre)}</a> <span class="text-zinc-500">(${esc(a.modificado.slice(11, 16))})</span>`
+         : '<span class="text-zinc-500">sin archivo de este día</span>') + '</div>';
+  }).join('');
+}
+async function dEstado() {
+  if (!document.getElementById('d-archivos')) return;
+  try { const d = await api('/admin/api/deposito-drive/estado?fecha=' + document.getElementById('fecha').value); dPintar(d.secciones || {}); }
+  catch (e) { document.getElementById('d-archivos').innerHTML = `<span class="text-red-400">${esc(e.message)}</span>`; }
+}
+async function dGuardar(b) {
+  b.disabled = true; const t = b.textContent; b.textContent = 'Guardando…';
+  try { const d = await api('/admin/api/deposito-drive/guardar', { json: { fecha: document.getElementById('fecha').value } });
+    toast(`📁 Guardados en DEPOSITO PARKA: ${d.archivos.map(a => a.nombre).join(', ')}`, 'ok', 6000); dEstado(); }
+  catch (e) { toast(e.message, 'error', 7000); }
+  b.disabled = false; b.textContent = t;
+}
 async function gConfig() {
   const el = document.getElementById('g-config'); if (!el) return;
   try { const c = await api('/admin/api/google/config');
@@ -71,7 +108,8 @@ async function gCerrar(b) {
 gConfig();
 const fecha = document.getElementById('fecha');
 function ver() { document.getElementById('vista').src = '/admin/cierre/vista?fecha=' + fecha.value; }
-fecha.onchange = ver;
+fecha.onchange = () => { ver(); dEstado(); };
+dEstado();
 async function enviar() {
   const b = document.getElementById('btn-enviar'); b.disabled = true; b.textContent = 'Enviando…';
   try { await api('/admin/api/cierre/enviar', { json: { fecha: fecha.value, destinatario: document.getElementById('dest').value } });

@@ -70,6 +70,26 @@ def _iniciar_scheduler():
                     db.close()
         sch.add_job(job_google, "interval", minutes=2, id="google")
 
+    # 2b) DEPOSITO PARKA en Drive: cada 15 min se reemplazan los Excel del día que cambiaron
+    #     (Despachos / Devoluciones / Conteos / Cierre). Pasada la medianoche se cierra también el día anterior.
+    def job_deposito_drive():
+        from .services import deposito_drive
+        db = SessionLocal()
+        try:
+            if not (deposito_drive.configurado(db) and deposito_drive.automatico(db)):
+                return
+            now = ahora()
+            fechas = [hoy()] + ([hoy() - __import__("datetime").timedelta(days=1)] if now.hour == 0 else [])
+            for f in fechas:
+                r = deposito_drive.sincronizar(db, f)
+                if r["archivos"]:
+                    log.info("DEPOSITO PARKA %s: %s", f, [a["nombre"] for a in r["archivos"]])
+        except Exception as e:  # noqa: BLE001
+            log.warning("No se pudo guardar en DEPOSITO PARKA: %s", e)
+        finally:
+            db.close()
+    sch.add_job(job_deposito_drive, "interval", minutes=15, id="deposito_drive")
+
     # 3) Odoo: sincroniza el catálogo de artículos cada N minutos (Conexiones → Odoo). Sin datos de Odoo no hace nada.
     def job_odoo():
         from .services import catalogo, odoo

@@ -5,6 +5,9 @@
   GET  ?token&action=listar&fecha=aaaa-mm-dd → archivos de esa fecha (sin crear la carpeta)
   GET  ?token&action=archivo&id=…            → archivo en base64 (las Hojas de Google vienen como .xlsx)
   POST {token, action:"guardar", fecha, nombre, base64, mime} → guarda en la carpeta de la fecha
+  GET  ?token&action=deposito&fecha=…        → carpetas de DEPOSITO PARKA y archivos de ese día
+  POST {token, action:"guardarDeposito", fecha, archivos:[{seccion, base64}]} → reemplaza los Excel del día
+       (secciones: despachos | devoluciones | conteos | cierre). Código del script: google/deposito-drive.gs
 Respuesta: {"ok": true, "data": …} o {"ok": false, "error": "…"}.
 """
 from __future__ import annotations
@@ -89,3 +92,13 @@ def guardar(db: Session | None, fecha: str, nombre: str, contenido: bytes,
             mime: str = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") -> dict:
     return _post(db, "guardar", fecha=fecha, nombre=nombre, mime=mime,
                  base64=base64.b64encode(contenido).decode("ascii"))
+
+
+def deposito(db: Session | None, fecha: str | None = None) -> dict:
+    return _get(db, "deposito", timeout=60, **({"fecha": fecha} if fecha else {}))
+
+
+def guardar_deposito(db: Session | None, fecha: str, archivos: dict[str, bytes]) -> dict:
+    """Sube los Excel del día a DEPOSITO PARKA/<Sección>/<fecha> - <Sección>.xlsx (reemplaza los anteriores)."""
+    return _post(db, "guardarDeposito", timeout=180, fecha=fecha,
+                 archivos=[{"seccion": k, "base64": base64.b64encode(v).decode("ascii")} for k, v in archivos.items()])
