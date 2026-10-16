@@ -44,7 +44,6 @@
        y sin recortar se desbordaba tapando la lista de pendientes / despachados. */
     #camera-wrapper { height: 25vh !important; height: 25dvh !important; min-height: 170px; max-height: 25dvh; overflow: hidden; }
     #qr-reader { width: 100% !important; height: 100% !important; border: none !important; padding: 0 !important; background: #000; overflow: hidden; }
-    #qr-reader > div { height: 100% !important; }
     #qr-reader video { width: 100% !important; height: 100% !important; object-fit: cover; display: block; }
     /* Hide ALL injected html5-qrcode UI chrome */
     #qr-reader > div[id$="header_message"],
@@ -2131,16 +2130,11 @@ async function startScanner(fromUserGesture = false) {
   }
   if (!scanner) { scannerStarting = false; showCamError('notfound', 'No se pudo inicializar el escáner'); return; }
 
-  // Un solo recuadro cuadrado (QR). Es un poco más grande que el dibujado (.scan-frame) para que lea
-  // aunque la etiqueta no quede perfectamente centrada; las barras de SmartPost / TN también entran.
+  // Se lee en TODA la imagen de la cámara (sin qrbox): con la cámara chica (1/4 de pantalla) un recuadro
+  // de lectura dejaba afuera las barras de Colecta y los QR algo lejos. El recuadro verde es solo una guía.
   const qrConfig = {
     fps: 12,
-    qrbox: (w, h) => {
-      const side = Math.round(Math.min(w, h) * 0.85);
-      return { width: side, height: side };
-    },
     rememberLastUsedCamera: false,
-    aspectRatio: 1.0,
   };
 
   // Probar cámaras en cascada. La primera pide HD y enfoque continuo: con la resolución baja por defecto
