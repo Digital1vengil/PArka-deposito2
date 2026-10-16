@@ -9,11 +9,13 @@
   const original = processScan;
   let conectado = null;            // null = no sé todavía
   const badge = document.createElement('div');
-  badge.style.cssText = 'position:fixed;right:8px;bottom:8px;z-index:60;font:600 11px system-ui;padding:3px 8px;border-radius:999px;color:#fff;opacity:.85;pointer-events:none';
+  // dentro de la cámara, arriba a la derecha (abajo tapaba el botón Finalizar)
+  badge.style.cssText = 'position:absolute;right:8px;top:8px;z-index:60;font:600 11px system-ui;padding:3px 8px;border-radius:999px;color:#fff;opacity:.85;pointer-events:none';
   function pintar(txt, color) { badge.textContent = txt; badge.style.background = color; }
   pintar('ML …', '#6b6b6b');
-  document.addEventListener('DOMContentLoaded', () => document.body.appendChild(badge));
-  if (document.body) document.body.appendChild(badge);
+  function ubicar() { (document.getElementById('camera-wrapper') || document.body).appendChild(badge); }
+  document.addEventListener('DOMContentLoaded', ubicar);
+  if (document.body) ubicar();
 
   fetch('/despacho/api/ml/estado', { cache: 'no-store' }).then(r => r.json()).then(d => {
     conectado = !!d.conectado;

@@ -2,6 +2,7 @@
 {% block titulo %}Despacho · {{ APP_NOMBRE }}{% endblock %}
 {% block main_class %}max-w-none px-0 py-0{% endblock %}
 {% block contenido %}
+<style>#parkia-fab{display:none}</style>{# en Despacho la burbuja tapaba "Finalizar Despacho" #}
 {% if cotejo_ok %}
 <div class="bg-white border-b border-zinc-700 px-4 py-1.5 flex items-center text-sm">
   <button class="btn btn-primario btn-chico ml-auto" onclick="cotejar(false)">🔎 Cotejar con ML</button>

@@ -50,6 +50,9 @@
     #qr-reader select,
     #qr-reader button { display: none !important; }
     #qr-reader img { display: none !important; }
+    /* html5-qrcode dibuja su propio recuadro: se oculta para que se vea uno solo (.scan-frame) */
+    #qr-reader #qr-shaded-region { border-color: transparent !important; box-shadow: none !important; }
+    #qr-reader #qr-shaded-region > div { display: none !important; }
 
     /* ── Scan overlay ─────────────────────────────── */
     .scan-overlay {
@@ -59,7 +62,9 @@
     }
     .scan-frame {
       position: relative;
-      width: min(65vw, 200px); height: min(65vw, 200px);
+      width: min(72vw, 34vh, 300px); aspect-ratio: 1 / 1;
+      box-shadow: 0 0 0 9999px rgba(0,0,0,.35);   /* oscurece afuera del recuadro */
+      border-radius: 14px;
     }
     .scan-frame::before, .scan-frame::after,
     .scan-frame > span::before, .scan-frame > span::after {
@@ -198,7 +203,7 @@
       </div>
       <!-- Selector de tipo para dividir la carga de archivos (Flex / Colecta) -->
       <div class="flex bg-slate-100 rounded-full p-0.5 gap-0.5 mb-3">
-        <button id="btn-drive-colecta" class="flex-1 text-xs font-bold px-3 py-1.5 rounded-full text-slate-500 flex items-center justify-center gap-1"><i data-lucide="barcode" class="icon" style="width:14px;height:14px;"></i> Colecta</button>
+        <button id="btn-drive-colecta" class="flex-1 text-xs font-bold px-3 py-1.5 rounded-full text-slate-500 flex items-center justify-center gap-1"><i data-lucide="qr-code" class="icon" style="width:14px;height:14px;"></i> Colecta</button>
         <button id="btn-drive-flex" class="flex-1 text-xs font-bold px-3 py-1.5 rounded-full text-slate-500 flex items-center justify-center gap-1"><i data-lucide="qr-code" class="icon" style="width:14px;height:14px;"></i> Flex</button>
         <button id="btn-drive-tiendanube" class="flex-1 text-xs font-bold px-2 py-1.5 rounded-full text-slate-500 flex items-center justify-center gap-1"><i data-lucide="shopping-bag" class="icon" style="width:14px;height:14px;"></i> Tienda Nube</button>
         <button id="btn-drive-cambios" class="flex-1 text-xs font-bold px-2 py-1.5 rounded-full text-slate-500 flex items-center justify-center gap-1"><i data-lucide="repeat" class="icon" style="width:14px;height:14px;"></i> Cambios</button>
@@ -405,20 +410,8 @@
     </div>
   </div>
 
-  <!-- ── Scan mode toggle ── -->
-  <div class="bg-white border-b border-slate-200 px-3 py-2 flex items-center justify-center gap-3 flex-shrink-0">
-    <span class="text-slate-400 text-xs font-semibold uppercase tracking-wider">Modo escáner:</span>
-    <div class="flex bg-slate-100 rounded-full p-0.5 gap-0.5">
-      <button id="btn-mode-barcode" class="text-xs font-bold px-4 py-1.5 rounded-full bg-forest-600 text-white">
-        ▬ Barras
-      </button>
-      <button id="btn-mode-qr" class="text-xs font-bold px-4 py-1.5 rounded-full text-slate-500">
-        ▣ QR
-      </button>
-    </div>
-  </div>
   <!-- ── Camera area ── -->
-  <div class="relative bg-black flex-shrink-0" id="camera-wrapper" style="height: 42dvh; height: 42vh;">
+  <div class="relative bg-black flex-shrink-0" id="camera-wrapper" style="height: 46vh; height: 46dvh;">
     <div id="qr-reader" style="width:100%; height:100%;"></div>
 
     <!-- Camera-idle overlay: default state — the camera only turns on from "Iniciar Despacho" -->
@@ -456,7 +449,7 @@
     <div id="status-banner" class="banner-animate rounded-xl px-4 py-2.5 bg-slate-600 flex items-center gap-3">
       <span id="banner-icon" class="text-2xl flex-shrink-0">📷</span>
       <div class="min-w-0">
-        <p id="banner-title" class="text-white font-bold text-sm leading-tight">Apuntá la cámara a un código QR o de barras</p>
+        <p id="banner-title" class="text-white font-bold text-sm leading-tight">Apuntá la cámara al QR de la etiqueta</p>
         <p id="banner-sub1" class="text-white/70 text-xs mt-0.5 truncate hidden"></p>
         <p id="banner-sub2" class="text-white/50 text-xs truncate hidden"></p>
       </div>
@@ -587,10 +580,10 @@
     <p class="text-slate-800 font-bold text-lg mb-1">¿Qué tipo de despacho?</p>
     <p class="text-slate-500 text-sm mb-6">Selecciona el tipo para cargar los archivos correspondientes</p>
     <button id="tipo-colecta-btn" style="background-color:#2563eb" class="w-full active:opacity-80 text-white font-bold py-4 rounded-xl text-base mb-3 flex items-center justify-center gap-2">
-      <i data-lucide="barcode" class="icon"></i> Colecta (Códigos de barras)
+      <i data-lucide="qr-code" class="icon"></i> Colecta (Mercado Libre)
     </button>
     <button id="tipo-flex-btn" style="background-color:#7c3aed" class="w-full active:opacity-80 text-white font-bold py-4 rounded-xl text-base flex items-center justify-center gap-2">
-      <i data-lucide="qr-code" class="icon"></i> Flex (Códigos QR)
+      <i data-lucide="qr-code" class="icon"></i> Flex (Mercado Libre)
     </button>
   </div>
 </div>
@@ -610,7 +603,7 @@ let state = null;
 let scanner = null;
 let scannerRunning = false;
 let scannerStarting = false;
-let scanMode = 'barcode'; // 'barcode' or 'qr'
+const scanMode = 'qr'; // siempre QR (las etiquetas de ML traen QR); las barras de SmartPost / TN se siguen leyendo
 // Despacho session
 let currentDespacho = [];
 let despachoActive  = false;
@@ -2134,29 +2127,16 @@ async function startScanner(fromUserGesture = false) {
   }
   if (!scanner) { scannerStarting = false; showCamError('notfound', 'No se pudo inicializar el escáner'); return; }
 
-  // Flex lleva etiquetas de ML (QR) y de SmartPost / Tienda Nube (barras): un recuadro que sirve para las dos
-  const mixto = !!(state && state.dispatchType === 'flex');
+  // Un solo recuadro cuadrado (QR). Es un poco más grande que el dibujado (.scan-frame) para que lea
+  // aunque la etiqueta no quede perfectamente centrada; las barras de SmartPost / TN también entran.
   const qrConfig = {
     fps: 12,
     qrbox: (w, h) => {
-      if (mixto) {
-        const bw = Math.round(w * 0.88);
-        const bh = Math.max(120, Math.round(Math.min(h * 0.62, bw)));
-        return { width: bw, height: bh };
-      }
-      if (scanMode === 'qr') {
-        // Cuadrado centrado — ideal para QR
-        const side = Math.round(Math.min(w, h) * 0.75);
-        return { width: side, height: side };
-      } else {
-        // Rectángulo ancho y bajo — ideal para Code128/EAN/barcode
-        const bw = Math.round(w * 0.92);
-        const bh = Math.max(70, Math.round(h * 0.25));
-        return { width: bw, height: bh };
-      }
+      const side = Math.round(Math.min(w, h) * 0.85);
+      return { width: side, height: side };
     },
     rememberLastUsedCamera: false,
-    aspectRatio: scanMode === 'qr' ? 1.0 : 1.7778, // 1:1 para QR, 16:9 para barras
+    aspectRatio: 1.0,
   };
 
   // Probar cámaras en cascada. La primera pide HD y enfoque continuo: con la resolución baja por defecto
@@ -3267,17 +3247,6 @@ document.addEventListener('DOMContentLoaded', () => {
     toast('🔫 Pistola láser activa — apuntá y disparás, el código se procesa automáticamente', 'info', 4000);
   });
 
-  function setScanMode(mode) {
-    scanMode = mode;
-    const bBar = document.getElementById('btn-mode-barcode');
-    const bQr  = document.getElementById('btn-mode-qr');
-    if (bBar) { bBar.className = mode === 'barcode' ? 'text-xs font-bold px-4 py-1.5 rounded-full bg-forest-600 text-white' : 'text-xs font-bold px-4 py-1.5 rounded-full text-slate-500'; }
-    if (bQr)  { bQr.className  = mode === 'qr'      ? 'text-xs font-bold px-4 py-1.5 rounded-full bg-forest-600 text-white' : 'text-xs font-bold px-4 py-1.5 rounded-full text-slate-500'; }
-    if (scannerRunning) startScanner(true);
-  }
-  document.getElementById('btn-mode-barcode')?.addEventListener('click', () => setScanMode('barcode'));
-  document.getElementById('btn-mode-qr')?.addEventListener('click', () => setScanMode('qr'));
-
   // ── Secondary actions popup ("+" button) ──
   document.getElementById('btn-fab-toggle')?.addEventListener('click', toggleFabMenu);
   document.addEventListener('click', (e) => {
@@ -3305,7 +3274,6 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-begin-day')?.addEventListener('click', beginDay);
   document.getElementById('btnIniciar')?.addEventListener('click', () => {
     if (despachoActive) { startScanner(true); return; }   // ya iniciado: solo enciende la cámara
-    setScanMode(resolveDispatchType() === 'flex' ? 'qr' : 'barcode');
     iniciarDespacho();
   });
   document.getElementById('btnFinalizar')?.addEventListener('click', finalizarDespacho);
