@@ -366,15 +366,34 @@ def fecha_de(ped: dict) -> str:
     return f"{f[8:10]}/{f[5:7]}/{f[:4]}" if len(f) >= 10 else ""
 
 
-# ZPL a 300 dpi: 11,81 puntos por mm. Rótulo de 100 x 150 mm = 1181 x 1772 puntos.
+# ZPL a 300 dpi: 11,81 puntos por mm. Etiqueta Zebra de 100 x 150 mm = 1181 x 1772 puntos.
+# El rótulo ocupa 100 x 130 mm, pegado abajo: los 20 mm de arriba quedan en blanco.
 DPMM = 300 / 25.4
 PW, LL = round(100 * DPMM), round(150 * DPMM)
 MX = 35   # margen lateral (puntos)
+ARRIBA_MM, ALTO_MM = 20, 130
+_TOP = round(ARRIBA_MM * DPMM)
+# El diseño está dibujado en puntos de 30 a 1740 (1710 de alto); se achica para entrar en 130 mm.
+_K = (LL - _TOP - 30) / 1710
+
+
+def _Y(v: float) -> int:
+    return _TOP + 10 + round((v - 30) * _K)
+
+
+def _S(v: float) -> int:
+    return max(1, round(v * _K))
 
 
 def _z(s) -> str:
     """Texto seguro para ^FD (sin ^ ni ~, que son comandos)."""
     return re.sub(r"[\^~\r\n]+", " ", str(s or "")).strip()
+
+
+def _achicar(texto: str, entra: int, minimo: float) -> float:
+    """Factor de tamaño de letra: 1 si el texto tiene hasta `entra` caracteres; si no, proporcional (con un mínimo)."""
+    n = len(texto or "")
+    return 1.0 if n <= entra else max(minimo, entra / n)
 
 
 def _datos(r: dict) -> dict:
@@ -389,6 +408,9 @@ def _datos(r: dict) -> dict:
                  ("Ciudad", cli.get("localidad", "")), ("Provincia", cli.get("provincia", "")),
                  ("CP", cli.get("cp", "")), ("Tel.", cli.get("telefono", ""))],
         "expreso": cli.get("expreso") or "SIN EXPRESO", "codigo": cli["codigo"], "url": r["url"],
+        # letra más chica si el texto es largo, para que entre en una línea
+        "f_exp": _achicar(cli.get("expreso") or "SIN EXPRESO", 15, 0.45),
+        "f_rs": _achicar(f"Razón social: {cli['nombre']}", 34, 0.62),
         "tracking": r.get("tracking", ""),
         "rem_izq": [("Razón social", rem["nombre"]), ("CUIT", rem.get("cuit", "")), ("Domicilio", rem.get("calle", ""))],
         "rem_der": [("Teléfono", rem.get("telefono", "")),
@@ -402,19 +424,20 @@ def _zpl_rotulo(r: dict, cfg: dict) -> str:
     X0, X1, W = MX, PW - MX, PW - 2 * MX
     z = [f"^XA^CI28^PW{PW}^LL{LL}^LH{cfg['x']},{cfg['y']}^MD{cfg['md']}^PON"]
 
+    # (las y y los altos están en puntos del diseño; _Y/_S los llevan a la zona de 130 mm)
     def caja(y, h):
-        z.append(f"^FO{X0},{y}^GB{W},{h},3^FS")
+        z.append(f"^FO{X0},{_Y(y)}^GB{W},{_S(h)},3^FS")
 
     def vline(x, y, h):
-        z.append(f"^FO{x},{y}^GB3,{h},3^FS")
+        z.append(f"^FO{x},{_Y(y)}^GB3,{_S(h)},3^FS")
 
     def txt(x, y, alto, texto, ancho=0, lineas=1, centro=False):
         fb = f"^FB{ancho},{lineas},4,{'C' if centro else 'L'}" if ancho else ""
-        z.append(f"^FO{x},{y}^A0N,{alto},{alto}{fb}^FD{_z(texto)}^FS")
+        z.append(f"^FO{x},{_Y(y)}^A0N,{_S(alto)},{_S(alto)}{fb}^FD{_z(texto)}^FS")
 
     def titulo(y, texto):
         txt(X0 + 14, y + 12, 32, texto)
-        z.append(f"^FO{X0},{y + 52}^GB{W},2,2^FS")
+        z.append(f"^FO{X0},{_Y(y + 52)}^GB{W},2,2^FS")
 
     # 1) empresa | fecha, bulto, peso, pedido
     y, h, xs = 30, 250, X0 + 600
@@ -439,7 +462,7 @@ def _zpl_rotulo(r: dict, cfg: dict) -> str:
     caja(y, h)
     titulo(y, "DESTINATARIO")
     dest = dict(d["dest"])
-    txt(X0 + 18, y + 68, 46, f"Razón social: {dest['Razón social']}", W - 36, 2)
+    txt(X0 + 18, y + 68 + round(23 * (1 - d["f_rs"])), round(46 * d["f_rs"]), f"Razón social: {dest['Razón social']}", W - 36, 2)
     txt(X0 + 18, y + 172, 36, f"CUIT: {dest['CUIT']}", W - 36, 1)
     txt(X0 + 18, y + 220, 36, f"Dirección: {dest['Dirección']}", W - 36, 2)
     txt(X0 + 18, y + 306, 36, f"Ciudad: {dest['Ciudad']}", W - 36, 1)
@@ -449,16 +472,16 @@ def _zpl_rotulo(r: dict, cfg: dict) -> str:
     y, h = 790, 170
     caja(y, h)
     titulo(y, "EXPRESO")
-    txt(X0, y + 72, 86, d["expreso"], W, 1, centro=True)
+    txt(X0, y + 72 + round(43 * (1 - d["f_exp"])), round(86 * d["f_exp"]), d["expreso"], W, 1, centro=True)
     # 5) tracking: código de barras del cliente + QR a su ficha
     y, h = 960, 460
     caja(y, h)
     titulo(y, "TRACKING")
-    z.append(f"^FO{X0 + 24},{y + 80}^BY4,3,250^BCN,250,N,N,N^FD{_z(d['codigo'])}^FS")
+    z.append(f"^FO{X0 + 24},{_Y(y + 80)}^BY4,3,{_S(250)}^BCN,{_S(250)},N,N,N^FD{_z(d['codigo'])}^FS")
     txt(X0 + 24, y + 345, 48, d["codigo"])
     if d["tracking"]:
         txt(X0 + 24, y + 405, 30, f"Seguimiento: {d['tracking']}", 640, 1)
-    z.append(f"^FO{X1 - 335},{y + 70}^BQN,2,9^FDQA,{_z(d['url'])}^FS")
+    z.append(f"^FO{X1 - 305},{_Y(y + 70)}^BQN,2,8^FDQA,{_z(d['url'])}^FS")
     # 6) remitente
     y, h, xs = 1420, 320, X0 + 600
     caja(y, h)
@@ -520,17 +543,19 @@ def qr_svg(texto: str, lado_mm: float) -> str:
 CSS_ROTULO = """@page{size:100mm 150mm;margin:0}
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:Arial,Helvetica,sans-serif;color:#000;background:#fff}
-.rot{width:100mm;height:150mm;padding:2.5mm 3mm;page-break-after:always;overflow:hidden}
+.rot{width:100mm;height:150mm;padding-top:20mm;page-break-after:always;overflow:hidden}
+.zona{width:100mm;height:130mm;overflow:hidden}
+.cont{width:107.53mm;padding:2.5mm 3mm;transform:scale(.93);transform-origin:0 0}
 .rot:last-child{page-break-after:auto}
 .c{border:.3mm solid #000;border-top:0;overflow:hidden}.c:first-child{border-top:.3mm solid #000}
 .f{display:flex}.f>div{min-width:0}.bl{border-left:.3mm solid #000}
 .t{font-size:2.9mm;font-weight:700;padding:.8mm 1.4mm;border-bottom:.2mm solid #000}
 .b{padding:1mm 1.6mm;font-size:3.1mm;line-height:3.9mm}
 .emp{flex:1.15;font-size:7mm;font-weight:700;line-height:7.6mm;padding:2.5mm 2mm;display:flex;align-items:center}
-.cab{flex:1;font-size:2.9mm;line-height:4.2mm;padding:1.4mm 1.6mm}.cab big{font-size:5.4mm;font-weight:700}
+.cab{flex:1;font-size:2.9mm;line-height:4.2mm;padding:1.4mm 1.6mm;white-space:nowrap}.cab big{font-size:5.4mm;font-weight:700}
 .fr{font-size:3.4mm;font-weight:700;padding:1.2mm 1.6mm;width:22mm}
 .obs{flex:1;font-size:2.6mm;padding:1.6mm;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.rs{font-size:4mm;font-weight:700;line-height:4.6mm;margin-bottom:.6mm}
+.rs{font-size:4mm;font-weight:700;line-height:4.6mm;margin-bottom:.6mm;white-space:nowrap;overflow:hidden}
 .exp{text-align:center;font-weight:700;font-size:7.4mm;line-height:10mm;white-space:nowrap;overflow:hidden}
 .trk{display:flex;justify-content:space-between;align-items:flex-start;padding:2mm 2mm 1.5mm}
 .trk .k{font-size:4mm;font-weight:700;margin-top:1mm}.trk .s{font-size:2.6mm;margin-top:.8mm}
@@ -546,20 +571,20 @@ def _rotulo_html(r: dict) -> str:
     dest = dict(d["dest"])
     pick = f' <span style="font-size:2.4mm">· {e(d["picking"])}</span>' if d["picking"] else ""
     seg = f'<div class="s">Seguimiento: {e(d["tracking"])}</div>' if d["tracking"] else ""
-    return f"""<div class="rot">
+    return f"""<div class="rot"><div class="zona"><div class="cont">
 <div class="c f"><div class="emp">{e(d['empresa'])}</div><div class="cab bl"><div><b>Fecha:</b> {e(d['fecha'])}</div>
 <div><b>Bulto:</b> <big>{e(d['bulto'])}</big></div><div><b>Peso (kg):</b> {e(d['peso'] or '-')}</div>
 <div><b>#Pedido:</b> {e(d['pedido'])}{pick}</div></div></div>
 <div class="c f"><div class="fr">FRAGIL</div><div class="obs bl">OBS: {e(d['obs'])}</div></div>
-<div class="c"><div class="t">DESTINATARIO</div><div class="b"><div class="rs">Razón social: {e(dest['Razón social'])}</div>
+<div class="c"><div class="t">DESTINATARIO</div><div class="b"><div class="rs" style="font-size:{4 * d['f_rs']:.2f}mm">Razón social: {e(dest['Razón social'])}</div>
 {filas([(k, dest[k]) for k in ('CUIT', 'Dirección', 'Ciudad', 'Provincia')])}
 <div><b>CP:</b> {e(dest['CP'] or '-')} &nbsp; <b>Tel.:</b> {e(dest['Tel.'] or '-')}</div></div></div>
-<div class="c"><div class="t">EXPRESO</div><div class="exp">{e(d['expreso'])}</div></div>
+<div class="c"><div class="t">EXPRESO</div><div class="exp" style="font-size:{7.4 * d['f_exp']:.2f}mm">{e(d['expreso'])}</div></div>
 <div class="c"><div class="t">TRACKING</div><div class="trk"><div>{barcode_svg(d['codigo'], 18)}<div class="k">{e(d['codigo'])}</div>{seg}</div>
 {qr_svg(d['url'], 26)}</div></div>
 <div class="c"><div class="t">REMITENTE</div><div class="f rem"><div class="b" style="flex:1.1">{filas(d['rem_izq'])}</div>
 <div class="b bl" style="flex:1">{filas(d['rem_der'])}</div></div></div>
-</div>"""
+</div></div></div>"""
 
 
 def build_html(rotulos: list[dict], titulo: str = "Rótulos", auto_print: bool = True) -> str:

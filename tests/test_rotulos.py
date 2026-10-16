@@ -162,3 +162,14 @@ def test_completa_cp_ciudad_y_telefono():
     r = svc.completar_direccion(d("Alberti 2319", "MAR DEL PLATA", "", "Buenos Aires"), d("ALBERTI 2319", "MAR DEL PLATA", "", "Buenos Aires"))
     assert r["cp"] == "7600"
     assert svc.cp_de_localidad("CABA", caba) == ""
+
+
+def test_rotulo_deja_20mm_arriba():
+    """Etiqueta 100x150: el rótulo ocupa 100x130 abajo y los 20 mm de arriba quedan en blanco."""
+    cli = svc.armar_cliente(PARTNERS[11387])
+    rem = {"nombre": "MAGONTEX S.A.", "cuit": "1", "calle": "x", "localidad": "", "cp": "", "provincia": "", "telefono": ""}
+    z = svc.build_zpl(svc.lista_rotulos(None, cli, rem, 1, "http://x/clientes/11387"))
+    ys = [int(m) for m in re.findall(r"\^FO\d+,(\d+)", z)]
+    assert "^PW1181^LL1772" in z and min(ys) >= round(20 * 300 / 25.4) and max(ys) < 1772
+    h = svc.build_html(svc.lista_rotulos(None, cli, rem, 1, "http://x/clientes/11387"))
+    assert "padding-top:20mm" in h and ".zona{width:100mm;height:130mm" in h
