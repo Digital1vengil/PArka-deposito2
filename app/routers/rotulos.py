@@ -67,7 +67,7 @@ def rotulo_html(pid: int, request: Request, bultos: int = 0, prueba: bool = Fals
     else:
         svc.registrar_impresion(db, p["id"], p["nombre"], u.id, len(lista))
         registrar(db, u, "imprimió rótulos", f"{len(lista)} rótulo(s) de {p['nombre']} ({p['origen']})", seccion="rotulos")
-    return HTMLResponse(svc.build_html(lista, f"Rótulo {p['nombre']}"))
+    return HTMLResponse(svc.build_html(lista, f"Rótulo {p['nombre']}", arriba=svc.config(db)["arriba"]))
 
 
 @router.get("/rotulos/{pid}/rotulo.zpl")
@@ -131,7 +131,7 @@ def rotulo_cliente_html(pid: int, request: Request, bultos: int = 1, entrega: in
                         u: Usuario = Depends(acceso_cli), db: Session = Depends(get_db)):
     cli, lista = _rotulos_cliente(request, db, pid, bultos, entrega)
     registrar(db, u, "imprimió rótulos", f"{len(lista)} rótulo(s) de {cli['nombre']} ({cli['codigo']})", seccion="clientes")
-    return HTMLResponse(svc.build_html(lista, f"Rótulo {cli['codigo']}"))
+    return HTMLResponse(svc.build_html(lista, f"Rótulo {cli['codigo']}", arriba=svc.config(db)["arriba"]))
 
 
 @router.get("/clientes/{pid}/rotulo.zpl")

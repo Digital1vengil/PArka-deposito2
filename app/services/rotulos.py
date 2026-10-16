@@ -367,22 +367,20 @@ def fecha_de(ped: dict) -> str:
 
 
 # ZPL a 300 dpi: 11,81 puntos por mm. Etiqueta Zebra de 100 x 150 mm = 1181 x 1772 puntos.
-# El rótulo ocupa 100 x 130 mm, pegado abajo: los 20 mm de arriba quedan en blanco.
+# El rótulo va pegado abajo: los mm de arriba (Conexiones → "Margen libre arriba", 40 por defecto) quedan en blanco
+# porque en la etiqueta de Mercado Libre esa parte se separa.
 DPMM = 300 / 25.4
 PW, LL = round(100 * DPMM), round(150 * DPMM)
 MX = 35   # margen lateral (puntos)
-ARRIBA_MM, ALTO_MM = 20, 130
-_TOP = round(ARRIBA_MM * DPMM)
-# El diseño está dibujado en puntos de 30 a 1740 (1710 de alto); se achica para entrar en 130 mm.
-_K = (LL - _TOP - 30) / 1710
+ARRIBA_MM = 40
+DISENO_ALTO = 1710   # el diseño ZPL está dibujado en puntos de 30 a 1740; se achica para entrar en la zona de abajo
 
 
-def _Y(v: float) -> int:
-    return _TOP + 10 + round((v - 30) * _K)
-
-
-def _S(v: float) -> int:
-    return max(1, round(v * _K))
+def _arriba(v) -> float:
+    try:
+        return max(0.0, min(70.0, float(v)))
+    except (TypeError, ValueError):
+        return ARRIBA_MM
 
 
 def _z(s) -> str:
@@ -423,8 +421,16 @@ def _zpl_rotulo(r: dict, cfg: dict) -> str:
     d = _datos(r)
     X0, X1, W = MX, PW - MX, PW - 2 * MX
     z = [f"^XA^CI28^PW{PW}^LL{LL}^LH{cfg['x']},{cfg['y']}^MD{cfg['md']}^PON"]
+    top = round(_arriba(cfg.get("arriba", ARRIBA_MM)) * DPMM)
+    escala = (LL - top - 30) / DISENO_ALTO
 
-    # (las y y los altos están en puntos del diseño; _Y/_S los llevan a la zona de 130 mm)
+    # las y y los altos están en puntos del diseño; _Y/_S los llevan a la zona libre de abajo
+    def _Y(v: float) -> int:
+        return top + 10 + round((v - 30) * escala)
+
+    def _S(v: float) -> int:
+        return max(1, round(v * escala))
+
     def caja(y, h):
         z.append(f"^FO{X0},{_Y(y)}^GB{W},{_S(h)},3^FS")
 
@@ -506,11 +512,11 @@ def config(db: Session | None = None) -> dict:
         except ValueError:
             return defecto
     return {"x": max(0, round(num("rotulo_desplaz_x", 0) * DPMM)), "y": max(0, round(num("rotulo_desplaz_y", 0) * DPMM)),
-            "md": max(-30, min(30, int(num("rotulo_oscuridad", 0))))}
+            "md": max(-30, min(30, int(num("rotulo_oscuridad", 0)))), "arriba": _arriba(num("rotulo_arriba_mm", ARRIBA_MM))}
 
 
 def build_zpl(rotulos: list[dict], cfg: dict | None = None) -> str:
-    cfg = cfg or {"x": 0, "y": 0, "md": 0}
+    cfg = cfg or {"x": 0, "y": 0, "md": 0, "arriba": ARRIBA_MM}
     return "".join(_zpl_rotulo(r, cfg) for r in rotulos)
 
 
@@ -543,9 +549,9 @@ def qr_svg(texto: str, lado_mm: float) -> str:
 CSS_ROTULO = """@page{size:100mm 150mm;margin:0}
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:Arial,Helvetica,sans-serif;color:#000;background:#fff}
-.rot{width:100mm;height:150mm;padding-top:20mm;page-break-after:always;overflow:hidden}
-.zona{width:100mm;height:130mm;overflow:hidden}
-.cont{width:107.53mm;padding:2.5mm 3mm;transform:scale(.93);transform-origin:0 0}
+.rot{width:100mm;height:150mm;page-break-after:always;overflow:hidden}
+.zona{width:100mm;overflow:hidden}
+.cont{padding:2.5mm 3mm;transform-origin:0 0}
 .rot:last-child{page-break-after:auto}
 .c{border:.3mm solid #000;border-top:0;overflow:hidden}.c:first-child{border-top:.3mm solid #000}
 .f{display:flex}.f>div{min-width:0}.bl{border-left:.3mm solid #000}
@@ -587,10 +593,22 @@ def _rotulo_html(r: dict) -> str:
 </div></div></div>"""
 
 
-def build_html(rotulos: list[dict], titulo: str = "Rótulos", auto_print: bool = True) -> str:
+CONT_ALTO_MM = 140   # alto del diseño HTML sin achicar (con nombres largos)
+
+
+def css_zona(arriba: float = ARRIBA_MM) -> str:
+    """Los mm de arriba en blanco y el rótulo achicado para entrar en el resto de la etiqueta de 150 mm."""
+    arriba = _arriba(arriba)
+    alto = 150 - arriba
+    k = min(1.0, (alto - 2) / CONT_ALTO_MM)
+    return (f".rot{{padding-top:{arriba:g}mm}}.zona{{height:{alto:g}mm}}"
+            f".cont{{width:{100 / k:.2f}mm;transform:scale({k:.3f})}}")
+
+
+def build_html(rotulos: list[dict], titulo: str = "Rótulos", auto_print: bool = True, arriba: float = ARRIBA_MM) -> str:
     js = "<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),300))</script>" if auto_print else ""
     return (f'<!doctype html><html lang="es"><head><meta charset="utf-8"><title>{escape(titulo)}</title>'
-            f'<style>{CSS_ROTULO}</style></head><body>{"".join(_rotulo_html(r) for r in rotulos)}{js}</body></html>')
+            f'<style>{CSS_ROTULO}{css_zona(arriba)}</style></head><body>{"".join(_rotulo_html(r) for r in rotulos)}{js}</body></html>')
 
 
 # ───────────────────────── planilla A4 de códigos de clientes ─────────────────────────
