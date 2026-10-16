@@ -2127,7 +2127,9 @@ async function startScanner(fromUserGesture = false) {
     scanner = new Html5Qrcode('qr-reader', {
       verbose: false,
       formatsToSupport: formatos,
-      experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+      // El lector nativo de Android (BarcodeDetector) no devolvía nada con las etiquetas de ML en el celular:
+      // se usa el lector propio de html5-qrcode (ZXing), que sí las lee.
+      experimentalFeatures: { useBarCodeDetectorIfSupported: false },
     });
   } catch {
     try { scanner = new Html5Qrcode('qr-reader', { verbose: false }); } catch {}
