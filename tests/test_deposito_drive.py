@@ -106,3 +106,32 @@ def test_payload_guardar_deposito(monkeypatch):
     re_drive.guardar_deposito(None, "2026-10-16", {"conteos": b"abc"})
     assert enviado["action"] == "guardarDeposito" and enviado["fecha"] == "2026-10-16"
     assert enviado["archivos"] == [{"seccion": "conteos", "base64": base64.b64encode(b"abc").decode()}]
+
+
+def test_cierre_por_mail(monkeypatch):
+    mails = []
+    monkeypatch.setattr(re_drive, "configurado", lambda db=None: True)
+    monkeypatch.setattr(re_drive, "guardar_deposito", lambda db, fecha, archivos: {
+        "archivos": [{"seccion": s, "nombre": s, "url": f"https://drive/{s}"} for s in archivos]})
+    monkeypatch.setattr(re_drive, "enviar_mail", lambda db, para, asunto, html, adjuntos=None, copia="":
+                        mails.append(dict(para=para, asunto=asunto, html=html, adjuntos=adjuntos)) or {})
+    with SessionLocal() as db:
+        assert not deposito_drive.cierre_mail_ya_enviado(db, hoy())
+        r = deposito_drive.enviar_cierre_mail(db, hoy(), automatico=True)
+        assert r.ok and r.destinatario == "gerencia@magontex.com.ar"
+        assert deposito_drive.cierre_mail_ya_enviado(db, hoy())
+    m = mails[0]
+    assert m["para"] == "gerencia@magontex.com.ar" and "Cierre PARKA Depósito" in m["asunto"]
+    assert "https://drive/cierre" in m["html"] and "Despachos" in m["html"]
+    nombre, contenido = next(iter(m["adjuntos"].items()))
+    assert nombre.endswith(" - Cierre.xlsx") and "Resumen" in _hojas(contenido)
+
+    # si el script falla queda registrado el error
+    def falla(*a, **k):
+        raise re_drive.REDriveError("Acción desconocida: enviarMail")
+    monkeypatch.setattr(re_drive, "enviar_mail", falla)
+    with TestClient(app) as c:
+        _login(c)
+        r = c.post("/admin/api/deposito-drive/mail", json={})
+        assert r.status_code == 502 and "enviarMail" in r.json()["detail"]
+        assert "gerencia@magontex.com.ar" in c.get("/admin/cierre").text

@@ -90,6 +90,28 @@ def _iniciar_scheduler():
             db.close()
     sch.add_job(job_deposito_drive, "interval", minutes=15, id="deposito_drive")
 
+    # 2c) Mail del cierre a gerencia (por defecto lunes a viernes 17:00) con el Excel del Cierre adjunto.
+    #     Días y hora se leen al arrancar (Conexiones → cierre_mail_dias / cierre_mail_hora).
+    def job_cierre_mail():
+        from .services import ajustes, deposito_drive
+        db = SessionLocal()
+        try:
+            if ajustes.leer("cierre_mail_auto", db).strip() == "0" or deposito_drive.cierre_mail_ya_enviado(db, hoy()):
+                return
+            r = deposito_drive.enviar_cierre_mail(db, hoy(), automatico=True)
+            log.info("Cierre por mail %s → %s: %s", hoy(), r.destinatario, "OK" if r.ok else r.error)
+        except Exception as e:  # noqa: BLE001
+            log.warning("No se pudo mandar el cierre por mail: %s", e)
+        finally:
+            db.close()
+    try:
+        from .services import ajustes as _aj
+        hh, mm = (_aj.leer("cierre_mail_hora").strip().split(":") + ["0"])[:2]
+        sch.add_job(job_cierre_mail, "cron", day_of_week=_aj.leer("cierre_mail_dias").strip() or "mon-fri",
+                    hour=int(hh), minute=int(mm), id="cierre_mail", misfire_grace_time=1800)
+    except Exception as e:  # noqa: BLE001 — un horario mal cargado no tiene que tirar la app
+        log.warning("Horario del cierre por mail inválido: %s", e)
+
     # 3) Odoo: sincroniza el catálogo de artículos cada N minutos (Conexiones → Odoo). Sin datos de Odoo no hace nada.
     def job_odoo():
         from .services import catalogo, odoo

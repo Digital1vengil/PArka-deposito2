@@ -35,6 +35,12 @@ CLAVES = {
     "re_token": ("RE_TOKEN", "", True),
     # DEPOSITO PARKA en Drive (mismo Apps Script): Despachos / Devoluciones / Conteos / Cierre, un Excel por día
     "deposito_drive_auto": ("DEPOSITO_DRIVE_AUTO", "1", False),   # 1 = se actualizan solos cada 15 min
+    # Mail del cierre (lo manda el mismo Apps Script con MailApp, con el Excel del Cierre adjunto)
+    "cierre_mail_auto": ("CIERRE_MAIL_AUTO", "1", False),
+    "cierre_mail_para": ("CIERRE_MAIL_PARA", "gerencia@magontex.com.ar", False),
+    "cierre_mail_copia": ("CIERRE_MAIL_COPIA", "", False),
+    "cierre_mail_hora": ("CIERRE_MAIL_HORA", "17:00", False),
+    "cierre_mail_dias": ("CIERRE_MAIL_DIAS", "mon-fri", False),   # formato de APScheduler: mon-fri, mon-sat…
     # Búsqueda automática: revisa ML + TN cada N minutos, suma las ventas nuevas y avisa cancelaciones
     "re_auto": ("RE_AUTO", "1", False),
     "re_auto_min": ("RE_AUTO_MIN", "2", False),

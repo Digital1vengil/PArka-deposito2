@@ -8,6 +8,9 @@
 La app arma los Excel con lo que hay en la base y el Apps Script (google/deposito-drive.gs, el mismo de
 Recolección Ecommerce) solo los guarda: cada vez que se vuelve a mandar un día, el archivo se reemplaza.
 Se actualizan solos cada 15 minutos si algo cambió (Conexiones → deposito_drive_auto) y a mano desde Cierre diario.
+
+El cierre también sale por mail (cierre_mail_para, por defecto gerencia@magontex.com.ar) en los días y la hora
+de cierre_mail_dias / cierre_mail_hora (lunes a viernes, 17:00), con el Excel del Cierre adjunto.
 """
 from __future__ import annotations
 
@@ -344,3 +347,73 @@ def sincronizar(db: Session, fecha: date, usuario: Usuario | None = None, forzar
     registrar(db, usuario, "drive_deposito", f"{f} · " + ", ".join(a["nombre"] or "" for a in subidos), "cierre")
     return {"fecha": f, "archivos": subidos, "sin_cambios": [s for s in secciones if s not in cambiadas],
             "carpeta": r.get("carpeta", "")}
+
+
+# ─────────────── Mail del cierre ───────────────
+
+def html_cierre_dia(db: Session, fecha: date, links: dict[str, str] | None = None) -> str:
+    """Cuerpo del mail: totales del día + links a los Excel de DEPOSITO PARKA (el detalle va adjunto)."""
+    from html import escape
+    desp, sp = despachos_del_dia(db, fecha), smartpost_del_dia(db, fecha)
+    devs, conteos = devoluciones_del_dia(db, fecha), conteos_del_dia(db, fecha)
+    pend = datos_cierre(db, fecha)["pendientes"]
+
+    def tabla(enc: list[str], filas: list[list]) -> str:
+        th = "".join(f"<th style='text-align:left;padding:6px 10px;background:#1f2937;color:#fff'>{escape(h)}</th>" for h in enc)
+        trs = "".join("<tr>" + "".join(f"<td style='padding:6px 10px;border-bottom:1px solid #e5e7eb'>{escape(str(c))}</td>"
+                                       for c in f) + "</tr>" for f in filas)
+        return f"<table style='border-collapse:collapse;font-size:14px;margin:8px 0 20px'><tr>{th}</tr>{trs}</table>"
+
+    pend_f = [[TIPOS_LOTE.get(p.lote.tipo, p.lote.tipo), p.tracking, p.comprador, (p.producto or "")[:60]] for p in pend[:50]]
+    extra = f"<p style='color:#6b7280'>…y {len(pend) - 50} más (ver Excel adjunto)</p>" if len(pend) > 50 else ""
+    nombres = {"despachos": "Despachos", "devoluciones": "Devoluciones", "conteos": "Conteos", "cierre": "Cierre"}
+    enlaces = " · ".join(f"<a href='{escape(u)}'>{nombres.get(k, k)}</a>" for k, u in (links or {}).items() if u)
+    return f"""<div style="font-family:Arial,sans-serif;color:#111">
+<h2 style="margin:0 0 4px">Cierre del día — {fecha.strftime('%d/%m/%Y')}</h2>
+<p style="color:#6b7280;margin:0 0 16px">PARKA Depósito · generado {ahora().strftime('%H:%M')}</p>
+<h3>Despachos</h3>{tabla(['Tipo', 'Despachados'], _totales_desp(desp, sp))}
+<h3>Devoluciones</h3>{tabla(['Plataforma', 'Óptimo', 'Falla', 'Total prendas'], _totales_dev(devs)) if devs else '<p>Sin devoluciones.</p>'}
+<h3>Conteos</h3>{tabla(['Conteo', 'Ubicación / nota', 'Operario', 'Prendas'], [[f"#{c.id}", c.nota, c.usuario.nombre if c.usuario else "", c.total] for c in conteos]) if conteos else '<p>Sin conteos.</p>'}
+<h3>Sin despachar</h3>{tabla(['Tipo', 'Nº de envío', 'Comprador', 'Producto'], pend_f) if pend_f else '<p>Todo despachado ✔</p>'}{extra}
+{f"<p>Archivos en Drive (DEPOSITO PARKA): {enlaces}</p>" if enlaces else ""}
+<p style="color:#6b7280">El detalle completo está en el Excel adjunto.</p></div>"""
+
+
+def enviar_cierre_mail(db: Session, fecha: date, usuario: Usuario | None = None, automatico: bool = False,
+                       para: str | None = None) -> "Cierre":
+    """Guarda los Excel del día en Drive y manda el cierre por mail (Apps Script → MailApp) con el Excel adjunto.
+    Queda registrado en la tabla de cierres (lo muestra Cierre diario → Envíos anteriores)."""
+    from ..models import Cierre
+    para = (para or ajustes.leer("cierre_mail_para", db)).strip()
+    copia = ajustes.leer("cierre_mail_copia", db).strip()
+    registro = Cierre(fecha=fecha, destinatario=para + (f" (cc {copia})" if copia else ""), automatico=automatico)
+    try:
+        if not configurado(db):
+            raise DepositoDriveError("Falta conectar el Apps Script de Drive (Conexiones → Recolección Ecommerce)")
+        links = {}
+        try:  # los links del mail apuntan a los archivos recién guardados; si Drive falla igual sale el mail
+            r = sincronizar(db, fecha, usuario, forzar=True)
+            links = {a["seccion"]: a["url"] for a in r["archivos"]}
+        except DepositoDriveError as e:
+            log.warning("Cierre por mail: no se pudo guardar en Drive: %s", e)
+        desp = despachos_del_dia(db, fecha) + smartpost_del_dia(db, fecha)
+        devs = devoluciones_del_dia(db, fecha)
+        asunto = (f"Cierre PARKA Depósito — {fecha.strftime('%d/%m/%Y')} · {len(desp)} despachados, "
+                  f"{sum(i.cantidad for d in devs for i in d.items)} prendas devueltas")
+        re_drive.enviar_mail(db, para, asunto, html_cierre_dia(db, fecha, links),
+                             {f"{fecha.isoformat()} - Cierre.xlsx": excel_cierre_dia(db, fecha)}, copia=copia)
+        registro.ok = True
+        registrar(db, usuario, "cierre_mail", f"{fecha} → {registro.destinatario}"
+                  + (" (automático)" if automatico else ""), "cierre", commit=False)
+    except (DepositoDriveError, re_drive.REDriveError) as e:
+        registro.ok, registro.error = False, str(e)[:1000]
+    db.add(registro)
+    db.commit()
+    return registro
+
+
+def cierre_mail_ya_enviado(db: Session, fecha: date) -> bool:
+    """Para no mandar dos veces el automático (reinicios o más de una instancia)."""
+    from ..models import Cierre
+    return db.scalars(select(Cierre).where(Cierre.fecha == fecha, Cierre.automatico.is_(True),
+                                           Cierre.ok.is_(True))).first() is not None

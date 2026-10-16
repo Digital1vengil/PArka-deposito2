@@ -8,6 +8,7 @@
   GET  ?token&action=deposito&fecha=…        → carpetas de DEPOSITO PARKA y archivos de ese día
   POST {token, action:"guardarDeposito", fecha, archivos:[{seccion, base64}]} → reemplaza los Excel del día
        (secciones: despachos | devoluciones | conteos | cierre). Código del script: google/deposito-drive.gs
+  POST {token, action:"enviarMail", para, copia, asunto, html, adjuntos:[{nombre, base64}]} → mail (MailApp)
 Respuesta: {"ok": true, "data": …} o {"ok": false, "error": "…"}.
 """
 from __future__ import annotations
@@ -102,3 +103,10 @@ def guardar_deposito(db: Session | None, fecha: str, archivos: dict[str, bytes])
     """Sube los Excel del día a DEPOSITO PARKA/<Sección>/<fecha> - <Sección>.xlsx (reemplaza los anteriores)."""
     return _post(db, "guardarDeposito", timeout=180, fecha=fecha,
                  archivos=[{"seccion": k, "base64": base64.b64encode(v).decode("ascii")} for k, v in archivos.items()])
+
+
+def enviar_mail(db: Session | None, para: str, asunto: str, html: str, adjuntos: dict[str, bytes] | None = None,
+                copia: str = "") -> dict:
+    return _post(db, "enviarMail", timeout=120, para=para, copia=copia, asunto=asunto, html=html,
+                 adjuntos=[{"nombre": n, "base64": base64.b64encode(b).decode("ascii")}
+                           for n, b in (adjuntos or {}).items()])

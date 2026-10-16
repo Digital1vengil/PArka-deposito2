@@ -12,7 +12,7 @@ from ..auth import solo_admin, requiere, hash_pin, pin_valido, verificar_pin, ac
 acceso_cierre = requiere("cierre")
 from ..db import get_db, hoy
 from ..models import Cierre, Seccion, Usuario, ROLES
-from ..services import deposito_drive, drive, re_drive
+from ..services import ajustes, deposito_drive, drive, re_drive
 from ..services.cierre import datos_cierre, excel_cierre, html_cierre, enviar_cierre, mail_configurado
 from ..templating import render
 
@@ -186,7 +186,9 @@ def cierre_page(request: Request, u: Usuario = Depends(acceso_cierre), db: Sessi
                   mail_ok=mail_configurado(), mail_to=config.MAIL_TO,
                   automatico=config.CIERRE_AUTOMATICO, hora=config.CIERRE_HORA, dias=config.CIERRE_DIAS,
                   google=drive.configurado(), gas_minutos=config.GAS_MINUTOS_ANTES, gas_auto=config.GAS_AUTO,
-                  deposito_ok=deposito_drive.configurado(db), deposito_auto=deposito_drive.automatico(db))
+                  deposito_ok=deposito_drive.configurado(db), deposito_auto=deposito_drive.automatico(db),
+                  cm_auto=ajustes.leer("cierre_mail_auto", db).strip() != "0", cm_para=ajustes.leer("cierre_mail_para", db),
+                  cm_hora=ajustes.leer("cierre_mail_hora", db), cm_dias=ajustes.leer("cierre_mail_dias", db))
 
 
 class DepositoIn(BaseModel):
@@ -200,6 +202,20 @@ def deposito_guardar(body: DepositoIn, u: Usuario = Depends(acceso_cierre), db: 
         return {"ok": True, **deposito_drive.sincronizar(db, body.fecha or hoy(), u, forzar=True)}
     except deposito_drive.DepositoDriveError as e:
         raise HTTPException(502, str(e))
+
+
+class CierreMailIn(BaseModel):
+    fecha: date | None = None
+    para: str | None = None
+
+
+@router.post("/api/deposito-drive/mail")
+def deposito_mail(body: CierreMailIn, u: Usuario = Depends(acceso_cierre), db: Session = Depends(get_db)):
+    """Manda ahora el cierre del día por mail (Apps Script) con el Excel adjunto."""
+    r = deposito_drive.enviar_cierre_mail(db, body.fecha or hoy(), u, para=(body.para or "").strip() or None)
+    if not r.ok:
+        raise HTTPException(502, r.error)
+    return {"ok": True, "destinatario": r.destinatario}
 
 
 @router.get("/api/deposito-drive/estado")

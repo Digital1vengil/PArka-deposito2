@@ -10,8 +10,10 @@
     {% if deposito_auto %}Se actualizan solos cada 15 minutos cuando hay cambios.{% else %}<span class="text-amber-400">La actualización automática está apagada (deposito_drive_auto=0).</span>{% endif %}</p>
   <div class="flex flex-wrap gap-2 items-center">
     <button class="btn btn-primario" onclick="dGuardar(this)">Guardar el día en Drive ahora</button>
-    <span class="text-xs text-zinc-500">Usa el día elegido abajo.</span>
+    <button class="btn btn-gris" onclick="dMail(this)">Enviar cierre por mail ahora</button>
+    <span class="text-xs text-zinc-500">Usan el día elegido abajo.</span>
   </div>
+  <p class="text-sm text-zinc-400 mt-3">✉ {% if cm_auto %}El cierre sale solo por mail a <b>{{ cm_para }}</b> a las <b>{{ cm_hora }}</b> ({{ cm_dias }}), con el Excel del día adjunto.{% else %}<span class="text-amber-400">El mail automático del cierre está apagado (cierre_mail_auto=0).</span>{% endif %}</p>
   <div id="d-archivos" class="text-sm mt-3"></div>
   {% else %}
   <p class="text-sm text-amber-300">Falta conectar el Apps Script de Drive: Conexiones → Recolección Ecommerce (URL y TOKEN).</p>
@@ -74,6 +76,13 @@ async function dEstado() {
   if (!document.getElementById('d-archivos')) return;
   try { const d = await api('/admin/api/deposito-drive/estado?fecha=' + document.getElementById('fecha').value); dPintar(d.secciones || {}); }
   catch (e) { document.getElementById('d-archivos').innerHTML = `<span class="text-red-400">${esc(e.message)}</span>`; }
+}
+async function dMail(b) {
+  if (!confirm('¿Mandar ahora el cierre de este día por mail a {{ cm_para }}?')) return;
+  b.disabled = true; const t = b.textContent; b.textContent = 'Enviando…';
+  try { const d = await api('/admin/api/deposito-drive/mail', { json: { fecha: document.getElementById('fecha').value } });
+    toast(`✅ Cierre enviado a ${d.destinatario}`, 'ok', 6000); dEstado(); setTimeout(() => location.reload(), 1500); }
+  catch (e) { toast(e.message, 'error', 8000); b.disabled = false; b.textContent = t; }
 }
 async function dGuardar(b) {
   b.disabled = true; const t = b.textContent; b.textContent = 'Guardando…';

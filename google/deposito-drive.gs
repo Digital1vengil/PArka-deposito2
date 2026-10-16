@@ -1,5 +1,5 @@
 /**
- * PARKA Depósito — Backend Drive (Apps Script)  ·  versión 2026.10.16-1
+ * PARKA Depósito — Backend Drive (Apps Script)  ·  versión 2026.10.16-2
  * (antes "Recolección Ecommerce — Backend Drive": este archivo lo reemplaza completo)
  *
  * Solo se ocupa de Drive. Toda la lógica y los datos están en PARKA Depósito (Python), que arma los Excel.
@@ -12,13 +12,14 @@
  *     Recolección Ecommerce/ 2026-10-16/ …            (archivos de ventas que sube el equipo; ver ordenarCarpetas)
  *
  * Cada vez que la app vuelve a mandar un día, el archivo de esa fecha se REEMPLAZA (nunca quedan duplicados).
+ * También manda el mail del cierre (acción enviarMail): sale desde la cuenta de Google dueña del script.
  *
  * Primera vez (o después de pegar esta versión): ejecutar  configurar()  desde el editor. Pide permisos,
  * crea las carpetas, genera el TOKEN (si no había) e instala el disparador diario. El TOKEN sale en Registros.
  * Después: Implementar → Administrar implementaciones → editar → Versión nueva (la URL /exec no cambia).
  */
 
-var VERSION = '2026.10.16-1';
+var VERSION = '2026.10.16-2';
 
 var CONFIG = {
   NOMBRE_DEPOSITO: 'DEPOSITO PARKA',
@@ -86,7 +87,7 @@ function instalarDisparador() {
 
 /**
  * Carpeta guardada por ID en las propiedades (no depende del nombre ni de dónde esté).
- * Si se borró o todavía no existe, la busca por nombre dentro de `padre` o la crea.
+ * Si se borró o todavía no existe, la busca por nombre dentro de "padre" o la crea.
  */
 function carpetaGuardada_(clave, nombre, padre) {
   var props = PropertiesService.getScriptProperties();
@@ -191,7 +192,7 @@ function listarCarpeta_(carpeta) {
   return out;
 }
 
-/** ¿El archivo está (a cualquier profundidad) dentro de la carpeta `raizId`? */
+/** ¿El archivo está (a cualquier profundidad) dentro de la carpeta "raizId"? */
 function estaDentroDe_(archivo, raizId) {
   var pendientes = [archivo.getParents()], vistos = {}, vueltas = 0;
   while (pendientes.length && vueltas++ < 50) {
@@ -227,7 +228,7 @@ function leerArchivo_(id) {
            base64: Utilities.base64Encode(blob.getBytes()) };
 }
 
-/** Guarda `base64` con ese nombre en la carpeta, reemplazando el archivo anterior del mismo nombre. */
+/** Guarda "base64" con ese nombre en la carpeta, reemplazando el archivo anterior del mismo nombre. */
 function reemplazarArchivo_(carpeta, nombre, base64, mime) {
   if (!nombre || !base64) throw new Error('Faltan nombre o contenido');
   var blob = Utilities.newBlob(Utilities.base64Decode(base64), mime || MIME_XLSX, nombre);
@@ -288,6 +289,29 @@ function estadoDeposito_(fecha) {
   return out;
 }
 
+/* ============================== Mail ============================== */
+
+/**
+ * Manda un mail con adjuntos opcionales.
+ *   body.para, body.copia?, body.asunto, body.html, body.adjuntos = [{nombre, base64, mime?}]
+ */
+function enviarMail_(body) {
+  if (!body.para) throw new Error('Falta el destinatario');
+  if (!body.asunto) throw new Error('Falta el asunto');
+  var adjuntos = (body.adjuntos || []).map(function (a) {
+    return Utilities.newBlob(Utilities.base64Decode(a.base64), a.mime || MIME_XLSX, a.nombre);
+  });
+  var opciones = { htmlBody: body.html || '', attachments: adjuntos, name: 'PARKA Depósito' };
+  if (body.copia) opciones.cc = body.copia;
+  MailApp.sendEmail(body.para, body.asunto, 'El detalle está en el Excel adjunto.', opciones);
+  return { para: body.para, copia: body.copia || '', restantesHoy: MailApp.getRemainingDailyQuota() };
+}
+
+/** Ejecutar una vez desde el editor después de pegar esta versión: pide el permiso para mandar mails. */
+function autorizarMail() {
+  Logger.log('Mails que quedan hoy: %s', MailApp.getRemainingDailyQuota());
+}
+
 /* ============================== API web ============================== */
 /*
  * Todas las llamadas llevan token. Respuesta: {"ok": true, "data": …} o {"ok": false, "error": "…"}.
@@ -298,6 +322,7 @@ function estadoDeposito_(fecha) {
  *   GET  ?token=…&action=deposito&fecha=2026-10-16    -> carpetas de DEPOSITO PARKA y archivos de ese día
  *   POST {token, action:"guardar", fecha, nombre, base64, mime}   -> Recolección: guarda en la carpeta de la fecha
  *   POST {token, action:"guardarDeposito", fecha, archivos:[…]}   -> DEPOSITO PARKA: reemplaza los del día
+ *   POST {token, action:"enviarMail", para, copia?, asunto, html, adjuntos:[…]} -> manda el mail (cierre)
  */
 
 function doGet(e) {
@@ -340,6 +365,8 @@ function doPost(e) {
         return guardarArchivo_(body.fecha, body.nombre, body.base64, body.mime);
       case 'guardarDeposito':
         return guardarDeposito_(body);
+      case 'enviarMail':
+        return enviarMail_(body);
       default:
         throw new Error('Acción desconocida: ' + body.action);
     }
