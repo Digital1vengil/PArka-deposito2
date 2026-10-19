@@ -4,12 +4,34 @@
 {% block contenido %}
 <a href="/" class="text-sm text-zinc-500 hover:text-violeta">← Inicio</a>
 <h1 class="text-2xl font-bold mb-1">↩️ Devoluciones</h1>
-<p class="text-sm text-zinc-500 mb-5"><b>Escaneá la etiqueta</b> de cada prenda y se suma sola (1 unidad por escaneo), o buscá el artículo a mano y elegí color, ML o TN, Óptimo o Falla y las cantidades por talle. Al confirmar se guarda en Drive y salen las etiquetas con el código de barras (rollo Honeywell).
+<p class="text-sm text-zinc-500 mb-5">Primero elegí el canal (<b>Mercado Libre</b> o <b>Tienda Nube</b>) y cargá el <b>número de venta</b> o de <b>orden</b> — escribilo o escaneá la etiqueta del paquete y la app busca la compra. Después <b>escaneá</b> cada prenda (1 unidad por escaneo) o buscala a mano y elegí color, Óptimo o Falla y las cantidades por talle. Al confirmar se guarda en Drive y salen las etiquetas con el código de barras (rollo Honeywell).
   Solo aparecen artículos <b>Parka</b> y <b>Puffers</b>.</p>
 
 <div class="grid lg:grid-cols-5 gap-6">
   <!-- 1. Buscar y elegir -->
   <div class="lg:col-span-3 flex flex-col gap-4">
+    <!-- Venta / orden: canal + número (escrito o escaneando la etiqueta) → se busca la compra en ML / TN -->
+    <section class="card p-4" id="venta-card">
+      <div class="flex flex-wrap items-center gap-3 mb-1">
+        <label class="lbl !mb-0">🧾 Venta</label>
+        <span class="text-sm text-zinc-500">Canal de venta:</span>
+        <div id="canal-box" class="flex gap-2 rounded-lg transition-colors">
+          <button class="btn btn-chico canal" data-p="ML" onclick="setCanal('ML')">Mercado Libre</button>
+          <button class="btn btn-chico canal" data-p="TN" onclick="setCanal('TN')">Tienda Nube</button>
+        </div>
+      </div>
+      <div id="venta-form" class="hidden mt-3">
+        <label class="lbl" id="venta-lbl" for="venta-num">Número de venta</label>
+        <div class="flex flex-wrap gap-2">
+          <input id="venta-num" class="input flex-1 min-w-[180px] !text-lg !py-3" autocomplete="off">
+          <button class="btn btn-primario" onclick="buscarVenta()">🔍 Buscar</button>
+          <button class="btn btn-gris" onclick="escanearEtiqueta()" title="Lector o cámara del celular">🏷 Escanear etiqueta</button>
+        </div>
+        <p class="text-xs text-zinc-500 mt-1" id="venta-ayuda"></p>
+      </div>
+      <div id="venta-res" class="mt-3"></div>
+    </section>
+
     <!-- Escáner: cada lectura suma 1 unidad, sin escribir nada -->
     <section class="card p-4">
       <div class="flex flex-wrap items-center gap-3 mb-3">
@@ -19,11 +41,7 @@
           <button class="btn btn-chico estado-scan" data-e="OPTIMO" onclick="setEstadoScan('OPTIMO')">Óptimo</button>
           <button class="btn btn-chico estado-scan" data-e="FALLA" onclick="setEstadoScan('FALLA')">Falla</button>
         </div>
-        <div id="plat-scan-box" class="flex gap-2 rounded-lg transition-colors">
-          <button class="btn btn-chico plat-scan" data-p="ML" onclick="setPlatScan('ML')">ML</button>
-          <button class="btn btn-chico plat-scan" data-p="TN" onclick="setPlatScan('TN')">TN</button>
-        </div>
-        <button class="btn btn-gris btn-chico ml-auto" onclick="toggleCam()" title="Usar la cámara del celular">📷 Cámara</button>
+        <button class="btn btn-gris btn-chico ml-auto" onclick="toggleCam('prenda')" title="Usar la cámara del celular">📷 Cámara</button>
       </div>
       <div id="scan-estado" class="rounded-xl p-4 text-center border-2 border-dashed border-zinc-300 transition-colors">
         <div class="text-lg font-bold">Listo para escanear</div>
@@ -84,9 +102,9 @@
     <div class="grid grid-cols-3 gap-2 mb-4 text-center">
       <div class="rounded-xl p-3" style="background:#dcfce7"><div class="text-3xl font-bold text-teal-700" id="r-optimo">0</div><div class="text-xs font-semibold text-teal-700">ÓPTIMAS</div></div>
       <div class="rounded-xl p-3" style="background:#fee2e2"><div class="text-3xl font-bold text-red-600" id="r-falla">0</div><div class="text-xs font-semibold text-red-600">FALLAS</div></div>
-      <div class="rounded-xl p-3 bg-zinc-100"><div class="text-3xl font-bold" id="r-total">0</div><div class="text-xs font-semibold text-zinc-500">TOTAL</div></div>
+      <div class="rounded-xl p-3" style="background:#f4f4f5"><div class="text-3xl font-bold" style="color:#18181b" id="r-total">0</div><div class="text-xs font-semibold text-zinc-500">TOTAL</div></div>
     </div>
-    <div id="r-plat" class="flex gap-2 mb-4 text-sm"></div>
+    <div id="r-plat" class="flex flex-wrap gap-2 mb-4 text-sm"></div>
     <div id="r-detalle" class="text-sm mb-4"></div>
     <p class="text-xs text-zinc-500 mb-3">Al confirmar se sube a Drive (Crédito y Reingreso) y se abren las etiquetas para imprimir.</p>
     <div class="flex gap-2">
@@ -99,18 +117,129 @@
 {% block scripts %}
 <script>
 let modelos = [], modelo = null, color = null, estado = '';   // Óptimo / Falla: sin valor por defecto, hay que elegirlo
-let items = [];   // {id, articulo, color, talle, sku, cantidad, estado, plataforma}
-// Plataforma por prenda (ML / TN), igual que Óptimo / Falla. Sin elegir no deja agregar ni escanear.
-let plataforma = '', platScan = '';
+let items = [];   // {id, articulo, color, talle, sku, cantidad, estado, plataforma, venta}
+// Canal (ML / TN) + nº de venta / orden: obligatorio. Cada prenda que se agrega lleva la venta activa.
+let canal = '', venta = null;   // venta = {plataforma, numero, verificada, info}
 const clsPlat = (p, on) => on ? (p === 'ML' ? 'btn-amarillo' : 'btn-azul') : 'btn-gris';
 const chipPlat = p => p ? `<span class="chip ${p === 'ML' ? 'chip-plat-ml' : 'chip-plat-tn'}">${esc(p)}</span>` : '';
 function _pintarPlat(sel, p, extra) {
   document.querySelectorAll(sel).forEach(b => { b.className = `btn ${extra} ${sel.slice(1)} ${clsPlat(b.dataset.p, b.dataset.p === p)}`; });
 }
 function _marcarFalta(id, on) { const b = document.getElementById(id); if (!b) return; b.style.outline = on ? '2px solid #dc2626' : ''; b.style.outlineOffset = on ? '3px' : ''; }
-function setPlataforma(p) { plataforma = p; _pintarPlat('.plat', p, ''); _marcarFalta('plat-box', false); }
-function setPlatScan(p) { platScan = p; _pintarPlat('.plat-scan', p, 'btn-chico'); _marcarFalta('plat-scan-box', false); }
-const clave = x => x.id + '|' + x.estado + '|' + x.plataforma;
+const clave = x => x.id + '|' + x.estado + '|' + x.plataforma + '|' + (x.venta || '');
+const nomVenta = p => p === 'TN' ? 'orden' : 'venta';
+
+// ── Venta / orden ──
+const AYUDA = {
+  ML: 'El nº de venta del panel de Mercado Libre (2000…), o escaneá la etiqueta del paquete (QR o código de barras del envío).',
+  TN: 'El nº de orden de Tienda Nube (#1234), o escaneá la etiqueta del paquete (nº de orden o guía de SmartPost).' };
+function setCanal(p) {
+  canal = p; _pintarPlat('.canal', p, 'btn-chico'); _marcarFalta('canal-box', false);
+  if (venta && venta.plataforma !== p) venta = null;
+  const f = document.getElementById('venta-form');
+  f.classList.toggle('hidden', !p);
+  if (!p) { pintarVenta(); return; }
+  document.getElementById('venta-lbl').textContent = p === 'ML' ? 'Número de venta (Mercado Libre)' : 'Número de orden (Tienda Nube)';
+  document.getElementById('venta-ayuda').textContent = AYUDA[p];
+  const inp = document.getElementById('venta-num');
+  inp.placeholder = p === 'ML' ? 'Ej: 2000012345678901 o escaneá la etiqueta' : 'Ej: 1234 o escaneá la etiqueta';
+  if (!venta) { inp.value = ''; pintarVenta(); inp.focus(); }
+}
+document.getElementById('venta-num').addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault(); e.stopPropagation(); buscarVenta();
+});
+function escanearEtiqueta() {
+  if (!canal) { faltaCanal(); return; }
+  const inp = document.getElementById('venta-num');
+  inp.value = ''; inp.placeholder = 'Pasá el lector por la etiqueta del paquete…'; inp.focus();
+  if (window.matchMedia('(pointer: coarse)').matches) toggleCam('etiqueta', true);   // celular: cámara
+}
+function faltaCanal() {
+  beepError(); _marcarFalta('canal-box', true);
+  toast('Elegí el canal de venta: Mercado Libre o Tienda Nube', 'warn', 4000);
+  document.getElementById('venta-card').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+function faltaVenta() {
+  if (!canal) { faltaCanal(); return; }
+  beepError(); _marcarFalta('venta-form', true);
+  toast(`Cargá el número de ${nomVenta(canal)} antes de agregar prendas`, 'warn', 4000);
+  document.getElementById('venta-num').focus();
+}
+let _buscandoVenta = false;
+async function buscarVenta(raw) {
+  if (!canal) { faltaCanal(); return; }
+  const inp = document.getElementById('venta-num');
+  const v = String(raw ?? inp.value).trim();
+  if (!v) { toast(`Escribí o escaneá el número de ${nomVenta(canal)}`, 'warn'); inp.focus(); return; }
+  if (_buscandoVenta) return;
+  _buscandoVenta = true; _marcarFalta('venta-form', false);
+  document.getElementById('venta-res').innerHTML = `<div class="text-sm text-zinc-500">Buscando en ${canal === 'ML' ? 'Mercado Libre' : 'Tienda Nube'}…</div>`;
+  let r;
+  try { r = await api(`/devoluciones/api/venta?plataforma=${canal}&c=${encodeURIComponent(v)}`); }
+  catch (e) { r = { ok: false, motivo: e.message, sin_conexion: true, codigo: v.replace(/^#/, '') }; }
+  _buscandoVenta = false;
+  if (r.ok) {
+    venta = { plataforma: r.plataforma, numero: r.numero, verificada: true, info: r };
+    inp.value = r.numero; beepOk();
+    if (camModo === 'etiqueta') pararCam();
+    pintarVenta();
+    return;
+  }
+  venta = null; beepError();
+  pintarVenta(r);
+}
+// Sin conexión con la plataforma: se puede seguir con el número escrito (queda "sin verificar").
+const numeroValido = (p, c) => p === 'ML' ? /^2000\d{9,}$/.test(c) : /^\d{1,6}$/.test(c);
+function usarSinVerificar(c) {
+  venta = { plataforma: canal, numero: c, verificada: false, info: null };
+  document.getElementById('venta-num').value = c; pintarVenta();
+}
+function cambiarVenta() {
+  venta = null; const inp = document.getElementById('venta-num');
+  inp.value = ''; pintarVenta(); if (canal) setCanal(canal);
+}
+function pintarVenta(err) {
+  const el = document.getElementById('venta-res');
+  document.getElementById('venta-form').classList.toggle('hidden', !canal || !!venta);
+  if (err) {
+    const puede = err.sin_conexion && numeroValido(canal, err.codigo || '');
+    el.innerHTML = `<div class="rounded-xl p-3" style="background:#fee2e2;border:2px solid #dc2626">
+      <div class="text-xs font-bold text-red-600">✖ NO SE ENCONTRÓ LA ${nomVenta(canal).toUpperCase()}</div>
+      <div class="font-bold text-red-700">${esc(err.motivo || 'Error')}</div>
+      ${puede ? `<button class="btn btn-gris btn-chico mt-2" onclick="usarSinVerificar(${esc(JSON.stringify(err.codigo))})">Usar el nº ${esc(err.codigo)} igual (sin verificar)</button>` : ''}</div>`;
+    return;
+  }
+  if (!venta) {
+    el.innerHTML = canal ? '' : '<p class="text-sm text-zinc-500">Elegí el canal para cargar el número de venta u orden.</p>';
+    return;
+  }
+  const i = venta.info, n = venta.plataforma === 'ML' ? 'Venta' : 'Orden';
+  const prendas = i && i.items.length ? `<div class="mt-2 text-sm flex flex-col gap-0.5">${i.items.map(x => `
+      <div class="flex justify-between gap-2"><span class="truncate">${esc(x.titulo)}${x.color || x.talle ? ` <span class="text-zinc-500">· ${esc([x.color, x.talle].filter(Boolean).join(' · '))}</span>` : ''}</span><b>x${x.cantidad}</b></div>`).join('')}</div>` : '';
+  const ok = venta.verificada;
+  el.innerHTML = `<div class="rounded-xl p-3" style="background:${ok ? '#dcfce7' : '#fef3c7'};border:2px solid ${ok ? '#15803d' : '#d97706'}">
+    <div class="flex flex-wrap items-center gap-2">
+      ${chipPlat(venta.plataforma)}<b class="text-lg">${n} #${esc(venta.numero)}</b>
+      ${i ? `<span class="text-sm text-zinc-600">${esc([i.fecha, i.estado].filter(Boolean).join(' · '))}</span>` : '<span class="text-sm font-semibold" style="color:#b45309">sin verificar</span>'}
+      <button class="btn btn-gris btn-chico ml-auto" onclick="cambiarVenta()">Cambiar ${nomVenta(venta.plataforma)}</button>
+    </div>
+    ${i && i.comprador ? `<div class="text-sm text-zinc-600">Comprador: ${esc(i.comprador)}${i.ventas && i.ventas.length > 1 ? ` · carrito de ${i.ventas.length} ventas` : ''}</div>` : ''}
+    ${i && i.cancelada ? '<div class="text-sm font-bold text-red-600 mt-1">⚠ La venta figura CANCELADA en la plataforma</div>' : ''}
+    ${prendas}
+    <div class="text-xs text-zinc-500 mt-2">Ahora escaneá o buscá las prendas de esta ${nomVenta(venta.plataforma)}.</div></div>`;
+}
+// ¿La prenda está en la venta? (aviso, no bloquea: ML / TN no siempre traen el SKU de Odoo)
+function enVenta(v) {
+  const it = venta && venta.info ? venta.info.items : [];
+  if (!it.length) return true;
+  const sku = String(v.sku || '').toUpperCase(), art = String(v.articulo || '').toUpperCase();
+  const num = (art.match(/\d{4,5}/) || [''])[0];
+  return it.some(x => {
+    const xs = String(x.sku || '').toUpperCase(), xt = String(x.titulo || '').toUpperCase();
+    return (sku && xs === sku) || (art && (xt.includes(art) || xs.includes(art))) || (num && (xs.includes(num) || xt.includes(num)));
+  });
+}
 let tBus = null;
 const q = document.getElementById('q');
 // Un código de barras (8 a 14 dígitos) o un SKU de Odoo escrito/escaneado en el buscador va directo a la devolución.
@@ -164,25 +293,37 @@ function escanear(cod) {   // en fila: si pasan dos prendas seguidas, se procesa
 }
 async function _escanear(cod) {
   if (!cod) return;
+  // Sin venta cargada, lo que se escanea es la etiqueta del paquete. Un QR de ML (JSON) siempre es etiqueta.
+  // (un código de 12 a 14 dígitos es de una prenda: sin venta cargada se avisa que falta la venta)
+  if (!venta || /[{]|^LA[,\s]/i.test(cod)) {
+    if (!canal) { faltaCanal(); return; }
+    if (!venta && /^\d{12,14}$/.test(cod)) { faltaVenta(); pintarScan(false, `Primero cargá el número de ${nomVenta(canal)} (arriba)`, cod); return; }
+    document.getElementById('venta-num').value = cod;
+    return buscarVenta(cod);
+  }
   if (!document.getElementById('modal-resumen').classList.contains('hidden')) { beepError(); toast('Cerrá el resumen para seguir escaneando', 'warn'); return; }
   if (!estadoScan) { beepError(); _marcarFalta('estado-scan-box', true); pintarScan(false, 'Elegí Óptimo o Falla antes de escanear', cod); return; }
-  if (!platScan) { beepError(); _marcarFalta('plat-scan-box', true); pintarScan(false, 'Elegí ML o TN antes de escanear', cod); return; }
   let r;
   try { r = await api('/devoluciones/api/codigo?c=' + encodeURIComponent(cod)); }
   catch (e) { beepError(); pintarScan(false, e.message, cod); return; }
-  if (!r.ok) { beepError(); pintarScan(false, r.motivo, cod); return; }
+  if (!r.ok) {
+    beepError();
+    const etiq = /^\d{11}$|^2000\d{12}$/.test(cod) ? ' — si es la etiqueta de otro paquete, tocá "Cambiar venta" arriba' : '';
+    pintarScan(false, r.motivo + etiq, cod); return;
+  }
   const v = r.variante;
-  const k = { id: v.id, estado: estadoScan, plataforma: platScan };
+  const k = { id: v.id, estado: estadoScan, plataforma: venta.plataforma, venta: venta.numero };
   const ya = items.find(x => clave(x) === clave(k));
   if (ya) ya.cantidad += 1;
-  else items.push({ id: v.id, articulo: v.articulo, color: v.color, talle: v.talle, marca: v.marca, sku: v.sku, cantidad: 1, estado: estadoScan, plataforma: platScan });
+  else items.push({ id: v.id, articulo: v.articulo, color: v.color, talle: v.talle, marca: v.marca, sku: v.sku, cantidad: 1, estado: estadoScan, plataforma: venta.plataforma, venta: venta.numero });
   ultimoScan = k;
   beepOk();
   pintarLista(clave(k));
   const n = items.find(x => clave(x) === clave(k)).cantidad;
-  pintarScan(true, `${v.articulo} · ${v.color} · ${v.talle}`, cod, `${platScan} · ${estadoScan === 'FALLA' ? 'Falla' : 'Óptimo'} · llevás ${n} de esta`);
+  pintarScan(true, `${v.articulo} · ${v.color} · ${v.talle}`, cod, `${venta.plataforma} #${venta.numero} · ${estadoScan === 'FALLA' ? 'Falla' : 'Óptimo'} · llevás ${n} de esta`,
+    enVenta(v) ? '' : `Ojo: esta prenda no figura en la ${nomVenta(venta.plataforma)} #${venta.numero}. Revisá que sea la correcta.`);
 }
-function pintarScan(ok, texto, cod, extra = '') {
+function pintarScan(ok, texto, cod, extra = '', aviso = '') {
   const el = document.getElementById('scan-estado');
   el.style.background = ok ? '#dcfce7' : '#fee2e2';
   el.style.borderColor = ok ? '#15803d' : '#dc2626';
@@ -190,6 +331,7 @@ function pintarScan(ok, texto, cod, extra = '') {
   el.innerHTML = ok
     ? `<div class="text-xs font-bold text-teal-700">✔ SUMADO +1</div><div class="text-lg font-bold">${esc(texto)}</div>
        <div class="text-sm text-zinc-600">${esc(extra)} · código ${esc(cod)}</div>
+       ${aviso ? `<div class="text-sm font-bold mt-1" style="color:#b45309">⚠ ${esc(aviso)}</div>` : ''}
        <button class="btn btn-gris btn-chico mt-2" onclick="deshacerScan()">↶ Deshacer</button>`
     : `<div class="text-xs font-bold text-red-600">✖ NO SE SUMÓ</div><div class="text-base font-bold text-red-700">${esc(texto)}</div>
        <div class="text-sm text-zinc-600">código ${esc(cod)}</div>`;
@@ -205,15 +347,17 @@ function deshacerScan() {
 }
 
 // cámara del celular
-let camScanner = null, _camUlt = '', _camT = 0;
-async function toggleCam() {
-  if (camScanner) { pararCam(); return; }
+let camScanner = null, _camUlt = '', _camT = 0, camModo = 'prenda';
+async function toggleCam(modo = 'prenda', soloAbrir = false) {
+  if (camScanner) { const cambia = camModo !== modo; camModo = modo; if (cambia || soloAbrir) return; pararCam(); return; }
+  camModo = modo;
   if (typeof Html5Qrcode === 'undefined') { toast('No se pudo cargar el lector de la cámara (¿sin internet?)', 'error'); return; }
   document.getElementById('cam-box').classList.remove('hidden');
   try {
     camScanner = new Html5Qrcode('qr-reader', { verbose: false, experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
     await camScanner.start({ facingMode: 'environment' }, { fps: 12, qrbox: (w, h) => ({ width: Math.round(w * .9), height: Math.max(80, Math.round(h * .35)) }) },
-      t => { const n = Date.now(); if (t === _camUlt && n - _camT < 2500) return; _camUlt = t; _camT = n; escanear(t); }, () => {});
+      t => { const n = Date.now(); if (t === _camUlt && n - _camT < 2500) return; _camUlt = t; _camT = n;
+             if (camModo === 'etiqueta') { document.getElementById('venta-num').value = t; buscarVenta(t); } else escanear(t); }, () => {});
   } catch (e) { toast('No se pudo abrir la cámara: ' + e, 'error', 6000); pararCam(); }
 }
 async function pararCam() { if (camScanner) { try { await camScanner.stop(); } catch {} camScanner = null; } document.getElementById('cam-box').classList.add('hidden'); }
@@ -240,7 +384,7 @@ async function buscar() {
   }
 }
 
-// Pasos: 2 · color → 3 · ML o TN → 4 · Óptimo o Falla → 5 · talles con cantidad (una sola opción se elige sola)
+// Pasos: 2 · color → 3 · Óptimo o Falla → 4 · talles con cantidad (una sola opción se elige sola). ML / TN sale de la venta.
 let eCant = {};   // id variante -> cantidad (del artículo elegido)
 const ORDEN_TALLE = ['XXXS','XXS','XS','S','M','L','XL','XXL','XXXL','XXXXL','U','UNICO','ÚNICO'];
 const ordTalle = t => { const i = ORDEN_TALLE.indexOf(String(t).toUpperCase()); return i >= 0 ? i : (parseInt(t) || 100); };
@@ -248,14 +392,13 @@ function opc(txt, activo, accion, extra = '') {
   return `<button type="button" class="opc ${activo ? 'activo' : ''} ${extra}" onclick="${accion}">${esc(txt)}</button>`;
 }
 function elegirModelo(i) {
-  modelo = modelos[i]; color = null; eCant = {}; estado = ''; plataforma = '';
+  modelo = modelos[i]; color = null; eCant = {}; estado = '';
   document.getElementById('e-articulo').textContent = modelo.articulo;
   document.getElementById('elegir').classList.remove('hidden');
   pintarElegir();
 }
 function cerrarElegir() { document.getElementById('elegir').classList.add('hidden'); modelo = null; }
 function elegirColor(c) { color = c; eCant = {}; pintarElegir(); }
-function setPlataforma(p) { plataforma = p; pintarElegir(); }
 function setEstado(e) { estado = e; pintarElegir(); }
 function sumarT(id, n) { fijarT(id, (eCant[id] || 0) + n); }
 function fijarT(id, v) { const n = Math.max(0, Math.min(999, parseInt(v) || 0)); if (n) eCant[id] = n; else delete eCant[id]; pintarElegir(); }
@@ -265,14 +408,12 @@ function pintarElegir() {
   if (colores.length === 1) color = colores[0];
   let html = `<div class="paso"><div class="paso-tit">2 · Color</div><div class="opcs">${colores.map(c =>
     opc(c, c === color, `elegirColor(${esc(JSON.stringify(c))})`)).join('')}</div></div>`;
-  if (color) html += `<div class="paso"><div class="paso-tit">3 · Plataforma</div><div class="opcs">` +
-    opc('Mercado Libre', plataforma === 'ML', "setPlataforma('ML')") + opc('Tienda Nube', plataforma === 'TN', "setPlataforma('TN')") + `</div></div>`;
-  if (color && plataforma) html += `<div class="paso"><div class="paso-tit">4 · Estado</div><div class="opcs">` +
+  if (color) html += `<div class="paso"><div class="paso-tit">3 · Estado</div><div class="opcs">` +
     opc('Óptimo', estado === 'OPTIMO', "setEstado('OPTIMO')", 'optimo') + opc('Falla', estado === 'FALLA', "setEstado('FALLA')", 'falla') + `</div></div>`;
-  if (color && plataforma && estado) {
+  if (color && estado) {
     const vs = modelo.variantes.filter(x => x.color === color).sort((a, b) => ordTalle(a.talle) - ordTalle(b.talle) || String(a.marca).localeCompare(b.marca));
     const repetido = t => vs.filter(x => x.talle === t).length > 1;   // mismo talle con distinta marca
-    html += `<div class="paso"><div class="paso-tit">5 · Talles — cuántas de cada uno</div><div class="flex flex-wrap gap-2">${vs.map(x => `
+    html += `<div class="paso"><div class="paso-tit">4 · Talles — cuántas de cada uno</div><div class="flex flex-wrap gap-2">${vs.map(x => `
       <div class="rounded-xl border ${eCant[x.id] ? 'border-teal-500' : 'border-zinc-700'} p-2 flex flex-col items-center gap-1" style="${eCant[x.id] ? 'background:#dcfce7' : ''}">
         <span class="font-bold text-sm">${esc(x.talle)}${repetido(x.talle) && x.marca ? ` <span class="text-[10px] font-medium opacity-80">${esc(x.marca)}</span>` : ''}</span>${x.sin_codigo ? '<span class="sin-cod" title="En Odoo no tiene código de barras: la etiqueta sale con el SKU">sin código</span>' : ''}
         <div class="flex items-center gap-1">
@@ -283,10 +424,10 @@ function pintarElegir() {
         </div>
       </div>`).join('')}</div></div>`;
   }
+  if (!venta) html = `<div class="text-sm font-semibold mb-2" style="color:#b45309">⚠ Antes de agregar, cargá arriba el número de venta (ML) o de orden (TN).</div>` + html;
   document.getElementById('e-pasos').innerHTML = html;
-  const nomPlat = { ML: 'Mercado Libre', TN: 'Tienda Nube' };
-  document.getElementById('e-migas').innerHTML = [modelo.articulo, color, nomPlat[plataforma], estado === 'FALLA' ? 'Falla' : estado ? 'Óptimo' : '']
-    .filter(Boolean).map(t => `<b>${esc(t)}</b>`).join(' › ') + (!color ? ' › elegí el color' : !plataforma ? ' › ML o TN' : !estado ? ' › Óptimo o Falla' : '');
+  document.getElementById('e-migas').innerHTML = [modelo.articulo, color, venta ? `${venta.plataforma} #${venta.numero}` : '', estado === 'FALLA' ? 'Falla' : estado ? 'Óptimo' : '']
+    .filter(Boolean).map(t => `<b>${esc(t)}</b>`).join(' › ') + (!color ? ' › elegí el color' : !estado ? ' › Óptimo o Falla' : '');
   const t = Object.values(eCant).reduce((a, n) => a + n, 0);
   document.getElementById('e-total').textContent = t ? `${t} prenda${t === 1 ? '' : 's'} para agregar` : '';
   document.getElementById('btn-agregar').disabled = !t;
@@ -294,25 +435,27 @@ function pintarElegir() {
 function agregar() {
   const ids = Object.keys(eCant).map(Number);
   if (!modelo || !ids.length) return;
-  if (!plataforma) { beepError(); toast('Elegí la plataforma de la prenda: ML o TN', 'warn', 4000); return; }
+  if (!venta) { faltaVenta(); return; }
   if (!estado) { beepError(); toast('Elegí el estado de la prenda: Óptimo o Falla', 'warn', 4000); return; }
   let ultima = '', total = 0;
   ids.forEach(id => {
     const v = modelo.variantes.find(x => x.id === id), n = eCant[id];
-    const k = { id, estado, plataforma };
+    const k = { id, estado, plataforma: venta.plataforma, venta: venta.numero };
     const ya = items.find(x => clave(x) === clave(k));
     if (ya) ya.cantidad += n;
-    else items.push({ id, articulo: modelo.articulo, color: v.color, talle: v.talle, marca: v.marca, sku: v.sku, cantidad: n, estado, plataforma });
+    else items.push({ id, articulo: modelo.articulo, color: v.color, talle: v.talle, marca: v.marca, sku: v.sku, cantidad: n, estado, plataforma: venta.plataforma, venta: venta.numero });
     ultima = clave(k); total += n;
   });
-  toast(`Agregado: ${modelo.articulo} ${color} · ${total} prenda${total === 1 ? '' : 's'} · ${plataforma} · ${estado === 'FALLA' ? 'Falla' : 'Óptimo'}`);
+  toast(`Agregado: ${modelo.articulo} ${color} · ${total} prenda${total === 1 ? '' : 's'} · ${venta.plataforma} #${venta.numero} · ${estado === 'FALLA' ? 'Falla' : 'Óptimo'}`);
+  if (!enVenta({ sku: modelo.variantes.find(x => x.id === ids[0]).sku, articulo: modelo.articulo }))
+    toast(`Ojo: ${modelo.articulo} no figura en la ${nomVenta(venta.plataforma)} #${venta.numero}. Revisá que sea la correcta.`, 'warn', 6000);
   pintarLista(ultima);
   limpiarBusqueda();
 }
 // Después de agregar queda todo limpio para cargar el artículo siguiente.
 function limpiarBusqueda() {
   clearTimeout(tBus);
-  cerrarElegir(); color = null; eCant = {}; estado = ''; plataforma = '';
+  cerrarElegir(); color = null; eCant = {}; estado = '';
   document.getElementById('e-pasos').innerHTML = '';
   document.getElementById('e-migas').innerHTML = '';
   document.getElementById('e-total').textContent = '';
@@ -329,7 +472,7 @@ function pintarLista(resaltar = '') {
   el.innerHTML = items.map((x, i) => `
     <div class="flex items-center gap-2 py-2 border-b border-zinc-700 last:border-0 rounded-lg transition-colors" ${resaltar === clave(x) ? 'style="background:#dcfce7"' : ''}>
       <div class="flex-1 min-w-0">
-        <div class="font-semibold text-sm truncate">${chipPlat(x.plataforma)} ${esc(x.articulo)}</div>
+        <div class="font-semibold text-sm truncate">${chipPlat(x.plataforma)} ${esc(x.articulo)} <span class="text-xs font-normal text-zinc-500">#${esc(x.venta)}</span></div>
         <div class="text-xs text-zinc-500">${esc(x.color)} · ${esc(x.talle)}${x.marca ? ' · ' + esc(x.marca) : ''} · <span class="${x.estado === 'FALLA' ? 'text-red-600 font-semibold' : 'text-teal-600'}">${x.estado === 'FALLA' ? 'Falla' : 'Óptimo'}</span></div>
       </div>
       <button class="btn btn-gris btn-chico !w-8" onclick="cantItem(${i},-1)">−</button>
@@ -357,8 +500,11 @@ function tarjetaResultado(d) {
 }
 function abrirResumen() {
   if (!items.length) return;
-  const np = p => items.filter(x => x.plataforma === p).reduce((a, x) => a + x.cantidad, 0);
-  document.getElementById('r-plat').innerHTML = ['ML', 'TN'].filter(np).map(p => `${chipPlat(p)} <b>${np(p)}</b> ${p === 'ML' ? 'Mercado Libre' : 'Tienda Nube'}`).join('<span class="text-zinc-400 mx-1">·</span>');
+  const vs = [...new Set(items.map(x => x.plataforma + '|' + x.venta))];
+  document.getElementById('r-plat').innerHTML = vs.map(k => {
+    const [p, nro] = k.split('|'), u = items.filter(x => x.plataforma === p && x.venta === nro).reduce((a, x) => a + x.cantidad, 0);
+    return `<span>${chipPlat(p)} ${p === 'ML' ? 'Venta' : 'Orden'} <b>#${esc(nro)}</b> · ${u} u.</span>`;
+  }).join('<span class="text-zinc-400 mx-1">·</span>');
   const n = e => items.filter(x => x.estado === e).reduce((a, x) => a + x.cantidad, 0);
   const op = n('OPTIMO'), fa = n('FALLA');
   document.getElementById('r-optimo').textContent = op;
@@ -369,7 +515,7 @@ function abrirResumen() {
     if (!xs.length) return '';
     return `<h3 class="text-xs font-bold uppercase tracking-wider mb-1 ${cls}">${titulo}</h3>` + xs.map(x => `
       <div class="flex justify-between gap-2 py-1 border-b border-zinc-200 last:border-0">
-        <span class="truncate">${chipPlat(x.plataforma)} ${esc(x.articulo)} · ${esc(x.color)} · ${esc(x.talle)}</span><b>x${x.cantidad}</b></div>`).join('') + '<div class="mb-3"></div>';
+        <span class="truncate">${chipPlat(x.plataforma)} ${esc(x.articulo)} · ${esc(x.color)} · ${esc(x.talle)} <span class="text-zinc-500">#${esc(x.venta)}</span></span><b>x${x.cantidad}</b></div>`).join('') + '<div class="mb-3"></div>';
   };
   document.getElementById('r-detalle').innerHTML = bloque('OPTIMO', 'Óptimas', 'text-teal-700') + bloque('FALLA', 'Fallas', 'text-red-600');
   document.getElementById('modal-resumen').classList.remove('hidden');
@@ -381,14 +527,14 @@ async function confirmar() {
   const bs = document.getElementById('btn-subir'); bs.disabled = true; bs.textContent = 'Subiendo a Drive…';
   const b = document.getElementById('btn-confirmar'); b.disabled = true; b.textContent = 'Guardando en Drive…';
   try {
-    const r = await api('/devoluciones/api/confirmar', { json: { items: items.map(x => ({ articulo_id: x.id, cantidad: x.cantidad, estado: x.estado, plataforma: x.plataforma })) } });
+    const r = await api('/devoluciones/api/confirmar', { json: { items: items.map(x => ({ articulo_id: x.id, cantidad: x.cantidad, estado: x.estado, plataforma: x.plataforma, venta: x.venta })) } });
     cerrarResumen();
     const desde = +document.getElementById('desde').value || 1;
     document.getElementById('resultado').innerHTML = tarjetaResultado(r.devolucion);
     syncFormatoEtiquetas();
     imprimirEtiquetas('devoluciones', r.devolucion.id, { desde });
     toast(r.devolucion.drive_ok ? 'Devolución guardada en Drive' : 'Devolución guardada en la app (Drive falló)', r.devolucion.drive_ok ? 'ok' : 'warn', 5000);
-    items = []; pintarLista(); limpiarBusqueda();
+    items = []; pintarLista(); limpiarBusqueda(); cambiarVenta();
     historial();
   } catch (e) { toast(e.message, 'error', 6000); }
   b.textContent = '✔ Confirmar y guardar'; b.disabled = !items.length;
@@ -405,7 +551,7 @@ async function historial() {
   el.innerHTML = d.devoluciones.length ? d.devoluciones.map(x => `
     <div class="flex flex-wrap items-center gap-3 py-2 border-b border-zinc-700 last:border-0">
       <b>PD-${x.id}</b>${(x.plataforma || '').split('+').map(chipPlat).join('')}${_chipNuevo(x)}<span class="text-zinc-500">${x.hora} · ${esc(x.usuario)}</span>
-      <span class="flex-1 min-w-[200px] truncate">${x.items.map(i => `${i.plataforma ? esc(i.plataforma) + ' ' : ''}${esc(i.articulo)} ${esc(i.color)} ${esc(i.talle)} x${i.cantidad}`).join(' · ')}</span>
+      <span class="flex-1 min-w-[200px] truncate">${(x.ventas || []).length ? `<b>${x.ventas.map(esc).join(', ')}</b> · ` : ''}${x.items.map(i => `${i.plataforma ? esc(i.plataforma) + ' ' : ''}${esc(i.articulo)} ${esc(i.color)} ${esc(i.talle)} x${i.cantidad}`).join(' · ')}</span>
       ${x.drive_ok ? '<span class="chip chip-hecha">☁ Drive</span>' : `<button class="btn btn-gris btn-chico" onclick="reintentar(${x.id}, this)">⚠ Reintentar Drive</button>`}
       <button class="btn btn-primario btn-chico" onclick="marcarVisto(${x.id}); imprimirEtiquetas('devoluciones', ${x.id}, { btn: this })">🖨 Imprimir etiquetas</button>
     </div>`).join('') : '<p class="text-zinc-500">Todavía no hay devoluciones.</p>';
@@ -427,6 +573,6 @@ function _avisarNuevos(xs) {
 }
 function _chipNuevo(x) { return _nuevos.has(x.id) ? `<span id="nuevo-PD-${x.id}" class="chip chip-alta">NUEVO</span>` : ''; }
 setInterval(() => { if (!document.hidden) historial().catch(() => {}); }, 20000);
-setEstadoScan(''); setPlatScan(''); pintarLista(); historial();
+setEstadoScan(''); setCanal(''); pintarLista(); historial();
 </script>
 {% endblock %}
