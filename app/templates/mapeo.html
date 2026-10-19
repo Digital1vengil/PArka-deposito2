@@ -8,6 +8,7 @@
 
 <div class="tabs">
   <button class="tab activo" data-t="mapa" onclick="tab('mapa')">Mapa</button>
+  <button class="tab" data-t="croquis" onclick="tab('croquis')">Croquis</button>
   <button class="tab" data-t="asignar" onclick="tab('asignar')">Asignar escaneando</button>
   <button class="tab" data-t="ubicaciones" onclick="tab('ubicaciones')">Ubicaciones</button>
   <button class="tab" data-t="vinculos" onclick="tab('vinculos')">SKU vinculados</button>
@@ -86,6 +87,33 @@
   </section>
 </div>
 
+<!-- CROQUIS -->
+<div id="t-croquis" class="hidden flex flex-col gap-4">
+  <section class="card p-4">
+    <div class="flex flex-wrap items-center gap-3 mb-2">
+      <h2 class="font-bold flex-1">Croquis del depósito</h2>
+      <span class="text-xs text-zinc-500">● violeta = rack con artículos asignados · tocá un rack para ver qué tiene</span>
+    </div>
+    <div id="cq-svg" class="overflow-x-auto"><div class="min-w-[720px]"></div></div>
+    <p class="text-xs text-zinc-500 mt-2">B01 está dividido en 8 columnas (C01 a C08, de izquierda a derecha) y 3 plantas (N0 = planta baja, N1, N2): su código es <b>B01-C07-N0</b>. Los demás racks tienen un solo código (A01, B02, C05…).</p>
+  </section>
+  <div class="grid md:grid-cols-2 gap-4">
+    <section class="card p-4">
+      <h2 class="font-bold mb-2">Ruta de devolución</h2>
+      <label class="lbl">La ruta sale de</label>
+      <select id="cq-inicio" class="input mb-3"><option value="P1">Persiana 1</option><option value="P2">Persiana 2</option></select>
+      <label class="lbl">Rack de fallas (ahí van las prendas marcadas Falla)</label>
+      <select id="cq-fallas" class="input mb-3"></select>
+      <button class="btn btn-primario" onclick="guardarCroquis(this)">Guardar</button>
+    </section>
+    <section class="card p-4">
+      <h2 class="font-bold mb-2">Ubicaciones del croquis</h2>
+      <p id="cq-faltan" class="text-sm text-zinc-500 mb-3"></p>
+      <button id="cq-cargar" class="btn btn-gris" onclick="cargarCroquis(this)">⬇ Cargar racks del croquis</button>
+    </section>
+  </div>
+</div>
+
 <!-- VINCULOS -->
 <div id="t-vinculos" class="hidden max-w-3xl">
   <section class="card p-4">
@@ -95,6 +123,7 @@
 </div>
 {% endblock %}
 {% block scripts %}
+<script src="/static/croquis.js?v={{ static_v("croquis.js") }}"></script>
 <script>
 let ubs = [], sel = null, marcadas = new Set(), escUb = null, tq = null;
 const ORDEN_TALLE = ['XXXS','XXS','XS','S','M','L','XL','XXL','XXXL','XXXXL','U','UNICO','ÚNICO'];
@@ -102,9 +131,10 @@ const ordTalle = t => { const i = ORDEN_TALLE.indexOf(String(t).toUpperCase()); 
 
 function tab(t) {
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('activo', b.dataset.t === t));
-  ['mapa', 'asignar', 'ubicaciones', 'vinculos'].forEach(x => document.getElementById('t-' + x).classList.toggle('hidden', x !== t));
+  ['mapa', 'croquis', 'asignar', 'ubicaciones', 'vinculos'].forEach(x => document.getElementById('t-' + x).classList.toggle('hidden', x !== t));
   if (t === 'asignar') document.getElementById('esc').focus();
   if (t === 'vinculos') vinculos();
+  if (t === 'croquis') croquis();
   try { localStorage.setItem('mapeo_tab', t); } catch {}
 }
 
@@ -274,6 +304,35 @@ async function vinculos() {
     <code class="text-xs">${esc(v.sku)}</code><span class="flex-1">→ ${esc(v.articulo)}</span><span class="text-xs text-zinc-500">${v.fecha}</span>
     <button class="text-red-600 text-xs" onclick="api('/mapeo/api/vinculos/${v.id}', {method:'DELETE'}).then(vinculos)">Quitar</button></div>`).join('')
     : '<p class="text-zinc-500">Todavía no hay vínculos.</p>';
+}
+// ── Croquis ──
+async function croquis() {
+  const d = await api('/mapeo/api/croquis');
+  const conteo = {};
+  d.ubicaciones.forEach(u => { if (u.rack && u.articulos) conteo[u.rack] = (conteo[u.rack] || 0) + u.articulos; });
+  const marcar = {}; if (d.rack_fallas) marcar[(d.rack_fallas.match(/^[A-Z]\d{2}/) || [''])[0]] = '#fca5a5';
+  document.querySelector('#cq-svg > div').innerHTML = dibujarCroquis(d.plano, { conteo, marcar, onRack: 'verRack',
+    inicio: { punto: [(p => p.x + p.w / 2)(d.plano.puertas.find(p => p.clave === d.inicio)), d.plano.alto - 14], nombre: '' } });
+  document.getElementById('cq-inicio').value = d.inicio;
+  document.getElementById('cq-fallas').innerHTML = '<option value="">— Sin rack de fallas (las Falla quedan sin ubicación) —</option>'
+    + d.ubicaciones.filter(u => u.activa).map(u => `<option value="${esc(u.codigo)}" ${u.codigo === d.rack_fallas ? 'selected' : ''}>${esc(u.codigo)}${u.descripcion ? ' · ' + esc(u.descripcion) : ''}</option>`).join('');
+  document.getElementById('cq-faltan').innerHTML = d.faltan.length
+    ? `Faltan cargar <b>${d.faltan.length}</b> ubicaciones del croquis (${esc(d.faltan.slice(0, 6).join(', '))}${d.faltan.length > 6 ? '…' : ''}).`
+    : '✔ Todas las ubicaciones del croquis están cargadas.';
+  document.getElementById('cq-cargar').classList.toggle('hidden', !d.faltan.length);
+}
+function verRack(rack) { tab('mapa'); q.value = rack; dondeEsta(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+async function guardarCroquis(b) {
+  b.disabled = true;
+  try { await api('/mapeo/api/croquis/ajustes', { json: { inicio: document.getElementById('cq-inicio').value, rack_fallas: document.getElementById('cq-fallas').value } }); toast('Guardado'); croquis(); }
+  catch (e) { toast(e.message, 'error'); }
+  b.disabled = false;
+}
+async function cargarCroquis(b) {
+  b.disabled = true;
+  try { const r = await api('/mapeo/api/croquis/cargar', { method: 'POST' }); toast(`${r.creadas} ubicaciones cargadas`); await cargar(); croquis(); }
+  catch (e) { toast(e.message, 'error'); }
+  b.disabled = false;
 }
 cargar();
 try { const t = localStorage.getItem('mapeo_tab'); if (t) tab(t); } catch {}

@@ -4,7 +4,7 @@
 {% block contenido %}
 <a href="/" class="text-sm text-zinc-500 hover:text-violeta">← Inicio</a>
 <h1 class="text-2xl font-bold mb-1">↩️ Devoluciones</h1>
-<p class="text-sm text-zinc-500 mb-5">Primero elegí el canal (<b>Mercado Libre</b> o <b>Tienda Nube</b>) y cargá el <b>número de venta</b> o de <b>orden</b> — escribilo o escaneá la etiqueta del paquete y la app busca la compra. Después <b>escaneá</b> cada prenda (1 unidad por escaneo) o buscala a mano y elegí color, Óptimo o Falla y las cantidades por talle. Al confirmar se guarda en Drive y salen las etiquetas con el código de barras (rollo Honeywell).
+<p class="text-sm text-zinc-500 mb-5">Primero elegí el canal (<b>Mercado Libre</b> o <b>Tienda Nube</b>) y cargá el <b>número de venta</b> o de <b>orden</b> — escribilo o escaneá la etiqueta del paquete y la app busca la compra. Después <b>escaneá</b> cada prenda (1 unidad por escaneo) o buscala a mano y elegí color, Óptimo o Falla y las cantidades por talle. Al confirmar salen las etiquetas (rollo Honeywell) y la app arma la <b>ruta de devolución</b>: te lleva rack por rack, escaneás el código del rack y cada prenda, y al marcar <b>devuelto</b> se guarda en Drive. Si no hay lugar o no hay información, usá <b>Guardar en Drive sin devolver</b>.
   Solo aparecen artículos <b>Parka</b> y <b>Puffers</b>.</p>
 
 <div class="grid lg:grid-cols-5 gap-6">
@@ -110,15 +110,46 @@
     </div>
     <div id="r-plat" class="flex flex-wrap gap-2 mb-4 text-sm"></div>
     <div id="r-detalle" class="text-sm mb-4"></div>
-    <p class="text-xs text-zinc-500 mb-3">Al confirmar se sube a Drive (Crédito y Reingreso) y se abren las etiquetas para imprimir.</p>
-    <div class="flex gap-2">
-      <button class="btn btn-gris flex-1" onclick="cerrarResumen()">← Volver a editar</button>
-      <button id="btn-subir" class="btn btn-primario flex-1 !py-3" onclick="confirmar()">✔ Confirmar y subir</button>
+    <p class="text-xs text-zinc-500 mb-3">Se abren las etiquetas para imprimir y la app arma la ruta para guardar cada prenda en su rack. Drive (Crédito y Reingreso) se carga al marcar <b>devuelto</b>.</p>
+    <div class="flex flex-col gap-2">
+      <button id="btn-subir" class="btn btn-primario w-full !py-3" onclick="confirmar('ruta')">🗺 Confirmar y armar la ruta</button>
+      <div class="flex gap-2">
+        <button class="btn btn-gris flex-1" onclick="cerrarResumen()">← Volver a editar</button>
+        <button id="btn-sin-ruta" class="btn btn-gris flex-1" onclick="confirmar('drive')">☁ Guardar en Drive sin devolver</button>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- Ruta de devolución: rack por rack -->
+<div id="modal-ruta" class="hidden fixed inset-0 z-50 bg-black/50 flex items-stretch justify-center p-0 md:p-4">
+  <div class="card w-full max-w-5xl p-4 md:p-5 overflow-y-auto md:rounded-2xl rounded-none">
+    <div class="flex flex-wrap items-center gap-2 mb-3">
+      <h2 class="text-lg font-bold flex-1" id="ruta-titulo">Ruta de devolución</h2>
+      <button class="btn btn-gris btn-chico" onclick="cerrarRuta()" title="La ruta queda en Últimas devoluciones para seguirla después">✕ Seguir después</button>
+    </div>
+    <div class="overflow-x-auto mb-3"><div id="ruta-svg" class="min-w-[680px]"></div></div>
+    <div class="grid md:grid-cols-5 gap-4">
+      <div class="md:col-span-3 flex flex-col gap-3">
+        <div id="ruta-parada" class="rounded-xl border-2 p-4"></div>
+        <div id="ruta-estado" class="rounded-xl border-2 border-dashed border-zinc-300 p-3 text-center"></div>
+        <div class="flex flex-wrap gap-2 items-center">
+          <input id="ruta-cod" class="input flex-1 min-w-[160px]" placeholder="o escribí el código y Enter" autocomplete="off">
+          <button class="btn btn-gris" onclick="toggleCam('ruta')">📷 Cámara</button>
+        </div>
+        <div id="ruta-cam-slot"></div>
+      </div>
+      <div class="md:col-span-2 flex flex-col gap-3">
+        <div><h3 class="text-xs font-bold uppercase tracking-wider text-zinc-500 mb-1">Paradas</h3><div id="ruta-lista" class="flex flex-col text-sm"></div></div>
+        <button id="btn-devuelto" class="btn btn-primario w-full !py-3" onclick="marcarDevuelto()">✔ Marcar como devuelto</button>
+        <button class="btn btn-gris w-full" onclick="sinDevolver()">☁ Guardar en Drive sin devolver</button>
+        <p class="text-xs text-zinc-500">"Sin devolver": no hay lugar o no hay información. Se sube igual a Drive (Crédito y Reingreso) y las prendas quedan sin rack.</p>
+      </div>
     </div>
   </div>
 </div>
 {% endblock %}
 {% block scripts %}
+<script src="/static/croquis.js?v={{ static_v("croquis.js") }}"></script>
 <script>
 let modelos = [], modelo = null, color = null, estado = '';   // Óptimo / Falla: sin valor por defecto, hay que elegirlo
 let items = [];   // {id, articulo, color, talle, sku, cantidad, estado, plataforma, venta}
@@ -374,6 +405,7 @@ function escanear(cod) {   // en fila: si pasan dos prendas seguidas, se procesa
 }
 async function _escanear(cod) {
   if (!cod) return;
+  if (rutaAct) return escanearRuta(cod);
   // Sin venta cargada, lo que se escanea es la etiqueta del paquete. Un QR de ML (JSON) siempre es etiqueta.
   // (un código de 12 a 14 dígitos es de una prenda: sin venta cargada se avisa que falta la venta)
   if (!venta || /[{]|^LA[,\s]/i.test(cod)) {
@@ -434,7 +466,7 @@ async function toggleCam(modo = 'prenda', soloAbrir = false) {
   camModo = modo;
   if (typeof Html5Qrcode === 'undefined') { toast('No se pudo cargar el lector de la cámara (¿sin internet?)', 'error'); return; }
   const box = document.getElementById('cam-box');
-  document.getElementById(modo === 'etiqueta' ? 'venta-cam-slot' : 'scan-cam-slot').appendChild(box);   // la cámara aparece donde se tocó
+  document.getElementById(modo === 'etiqueta' ? 'venta-cam-slot' : modo === 'ruta' ? 'ruta-cam-slot' : 'scan-cam-slot').appendChild(box);   // la cámara aparece donde se tocó
   box.classList.remove('hidden'); _textoCam();
   box.scrollIntoView({ behavior: 'smooth', block: 'center' });
   try {
@@ -609,23 +641,26 @@ function abrirResumen() {
   document.getElementById('btn-subir').focus();
 }
 function cerrarResumen() { document.getElementById('modal-resumen').classList.add('hidden'); }
-async function confirmar() {
+async function confirmar(modo = 'ruta') {
   if (!items.length) return;
-  const bs = document.getElementById('btn-subir'); bs.disabled = true; bs.textContent = 'Subiendo a Drive…';
-  const b = document.getElementById('btn-confirmar'); b.disabled = true; b.textContent = 'Guardando en Drive…';
+  const bs = document.getElementById('btn-subir'), bd = document.getElementById('btn-sin-ruta');
+  bs.disabled = bd.disabled = true; (modo === 'ruta' ? bs : bd).textContent = modo === 'ruta' ? 'Armando la ruta…' : 'Subiendo a Drive…';
+  const b = document.getElementById('btn-confirmar'); b.disabled = true; b.textContent = 'Guardando…';
   try {
-    const r = await api('/devoluciones/api/confirmar', { json: { items: items.map(x => ({ articulo_id: x.id, descripcion: x.id ? '' : x.articulo, llego: x.llego || '', cantidad: x.cantidad, estado: x.estado, plataforma: x.plataforma, venta: x.venta })) } });
+    const r = await api('/devoluciones/api/confirmar', { json: { ruta: modo === 'ruta', items: items.map(x => ({ articulo_id: x.id, descripcion: x.id ? '' : x.articulo, llego: x.llego || '', cantidad: x.cantidad, estado: x.estado, plataforma: x.plataforma, venta: x.venta })) } });
     cerrarResumen();
     const desde = +document.getElementById('desde').value || 1;
     if (r.devolucion.items.some(i => i.estado !== 'AJENO')) imprimirEtiquetas('devoluciones', r.devolucion.id, { desde });
-    toast(r.devolucion.drive_ok ? `Devolución PD-${r.devolucion.id} guardada en Drive`
+    if (r.ruta) toast(`PD-${r.devolucion.id} guardada en la app. Seguí la ruta para devolver las prendas a los racks.`, 'ok', 5000);
+    else toast(r.devolucion.drive_ok ? `Devolución PD-${r.devolucion.id} guardada en Drive`
       : `PD-${r.devolucion.id} guardada en la app, pero Drive falló: reintentalo desde "Últimas devoluciones"`,
       r.devolucion.drive_ok ? 'ok' : 'warn', r.devolucion.drive_ok ? 5000 : 10000);
     nuevaDevolucion();
     historial();
+    if (r.ruta) abrirRuta(r.ruta);
   } catch (e) { toast(e.message, 'error', 6000); }
   b.textContent = '✔ Confirmar y guardar'; b.disabled = !items.length;
-  bs.textContent = '✔ Confirmar y subir'; bs.disabled = false;
+  bs.textContent = '🗺 Confirmar y armar la ruta'; bd.textContent = '☁ Guardar en Drive sin devolver'; bs.disabled = bd.disabled = false;
 }
 // Después de confirmar queda todo limpio para cargar otra devolución: sin venta, sin canal, sin prendas,
 // sin Óptimo/Falla elegido y sin el recuadro del último escaneo (las etiquetas se reimprimen desde "Últimas devoluciones").
@@ -653,7 +688,9 @@ async function historial() {
     <div class="flex flex-wrap items-center gap-3 py-2 border-b border-zinc-700 last:border-0">
       <b>PD-${x.id}</b>${(x.plataforma || '').split('+').map(chipPlat).join('')}${_chipNuevo(x)}<span class="text-zinc-500">${x.hora} · ${esc(x.usuario)}</span>
       <span class="flex-1 min-w-[200px] truncate">${(x.ventas || []).length ? `<b>${x.ventas.map(esc).join(', ')}</b> · ` : ''}${x.items.map(i => `${i.plataforma ? esc(i.plataforma) + ' ' : ''}${esc(i.articulo)} ${esc(i.color)} ${esc(i.talle)} x${i.cantidad}`).join(' · ')}</span>
-      ${x.drive_ok ? '<span class="chip chip-hecha">☁ Drive</span>' : `<button class="btn btn-gris btn-chico" onclick="reintentar(${x.id}, this)">⚠ Reintentar Drive</button>`}
+      ${x.ruta_estado === 'PENDIENTE' ? `<button class="btn btn-amarillo btn-chico" onclick="seguirRuta(${x.id}, this)">🗺 Seguir la ruta</button>`
+        : x.drive_ok ? '<span class="chip chip-hecha">☁ Drive</span>' : `<button class="btn btn-gris btn-chico" onclick="reintentar(${x.id}, this)">⚠ Reintentar Drive</button>`}
+      ${x.ruta_estado === 'DEVUELTO' ? '<span class="chip chip-hecha">✔ En racks</span>' : x.ruta_estado === 'SIN_DEVOLVER' ? '<span class="chip chip-pendiente">Sin devolver</span>' : ''}
       <button class="btn btn-primario btn-chico" onclick="marcarVisto(${x.id}); imprimirEtiquetas('devoluciones', ${x.id}, { btn: this })">🖨 Imprimir etiquetas</button>
     </div>`).join('') : '<p class="text-zinc-500">Todavía no hay devoluciones.</p>';
 }
@@ -673,6 +710,155 @@ function _avisarNuevos(xs) {
   _vistos = ids;
 }
 function _chipNuevo(x) { return _nuevos.has(x.id) ? `<span id="nuevo-PD-${x.id}" class="chip chip-alta">NUEVO</span>` : ''; }
+// ───────────── Ruta de devolución ─────────────
+// Paradas en orden; en cada una: escanear el código del rack y después cada prenda (1 unidad por escaneo).
+// El progreso queda en este equipo (si se cierra, "Seguir la ruta" retoma donde quedó).
+let rutaAct = null;   // {did, data, paradas, actual, rackOk, puestos: {item_id: {codigo: n}}, saltadas: []}
+const _RACK = /^[A-Z]\d{2}(-C\d{1,2})?(-N\d)?$/;
+const _clave = did => 'ruta_PD_' + did;
+function _guardarProg() { try { const r = rutaAct; localStorage.setItem(_clave(r.did), JSON.stringify({ puestos: r.puestos, saltadas: r.saltadas, actual: r.actual })); } catch {} }
+function abrirRuta(data) {
+  pararCam();
+  const paradas = data.paradas.slice();
+  if (data.sin_ubicacion.length) paradas.push({ n: paradas.length + 1, codigo: '', libre: true, punto: [], tramo: [],
+    descripcion: 'Sin ubicación conocida: dejalas en el rack que tenga lugar y la app lo aprende para la próxima', items: data.sin_ubicacion });
+  rutaAct = { did: data.devolucion_id, data, paradas, actual: 0, rackOk: null, puestos: {}, saltadas: [] };
+  try { const g = JSON.parse(localStorage.getItem(_clave(data.devolucion_id)) || 'null'); if (g) Object.assign(rutaAct, { puestos: g.puestos || {}, saltadas: g.saltadas || [], actual: g.actual || 0 }); } catch {}
+  if (!paradas.length) rutaAct.actual = 0;
+  else if (_hecha(paradas[rutaAct.actual] || {})) _siguiente();
+  document.getElementById('modal-ruta').classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  _estadoRuta(null, paradas.length ? 'Andá a la parada 1 y escaneá el código del rack' : 'No hay prendas para guardar en racks');
+  pintarRuta();
+}
+function cerrarRuta() { if (camScanner && camModo === 'ruta') pararCam(); rutaAct = null; document.getElementById('modal-ruta').classList.add('hidden'); document.body.style.overflow = ''; historial(); }
+async function seguirRuta(id, b) {
+  b.disabled = true;
+  try { abrirRuta(await api(`/devoluciones/api/${id}/ruta`)); } catch (e) { toast(e.message, 'error'); }
+  b.disabled = false;
+}
+const _puestas = it => Object.values(rutaAct.puestos[it.item_id] || {}).reduce((a, n) => a + n, 0);
+const _faltan = it => Math.max(0, it.cantidad - _puestas(it));
+const _hecha = p => p.items && p.items.every(it => !_faltan(it));
+const _cerrada = p => _hecha(p) || rutaAct.saltadas.includes(p.n);
+function _siguiente() {
+  const ps = rutaAct.paradas, ini = rutaAct.actual;
+  for (let k = 1; k <= ps.length; k++) { const i = (ini + k) % ps.length; if (!_cerrada(ps[i])) { rutaAct.actual = i; rutaAct.rackOk = null; return true; } }
+  rutaAct.rackOk = null; return false;
+}
+function irParada(i) { rutaAct.actual = i; rutaAct.rackOk = null; rutaAct.saltadas = rutaAct.saltadas.filter(n => n !== rutaAct.paradas[i].n); _guardarProg(); _estadoRuta(null, 'Escaneá el código del rack'); pintarRuta(); }
+function saltarParada() {
+  const p = rutaAct.paradas[rutaAct.actual]; if (!p) return;
+  if (!rutaAct.saltadas.includes(p.n)) rutaAct.saltadas.push(p.n);
+  const hay = _siguiente(); _guardarProg();
+  _estadoRuta(null, hay ? `Saltaste la parada ${p.n}. Seguí con la siguiente.` : 'No quedan paradas: marcá como devuelto o guardá en Drive sin devolver.');
+  pintarRuta();
+}
+function _estadoRuta(ok, texto, extra = '') {
+  const el = document.getElementById('ruta-estado');
+  el.style.background = ok === true ? '#dcfce7' : ok === false ? '#fee2e2' : '';
+  el.style.borderColor = ok === true ? '#15803d' : ok === false ? '#dc2626' : '';
+  el.style.borderStyle = ok === null ? 'dashed' : 'solid';
+  el.innerHTML = `<div class="text-lg font-bold">${ok === true ? '✔ ' : ok === false ? '✖ ' : ''}${esc(texto)}</div>${extra ? `<div class="text-sm">${extra}</div>` : ''}`;
+}
+function pintarRuta() {
+  const r = rutaAct, ps = r.paradas, p = ps[r.actual];
+  const tot = ps.reduce((a, x) => a + x.items.reduce((b, it) => b + it.cantidad, 0), 0);
+  const puestas = ps.reduce((a, x) => a + x.items.reduce((b, it) => b + _puestas(it), 0), 0);
+  document.getElementById('ruta-titulo').innerHTML = `🗺 Ruta de devolución PD-${r.did} <span class="text-sm font-normal text-zinc-500">· sale de ${esc(r.data.inicio.nombre)} · ${r.data.paradas.length} racks · ~${r.data.metros_aprox} m · guardadas ${puestas} de ${tot}</span>`;
+  const hechas = new Set(ps.filter(_hecha).map(x => x.n));
+  document.getElementById('ruta-svg').innerHTML = dibujarCroquis(r.data.plano, { paradas: r.data.paradas, tramos: r.data.paradas.map(x => x.tramo), actual: p && !p.libre ? p.n : 0, hechas, inicio: r.data.inicio });
+  const el = document.getElementById('ruta-parada');
+  if (!p) { el.innerHTML = '<p class="text-zinc-500">No hay paradas.</p>'; }
+  else {
+    const rack = p.libre ? (r.rackOk ? `Rack elegido: <b>${esc(r.rackOk)}</b>` : 'Escaneá el rack donde las vas a dejar') : `<span class="text-3xl font-black tracking-wide">${esc(p.codigo)}</span>`;
+    el.style.borderColor = r.rackOk ? '#15803d' : '#ea580c';
+    el.innerHTML = `<div class="flex flex-wrap items-center gap-2 mb-1"><span class="chip ${p.libre ? 'chip-pendiente' : 'chip-en_curso'}">PARADA ${p.n} DE ${ps.length}</span>${p.es_fallas ? '<span class="chip" style="background:#fee2e2;color:#b91c1c">RACK DE FALLAS</span>' : ''}${r.rackOk ? '<span class="chip chip-hecha">RACK OK</span>' : ''}</div>
+      <div class="mb-1">${rack}</div><div class="text-sm text-zinc-500 mb-3">${esc(p.descripcion || '')}</div>
+      <div class="text-xs font-bold uppercase tracking-wider text-zinc-500 mb-1">${r.rackOk ? 'Ahora escaneá cada prenda que dejás acá' : 'Primero escaneá el código de barras del rack'}</div>
+      ${p.items.map(it => { const f = _faltan(it); return `<div class="flex items-center gap-2 py-1.5 border-b border-zinc-200 last:border-0 ${f ? '' : 'opacity-50'}">
+        <span class="flex-1 min-w-0"><b>${esc(it.articulo)}</b> · ${esc(it.color)} · ${esc(it.talle)} ${it.estado === 'FALLA' ? '<span class="chip" style="background:#fee2e2;color:#b91c1c">FALLA</span>' : ''}
+        <span class="block text-xs text-zinc-500 truncate">${esc(it.sku)}${it.alternativas && it.alternativas.length ? ' · también en ' + it.alternativas.map(esc).join(', ') : ''}</span></span>
+        <b class="text-lg whitespace-nowrap">${f ? `${_puestas(it)} / ${it.cantidad}` : '✔'}</b></div>`; }).join('')}
+      <div class="flex gap-2 mt-3"><button class="btn btn-gris btn-chico" onclick="saltarParada()">⏭ Saltar esta parada (no hay lugar)</button></div>`;
+  }
+  document.getElementById('ruta-lista').innerHTML = ps.map((x, i) => {
+    const h = _hecha(x), sal = !h && r.saltadas.includes(x.n), u = x.items.reduce((a, it) => a + it.cantidad, 0);
+    return `<button class="flex items-center gap-2 py-1.5 px-2 rounded-lg text-left ${i === r.actual ? 'bg-zinc-100 font-bold' : ''}" onclick="irParada(${i})">
+      <span class="w-6 h-6 rounded-full flex items-center justify-center text-xs text-white" style="background:${h ? '#16a34a' : i === r.actual ? '#ea580c' : sal ? '#a1a1aa' : '#18181b'}">${h ? '✓' : x.n}</span>
+      <span class="flex-1">${x.libre ? 'Sin ubicación' : esc(x.codigo)}${sal ? ' <span class="text-xs text-zinc-500">(saltada)</span>' : ''}</span><span class="text-zinc-500">${u} u.</span></button>`;
+  }).join('');
+  const todo = ps.every(_hecha);
+  const b = document.getElementById('btn-devuelto');
+  b.textContent = todo ? '✔ Marcar como devuelto' : `✔ Marcar como devuelto (faltan ${tot - puestas})`;
+  b.disabled = !puestas && tot > 0;
+}
+async function escanearRuta(raw) {
+  const r = rutaAct, p = r.paradas[r.actual];
+  if (!p) return;
+  const cod = String(raw).trim().toUpperCase();
+  if (_RACK.test(cod)) {   // es un rack
+    if (p.libre) {
+      const x = await api('/devoluciones/api/rack?c=' + encodeURIComponent(cod)).catch(e => ({ ok: false, motivo: e.message }));
+      if (!x.ok) { beepError(); _estadoRuta(false, x.motivo); return; }
+      r.rackOk = x.codigo; beepOk(); _estadoRuta(true, `Rack ${x.codigo}`, 'Ahora escaneá cada prenda que dejás en este rack.'); pintarRuta(); return;
+    }
+    if (cod === p.codigo) { r.rackOk = cod; beepOk(); _estadoRuta(true, `Rack ${cod} correcto`, 'Ahora escaneá cada prenda que dejás acá.'); pintarRuta(); return; }
+    const otra = r.paradas.findIndex(x => x.codigo === cod);
+    beepError();
+    _estadoRuta(false, `Este rack es ${cod}: tenés que estar en ${p.codigo}`,
+      otra >= 0 ? `${cod} es la parada ${r.paradas[otra].n}. <button class="underline font-semibold" onclick="irParada(${otra})">Ir a esa parada</button>` : 'Ese rack no es de esta ruta.');
+    return;
+  }
+  if (!r.rackOk) { beepError(); _estadoRuta(false, p.libre ? 'Primero escaneá el rack donde la dejás' : `Primero escaneá el rack ${p.codigo}`); return; }
+  const coincide = it => (it.codigo_barras && it.codigo_barras === cod) || (it.sku && it.sku.toUpperCase() === cod);
+  const it = p.items.find(x => coincide(x) && _faltan(x)) ;
+  if (it) {
+    const m = r.puestos[it.item_id] = r.puestos[it.item_id] || {};
+    m[r.rackOk] = (m[r.rackOk] || 0) + 1;
+    beepOk(); _guardarProg();
+    const listo = _hecha(p);
+    _estadoRuta(true, `${it.articulo} · ${it.color} · ${it.talle}`, listo ? `Parada ${p.n} completa.` : `${_puestas(it)} de ${it.cantidad} en ${r.rackOk}`);
+    if (listo) { const hay = _siguiente(); _guardarProg(); if (!hay) _estadoRuta(true, '¡Listo! Todas las prendas guardadas', 'Tocá "Marcar como devuelto" para cargarla en Drive.');
+      else _estadoRuta(true, `Parada ${p.n} completa`, `Seguí a la parada ${r.paradas[r.actual].n}: <b>${esc(r.paradas[r.actual].codigo || 'sin ubicación')}</b>`); }
+    pintarRuta(); return;
+  }
+  beepError();
+  if (p.items.some(coincide)) { _estadoRuta(false, 'Esa prenda ya está toda guardada acá'); return; }
+  const otra = r.paradas.find(x => x !== p && x.items.some(coincide));
+  _estadoRuta(false, otra ? `Esta prenda va en ${otra.codigo || 'otra parada (sin ubicación)'}` : 'Esta prenda no es de esta devolución',
+    otra ? `Es de la parada ${otra.n}. No la dejes en ${esc(r.rackOk)}.` : '');
+}
+document.getElementById('ruta-cod').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); const v = e.target.value; e.target.value = ''; if (v.trim()) escanear(v); } });
+function _guardados() {
+  const out = [];
+  for (const [iid, m] of Object.entries(rutaAct.puestos)) for (const [codigo, cantidad] of Object.entries(m)) out.push({ item_id: +iid, codigo, cantidad });
+  return out;
+}
+async function marcarDevuelto() {
+  const r = rutaAct, b = document.getElementById('btn-devuelto');
+  const faltan = r.paradas.reduce((a, x) => a + x.items.reduce((s, it) => s + _faltan(it), 0), 0);
+  if (faltan && !confirm(`Quedan ${faltan} prendas sin guardar en un rack. ¿Marcar como devuelto igual?`)) return;
+  b.disabled = true; b.textContent = 'Guardando en Drive…';
+  try {
+    const x = await api(`/devoluciones/api/${r.did}/devuelto`, { json: { guardados: _guardados() } });
+    try { localStorage.removeItem(_clave(r.did)); } catch {}
+    toast(x.devolucion.drive_ok ? `PD-${r.did} devuelta a los racks y guardada en Drive` : `PD-${r.did} devuelta, pero Drive falló: reintentalo desde "Últimas devoluciones"`,
+      x.devolucion.drive_ok ? 'ok' : 'warn', 8000);
+    if (x.aprendidas) toast(`La app aprendió ${x.aprendidas} ubicación${x.aprendidas > 1 ? 'es' : ''} nueva${x.aprendidas > 1 ? 's' : ''} para Mapeo`, 'info', 6000);
+    cerrarRuta();
+  } catch (e) { toast(e.message, 'error', 6000); pintarRuta(); }
+}
+async function sinDevolver() {
+  const r = rutaAct;
+  if (!confirm('¿Guardar en Drive sin devolver las prendas a los racks?')) return;
+  try {
+    const x = await api(`/devoluciones/api/${r.did}/sin-devolver`, { method: 'POST' });
+    try { localStorage.removeItem(_clave(r.did)); } catch {}
+    toast(x.devolucion.drive_ok ? `PD-${r.did} guardada en Drive (sin devolver a los racks)` : `Drive falló: reintentalo desde "Últimas devoluciones"`, x.devolucion.drive_ok ? 'ok' : 'warn', 7000);
+    cerrarRuta();
+  } catch (e) { toast(e.message, 'error', 6000); }
+}
 setInterval(() => { if (!document.hidden) historial().catch(() => {}); }, 20000);
 setEstadoScan(''); setCanal(''); pintarLista(); historial();
 </script>
