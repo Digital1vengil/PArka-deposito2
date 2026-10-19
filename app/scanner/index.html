@@ -438,6 +438,12 @@
       </div>
     </div>
 
+    <!-- Leer con una foto (si la cámara en vivo no lee) + diagnóstico de la lectura -->
+    <button id="btn-foto-qr" type="button" onclick="leerFotoQR()" style="position:absolute;left:8px;bottom:8px;z-index:15;background:rgba(255,255,255,.92);color:#1e293b;font-weight:700;font-size:14px;padding:8px 12px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.3)">📸 Foto</button>
+    <input id="input-foto-qr" type="file" accept="image/*" capture="environment" class="hidden">
+    <div id="qr-foto" style="display:none"></div>
+    <p id="cam-diag" style="position:absolute;right:8px;bottom:8px;z-index:15;font-size:10px;line-height:1.25;color:rgba(255,255,255,.85);background:rgba(0,0,0,.5);border-radius:4px;padding:2px 6px;max-width:60%;text-align:right;pointer-events:none"></p>
+
     <!-- Paused overlay -->
     <div id="paused-overlay" class="hidden absolute inset-0 bg-black/85 flex flex-col items-center justify-center z-20">
       <div class="w-14 h-14 rounded-full bg-white/10 flex items-center justify-center mb-3">
@@ -610,6 +616,17 @@ let state = null;
 let scanner = null;
 let scannerRunning = false;
 let scannerStarting = false;
+// Diagnóstico de la lectura en vivo (se ve chiquito abajo a la derecha de la cámara)
+const camDiag = { cuadros: 0, leidos: 0, error: '', modo: '' };
+function camLeido(text) { camDiag.leidos++; processScan(text); }
+function camSinLectura(err) { camDiag.cuadros++; const e = String(err || ''); if (e && !/NotFound|No MultiFormat|No barcode|not found/i.test(e)) camDiag.error = e.slice(0, 70); }
+setInterval(() => {
+  const el = document.getElementById('cam-diag'); if (!el) return;
+  if (!scannerRunning) { el.textContent = ''; return; }
+  const v = document.querySelector('#qr-reader video');
+  el.textContent = (v ? v.videoWidth + '×' + v.videoHeight : 'sin video') + ' · ' + camDiag.modo +
+    ' · cuadros ' + camDiag.cuadros + ' · leídos ' + camDiag.leidos + (camDiag.error ? ' · ' + camDiag.error : '');
+}, 1000);
 let scanMode = 'barcode'; // 'barcode' or 'qr'
 // Despacho session
 let currentDespacho = [];
@@ -2178,10 +2195,8 @@ async function startScanner(fromUserGesture = false) {
     const camConstraint = modo.hd ? { facingMode: modo.facingMode } : modo;
     const cfg = modo.hd ? Object.assign({}, qrConfig, { videoConstraints: hd, aspectRatio: undefined }) : qrConfig;
     try {
-      await scanner.start(camConstraint, cfg,
-        (text) => processScan(text),
-        () => {}
-      );
+      await scanner.start(camConstraint, cfg, camLeido, camSinLectura);
+      camDiag.modo = modo.hd ? 'HD' : 'modo ' + cameraModes.indexOf(modo);
       started = true;
       break;
     } catch (e) {
@@ -2203,7 +2218,8 @@ async function startScanner(fromUserGesture = false) {
             retryEl.parentNode.replaceChild(fresh, retryEl);
           }
           scanner = new Html5Qrcode('qr-reader', { verbose: false });
-          await scanner.start(camConstraint, cfg, (text) => processScan(text), () => {});
+          await scanner.start(camConstraint, cfg, camLeido, camSinLectura);
+          camDiag.modo = 'reintento';
           started = true;
           lastErr = '';
         } catch (e2) { lastErr = String(e2); }
@@ -2232,6 +2248,31 @@ async function startScanner(fromUserGesture = false) {
       vid.muted = true;
     }
   }, 400);
+}
+
+// ── Leer con una foto: abre la cámara del celular, saca la foto y la decodifica (ZXing) ──
+function leerFotoQR() {
+  const inp = document.getElementById('input-foto-qr');
+  inp.value = '';
+  inp.onchange = async () => {
+    const f = inp.files && inp.files[0];
+    if (!f) return;
+    showBanner('idle', '🔎 Leyendo la foto…', '', '');
+    try {
+      const F = window.Html5QrcodeSupportedFormats;
+      const lector = new Html5Qrcode('qr-foto', { verbose: false,
+        formatsToSupport: F ? [F.QR_CODE, F.CODE_128, F.CODE_39, F.EAN_13, F.ITF] : undefined });
+      const text = await lector.scanFile(f, false);
+      lastScanRaw = ''; lastScanTime = 0;
+      processScan(text);
+    } catch (e) {
+      beepError();
+      showBanner('error', '❌ No encontré el código en la foto', 'Acercate más a la etiqueta y con buena luz', '');
+    }
+    // al volver de la cámara de fotos, el video en vivo puede quedar congelado: se reinicia
+    if (scannerRunning || despachoActive) startScanner(true);
+  };
+  inp.click();
 }
 
 function setPausedIcon(name) {
