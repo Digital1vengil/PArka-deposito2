@@ -23,7 +23,7 @@ def _cargar_dia():
             db.add(DespachoEscaneo(fecha=hoy(), tipo=tipo, tracking=tr, venta="V" + tr, comprador="Ana", usuario_id=u.id))
         d = Devolucion(fecha=hoy(), usuario_id=u.id, total=3, plataforma="ML")
         d.items = [DevolucionItem(codigo_barras="200", articulo="ABBA", color="BLACK", talle="M", estado="OPTIMO",
-                                  plataforma="ML", cantidad=2),
+                                  plataforma="ML", venta="2000012345678901", cantidad=2),
                    DevolucionItem(codigo_barras="201", articulo="ABBA", color="BLACK", talle="L", estado="FALLA",
                                   plataforma="ML", cantidad=1)]
         c = Conteo(fecha=hoy(), usuario_id=u.id, nota="Estante A", total=5)
@@ -74,6 +74,8 @@ def test_excels_y_subida(monkeypatch):
 
     dev = _hojas(archivos["devoluciones"])
     assert ["ML", 2, 1, 3] in dev["Resumen"] and len(dev["Detalle"]) == 3
+    # después de "Plataforma" (D) va el nº de venta (ML) / orden (TN) en la columna E
+    assert dev["Detalle"][0][3:5] == ["Plataforma", "Nº venta / orden"] and dev["Detalle"][1][3:5] == ["ML", "2000012345678901"]
 
     con = _hojas(archivos["conteos"])
     assert con["Por artículo"][1][-1] == 5 and con["Detalle"][1][2] == "Estante A"
