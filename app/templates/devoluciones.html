@@ -142,7 +142,7 @@
         <div><h3 class="text-xs font-bold uppercase tracking-wider text-zinc-500 mb-1">Paradas</h3><div id="ruta-lista" class="flex flex-col text-sm"></div></div>
         <button id="btn-devuelto" class="btn btn-primario w-full !py-3" onclick="marcarDevuelto()">✔ Marcar como devuelto</button>
         <button class="btn btn-gris w-full" onclick="sinDevolver()">☁ Guardar en Drive sin devolver</button>
-        <p class="text-xs text-zinc-500">"Sin devolver": no hay lugar o no hay información. Se sube igual a Drive (Crédito y Reingreso) y las prendas quedan sin rack.</p>
+        <p class="text-xs text-zinc-500">Cada prenda que escaneás en su rack queda confirmada al instante en el Excel del día (Drive). Al confirmar la última, la devolución se marca devuelta y se carga sola (Crédito y Reingreso). "Sin devolver": no hay lugar o no hay información. Se sube igual a Drive (Crédito y Reingreso) y las prendas quedan sin rack.</p>
       </div>
     </div>
   </div>
@@ -716,14 +716,17 @@ function _chipNuevo(x) { return _nuevos.has(x.id) ? `<span id="nuevo-PD-${x.id}"
 let rutaAct = null;   // {did, data, paradas, actual, rackOk, puestos: {item_id: {codigo: n}}, saltadas: []}
 const _RACK = /^[A-Z]\d{2}(-C\d{1,2})?(-N\d)?$/;
 const _clave = did => 'ruta_PD_' + did;
-function _guardarProg() { try { const r = rutaAct; localStorage.setItem(_clave(r.did), JSON.stringify({ puestos: r.puestos, saltadas: r.saltadas, actual: r.actual })); } catch {} }
+function _guardarProg() { try { const r = rutaAct; localStorage.setItem(_clave(r.did), JSON.stringify({ saltadas: r.saltadas, actual: r.actual })); } catch {} }
 function abrirRuta(data) {
   pararCam();
   const paradas = data.paradas.slice();
   if (data.sin_ubicacion.length) paradas.push({ n: paradas.length + 1, codigo: '', libre: true, punto: [], tramo: [],
     descripcion: 'Sin ubicación conocida: dejalas en el rack que tenga lugar y la app lo aprende para la próxima', items: data.sin_ubicacion });
-  rutaAct = { did: data.devolucion_id, data, paradas, actual: 0, rackOk: null, puestos: {}, saltadas: [] };
-  try { const g = JSON.parse(localStorage.getItem(_clave(data.devolucion_id)) || 'null'); if (g) Object.assign(rutaAct, { puestos: g.puestos || {}, saltadas: g.saltadas || [], actual: g.actual || 0 }); } catch {}
+  // lo ya confirmado viene del servidor (queda guardado al instante, sirve desde cualquier equipo)
+  const puestos = {};
+  paradas.forEach(p => p.items.forEach(it => { if (it.guardados && Object.keys(it.guardados).length) puestos[it.item_id] = { ...it.guardados }; }));
+  rutaAct = { did: data.devolucion_id, data, paradas, actual: 0, rackOk: null, puestos, saltadas: [] };
+  try { const g = JSON.parse(localStorage.getItem(_clave(data.devolucion_id)) || 'null'); if (g) Object.assign(rutaAct, { saltadas: g.saltadas || [], actual: Math.min(g.actual || 0, Math.max(0, paradas.length - 1)) }); } catch {}
   if (!paradas.length) rutaAct.actual = 0;
   else if (_hecha(paradas[rutaAct.actual] || {})) _siguiente();
   document.getElementById('modal-ruta').classList.remove('hidden');
@@ -814,9 +817,21 @@ async function escanearRuta(raw) {
   const coincide = it => (it.codigo_barras && it.codigo_barras === cod) || (it.sku && it.sku.toUpperCase() === cod);
   const it = p.items.find(x => coincide(x) && _faltan(x)) ;
   if (it) {
-    const m = r.puestos[it.item_id] = r.puestos[it.item_id] || {};
-    m[r.rackOk] = (m[r.rackOk] || 0) + 1;
+    // se confirma en el servidor al instante: queda en la devolución y en el Excel del día de Drive
+    let x;
+    try { x = await api(`/devoluciones/api/${r.did}/guardar`, { json: { item_id: it.item_id, codigo: r.rackOk, cantidad: 1 } }); }
+    catch (e) { beepError(); _estadoRuta(false, 'No se pudo confirmar', esc(e.message)); return; }
+    r.puestos[it.item_id] = x.guardados;
     beepOk(); _guardarProg();
+    if (x.aprendidas) toast('Mapeo aprendió esta ubicación para la próxima', 'info', 4000);
+    if (x.completa) {
+      try { localStorage.removeItem(_clave(r.did)); } catch {}
+      pintarRuta();
+      _estadoRuta(true, '¡Devolución completa!', x.devolucion.drive_ok ? 'Todas las prendas en su rack · guardada en Drive' : 'Todas las prendas en su rack · Drive falló: reintentalo desde "Últimas devoluciones"');
+      toast(x.devolucion.drive_ok ? `PD-${r.did} devuelta a los racks y guardada en Drive` : `PD-${r.did} devuelta, pero Drive falló: reintentalo desde "Últimas devoluciones"`, x.devolucion.drive_ok ? 'ok' : 'warn', 8000);
+      setTimeout(() => { if (rutaAct && rutaAct.did === r.did) cerrarRuta(); }, 2500);
+      return;
+    }
     const listo = _hecha(p);
     _estadoRuta(true, `${it.articulo} · ${it.color} · ${it.talle}`, listo ? `Parada ${p.n} completa.` : `${_puestas(it)} de ${it.cantidad} en ${r.rackOk}`);
     if (listo) { const hay = _siguiente(); _guardarProg(); if (!hay) _estadoRuta(true, '¡Listo! Todas las prendas guardadas', 'Tocá "Marcar como devuelto" para cargarla en Drive.');
