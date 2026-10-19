@@ -22,6 +22,7 @@ from collections import Counter, defaultdict
 from datetime import date, datetime, time
 
 from openpyxl import Workbook
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.styles import Alignment, Font, PatternFill
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -111,14 +112,25 @@ _ENC_FONT = Font(bold=True, color="FFFFFF")
 _ENC_FILL = PatternFill("solid", fgColor="1F2937")
 
 
+def _limpio(v):
+    """Excel no acepta caracteres de control (vienen a veces en nombres de compradores o detalles): se sacan."""
+    if isinstance(v, str):
+        return ILLEGAL_CHARACTERS_RE.sub("", v)[:32000]
+    return v
+
+
+def _fila(ws, valores) -> None:
+    ws.append([_limpio(v) for v in valores])
+
+
 def _hoja(wb: Workbook, titulo: str, encabezados: list[str], filas: list[list], anchos: list[int], primera=False):
     ws = wb.active if primera else wb.create_sheet()
     ws.title = titulo[:31]
-    ws.append(encabezados)
+    _fila(ws, encabezados)
     for c in ws[1]:
         c.font, c.fill, c.alignment = _ENC_FONT, _ENC_FILL, Alignment(vertical="center")
     for f in filas:
-        ws.append(f)
+        _fila(ws, f)
     for i, w in enumerate(anchos):
         ws.column_dimensions[chr(65 + i)].width = w
     ws.freeze_panes = "A2"
@@ -140,11 +152,11 @@ def _resumen(wb: Workbook, titulo: str, fecha: date, bloques: list[tuple[list[st
     ws.title = "Resumen"
     _titulo(ws, f"{titulo} — {fecha.strftime('%d/%m/%Y')}", f"PARKA Depósito · actualizado {ahora().strftime('%d/%m %H:%M')}")
     for enc, filas in bloques:
-        ws.append(enc)
+        _fila(ws, enc)
         for c in ws[ws.max_row]:
             c.font, c.fill = _ENC_FONT, _ENC_FILL
         for f in filas:
-            ws.append(f)
+            _fila(ws, f)
         ws.append([])
     for col, w in zip("ABCDE", [30, 16, 16, 16, 16]):
         ws.column_dimensions[col].width = w
@@ -333,7 +345,13 @@ def sincronizar(db: Session, fecha: date, usuario: Usuario | None = None, forzar
     cambiadas = [s for s in secciones if forzar or _subido.get((f, s)) != huellas[s]]
     if not cambiadas:
         return {"fecha": f, "archivos": [], "sin_cambios": list(secciones)}
-    archivos = {s: ARMADORES[s](db, fecha) for s in cambiadas}
+    archivos = {}
+    for sec in cambiadas:
+        try:
+            archivos[sec] = ARMADORES[sec](db, fecha)
+        except Exception as e:  # noqa: BLE001 — se dice qué archivo y por qué, en vez de un error 500 mudo
+            log.exception("No se pudo armar %s del %s", sec, f)
+            raise DepositoDriveError(f"No se pudo armar el Excel de {sec} del {f}: {type(e).__name__}: {e}"[:300]) from e
     try:
         r = re_drive.guardar_deposito(db, f, archivos)
     except re_drive.REDriveError as e:

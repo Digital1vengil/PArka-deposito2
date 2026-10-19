@@ -202,6 +202,10 @@ def deposito_guardar(body: DepositoIn, u: Usuario = Depends(acceso_cierre), db: 
         return {"ok": True, **deposito_drive.sincronizar(db, body.fecha or hoy(), u, forzar=True)}
     except deposito_drive.DepositoDriveError as e:
         raise HTTPException(502, str(e))
+    except Exception as e:  # noqa: BLE001 — que se vea la causa en pantalla
+        import logging
+        logging.getLogger("parka").exception("DEPOSITO PARKA %s", body.fecha)
+        raise HTTPException(500, f"{type(e).__name__}: {e}"[:300])
 
 
 class CierreMailIn(BaseModel):

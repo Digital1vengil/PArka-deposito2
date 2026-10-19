@@ -152,3 +152,15 @@ def test_botones_manuales_usan_el_cierre_nuevo(monkeypatch):
         assert r["ok"] and r["mail"] == "gerencia@magontex.com.ar" and r["despachados"] >= 4
         assert c.post("/admin/api/google/cerrar").json()["ok"]
     assert llamadas == [("mail_nuevo", "gerencia@magontex.com.ar")] * 2   # nunca el cerrarDia viejo
+
+
+def test_caracteres_invisibles_no_rompen_el_excel(monkeypatch):
+    from app.services.deposito_drive import excel_despachos, excel_cierre_dia
+    with SessionLocal() as db:
+        u = db.query(Usuario).first()
+        db.add(DespachoEscaneo(fecha=hoy(), tipo="flex", tracking="9001", venta="V9001",
+                               comprador="Juan\x0b Pérez\x01", usuario_id=u.id))
+        db.commit()
+        hojas = _hojas(excel_despachos(db, hoy()))
+        assert any(r and r[3] == "Juan Pérez" for r in hojas["Flex"])
+        assert "Resumen" in _hojas(excel_cierre_dia(db, hoy()))
