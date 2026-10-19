@@ -238,3 +238,54 @@ def etiquetas(ids: str = "", desde: int = 1, guias: bool = False, u: Usuario = D
 
 def _404():
     raise HTTPException(404, "No encontrado")
+
+
+# ─────────── Croquis del depósito (racks A/B/C, persianas) y ajustes de la ruta de devolución ───────────
+@router.get("/api/croquis")
+def croquis_ver(u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    from ..services import ajustes, croquis
+    cs = _conteos(db)
+    us = db.scalars(select(Ubicacion).order_by(Ubicacion.orden, Ubicacion.codigo)).all()
+    faltan = [c["codigo"] for c in croquis.codigos_iniciales()
+              if c["codigo"] not in {x.codigo for x in us}]
+    return {"plano": croquis.plano(), "inicio": ajustes.leer("mapa_inicio", db) or "P1",
+            "rack_fallas": ajustes.leer("mapa_rack_fallas", db), "faltan": faltan,
+            "ubicaciones": [dict(svc.ubicacion_json(x, cs.get(x.id, 0)), rack=(croquis.partes(x.codigo) or [""])[0])
+                            for x in us]}
+
+
+@router.post("/api/croquis/cargar")
+def croquis_cargar(u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    """Crea las ubicaciones del croquis que todavía no existen (A01…C05; B01 por columna y planta)."""
+    from ..services import croquis
+    existentes = set(db.scalars(select(Ubicacion.codigo)).all())
+    orden = (db.scalar(select(func.max(Ubicacion.orden))) or 0)
+    creadas = 0
+    for c in croquis.codigos_iniciales():
+        if c["codigo"] in existentes:
+            continue
+        orden += 10
+        db.add(Ubicacion(orden=orden, **c))
+        creadas += 1
+    db.commit()
+    if creadas:
+        registrar(db, u, "mapeo", f"{creadas} ubicaciones cargadas del croquis", "mapeo")
+    return {"ok": True, "creadas": creadas}
+
+
+class CroquisAjustesIn(BaseModel):
+    inicio: str = "P1"
+    rack_fallas: str = ""
+
+
+@router.post("/api/croquis/ajustes")
+def croquis_ajustes(body: CroquisAjustesIn, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    from ..services import ajustes, croquis
+    if body.inicio not in croquis.PUERTAS:
+        raise HTTPException(400, "Elegí Persiana 1 o Persiana 2")
+    fallas = svc.normalizar_codigo(body.rack_fallas)
+    if fallas and not db.scalar(select(Ubicacion).where(Ubicacion.codigo == fallas)):
+        raise HTTPException(400, f"No existe la ubicación {fallas}: cargala primero")
+    ajustes.guardar(db, "mapa_inicio", body.inicio)
+    ajustes.guardar(db, "mapa_rack_fallas", fallas)
+    return {"ok": True}

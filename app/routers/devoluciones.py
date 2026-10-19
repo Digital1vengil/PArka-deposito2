@@ -12,8 +12,9 @@ from sqlalchemy.orm import Session
 from ..actividad import registrar
 from ..auth import requiere
 from ..db import get_db, hoy
-from ..models import Articulo, Devolucion, DevolucionItem, Usuario
+from ..models import Articulo, Devolucion, DevolucionItem, UbicacionArticulo, Usuario
 from ..services import devoluciones as svc
+from ..services import ruta_devolucion as ruta_svc
 from ..services.etiquetas import pdf_etiquetas
 from ..services.etiquetas_html import html_etiquetas
 from ..services import etiquetas_rollo as rollo
@@ -95,6 +96,7 @@ class ItemIn(BaseModel):
 class ConfirmarIn(BaseModel):
     items: list[ItemIn]
     plataforma: str = ""   # compatibilidad: si una prenda no trae plataforma se usa esta
+    ruta: bool = False     # True = se guarda en la app y se arma la ruta; Drive recién al "Marcar como devuelto"
 
 
 def dev_json(d: Devolucion) -> dict:
@@ -104,9 +106,10 @@ def dev_json(d: Devolucion) -> dict:
         resp = {}
     return {"id": d.id, "hora": d.creado_at.strftime("%d/%m %H:%M"), "total": d.total, "plataforma": d.plataforma or "",
             "usuario": d.usuario.nombre if d.usuario else "", "usuario_id": d.usuario_id, "drive_ok": d.drive_ok,
-            "drive_error": "" if d.drive_ok else d.drive_resp, "drive": resp,
+            "drive_error": "" if d.drive_ok else d.drive_resp, "drive": resp, "ruta_estado": d.ruta_estado or "",
             "items": [{"articulo": i.articulo, "color": i.color, "talle": i.talle, "cantidad": i.cantidad,
-                       "estado": i.estado, "plataforma": i.plataforma or "", "venta": i.venta or "", "llego": i.llego or "", "sku": i.sku}
+                       "estado": i.estado, "plataforma": i.plataforma or "", "venta": i.venta or "", "llego": i.llego or "", "sku": i.sku,
+                       "ubicacion": i.ubicacion or ""}
                       for i in d.items],
             "ventas": list(dict.fromkeys(f"{i.plataforma} {i.venta}" for i in d.items if i.venta))}
 
@@ -171,7 +174,98 @@ def confirmar(body: ConfirmarIn, u: Usuario = Depends(acceso), db: Session = Dep
     db.commit()
     ventas = ", ".join(dict.fromkeys(f"{i.plataforma} {i.venta}" for i in d.items))
     registrar(db, u, "devolucion", f"PD-{d.id} · {ventas} · {d.total} unidades", "devoluciones")
+    if body.ruta and any(i.estado != "AJENO" for i in d.items):
+        d.ruta_estado = "PENDIENTE"   # Drive recién al marcar como devuelto (o "Guardar en Drive sin devolver")
+        db.commit()
+        return {"ok": True, "devolucion": dev_json(d), "ruta": ruta_svc.armar(db, d)}
     _enviar(db, d)
+    return {"ok": True, "devolucion": dev_json(d)}
+
+
+# ─────────── Ruta de devolución: guardar cada prenda en su rack ───────────
+def _dev(db: Session, did: int) -> Devolucion:
+    d = db.get(Devolucion, did)
+    if not d:
+        raise HTTPException(404, "No existe la devolución")
+    return d
+
+
+@router.get("/api/{did}/ruta")
+def ver_ruta(did: int, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    return ruta_svc.armar(db, _dev(db, did))
+
+
+@router.get("/api/rack")
+def rack(c: str = "", u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    """Código de barras del rack escaneado → la ubicación (tiene que estar cargada en Mapeo)."""
+    x = ruta_svc.ubicacion(db, c)
+    if not x:
+        return {"ok": False, "motivo": f"{(c or '').strip() or 'Ese código'} no es un rack cargado en Mapeo"}
+    from ..services import croquis
+    return {"ok": True, "codigo": x.codigo, "descripcion": croquis.describir(x.codigo) or x.descripcion}
+
+
+class GuardadoIn(BaseModel):
+    item_id: int
+    codigo: str
+    cantidad: int = 1
+
+
+class DevueltoIn(BaseModel):
+    guardados: list[GuardadoIn] = []
+
+
+@router.post("/api/{did}/devuelto")
+def devuelto(did: int, body: DevueltoIn, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    """Fin de la ruta: guarda en qué rack quedó cada prenda, aprende las ubicaciones nuevas y sube a Drive."""
+    d = _dev(db, did)
+    if d.ruta_estado != "PENDIENTE":
+        raise HTTPException(409, "Esta devolución ya se cerró")
+    items = {i.id: i for i in d.items}
+    por_item: dict[int, dict[str, int]] = {}
+    for g in body.guardados:
+        it = items.get(g.item_id)
+        x = ruta_svc.ubicacion(db, g.codigo)
+        if not it or it.estado == "AJENO":
+            raise HTTPException(400, "Hay una prenda que no es de esta devolución")
+        if not x:
+            raise HTTPException(400, f"{g.codigo} no es un rack cargado en Mapeo")
+        c = por_item.setdefault(it.id, {})
+        c[x.codigo] = c.get(x.codigo, 0) + max(1, g.cantidad)
+    rack_fallas = ruta_svc.ubicacion(db, ruta_svc.ajustes.leer("mapa_rack_fallas", db))
+    from ..services.mapeo import ubicaciones_de
+    aprendidas = 0
+    for iid, cods in por_item.items():
+        it = items[iid]
+        it.ubicacion = ", ".join(k if n >= it.cantidad else f"{k} x{n}" for k, n in cods.items())[:80]
+        if it.estado != "OPTIMO" or not it.articulo_id:
+            continue
+        a = db.get(Articulo, it.articulo_id)
+        conocidas = {x.codigo for x in ubicaciones_de(db, a)} if a else set()
+        for k in cods:   # la prenda quedó en un rack que la app no conocía: se aprende para la próxima
+            x = ruta_svc.ubicacion(db, k)
+            if a and x and k not in conocidas and not (rack_fallas and k == rack_fallas.codigo):
+                db.add(UbicacionArticulo(ubicacion_id=x.id, modelo=a.articulo, color="", articulo_id=a.id,
+                                         nota=f"Aprendido en la devolución PD-{d.id}", creado_por_id=u.id))
+                conocidas.add(k)
+                aprendidas += 1
+    d.ruta_estado = "DEVUELTO"
+    db.commit()
+    registrar(db, u, "devolucion", f"PD-{d.id} devuelta a los racks", "devoluciones")
+    _enviar(db, d)
+    return {"ok": True, "devolucion": dev_json(d), "aprendidas": aprendidas}
+
+
+@router.post("/api/{did}/sin-devolver")
+def sin_devolver(did: int, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    """No hay lugar o no hay información: se sube a Drive sin guardar las prendas en los racks."""
+    d = _dev(db, did)
+    if d.ruta_estado == "PENDIENTE":
+        d.ruta_estado = "SIN_DEVOLVER"
+        db.commit()
+        registrar(db, u, "devolucion", f"PD-{d.id} guardada en Drive sin devolver a los racks", "devoluciones")
+    if not d.drive_ok:
+        _enviar(db, d)
     return {"ok": True, "devolucion": dev_json(d)}
 
 
@@ -182,6 +276,8 @@ def reintentar(did: int, u: Usuario = Depends(acceso), db: Session = Depends(get
         raise HTTPException(404)
     if d.drive_ok:
         return {"ok": True, "devolucion": dev_json(d)}
+    if d.ruta_estado == "PENDIENTE":
+        raise HTTPException(409, "Primero terminá la ruta (o tocá \"Guardar en Drive sin devolver\")")
     _enviar(db, d)
     if not d.drive_ok:
         raise HTTPException(502, d.drive_resp)
