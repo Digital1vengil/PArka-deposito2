@@ -222,6 +222,7 @@ class DevolucionItem(Base):
     talle: Mapped[str] = mapped_column(String(20), default="")
     estado: Mapped[str] = mapped_column(String(10), default="OPTIMO")  # OPTIMO | FALLA
     plataforma: Mapped[str] = mapped_column(String(4), default="")  # ML | TN (por prenda)
+    venta: Mapped[str] = mapped_column(String(40), default="")  # nº de venta (ML) o nº de orden (TN)
     cantidad: Mapped[int] = mapped_column(Integer, default=1)
 
     devolucion: Mapped[Devolucion] = relationship(back_populates="items")
