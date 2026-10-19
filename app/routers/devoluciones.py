@@ -33,14 +33,9 @@ def buscar(q: str = "", u: Usuario = Depends(acceso), db: Session = Depends(get_
     return {"modelos": svc.buscar_modelos(db, q)}
 
 
-@router.get("/api/codigo")
-def por_codigo(c: str = "", u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
-    """Escáner: código de barras (o SKU) → variante lista para sumar a la devolución.
-    Si no se puede usar, devuelve ok=False con el motivo (para avisar sin escribir nada)."""
+def _variante(db: Session, cod: str) -> dict:
+    """Código de barras o SKU → variante lista para sumar a la devolución, o {ok: False, motivo}."""
     from ..services.catalogo import por_codigo as buscar_codigo
-    cod = (c or "").strip()
-    if not cod:
-        return {"ok": False, "motivo": "Código vacío"}
     a = buscar_codigo(db, cod)
     if a is None:
         return {"ok": False, "motivo": f"El código {cod} no está en el catálogo"}
@@ -56,13 +51,29 @@ def por_codigo(c: str = "", u: Usuario = Depends(acceso), db: Session = Depends(
                                      "sku": a.sku, "codigo_barras": a.codigo_barras, "nombre": a.nombre}}
 
 
+@router.get("/api/codigo")
+def por_codigo(c: str = "", u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    """Escáner: código de barras (o SKU) → variante lista para sumar a la devolución.
+    Si no se puede usar, devuelve ok=False con el motivo (para avisar sin escribir nada)."""
+    cod = (c or "").strip()
+    if not cod:
+        return {"ok": False, "motivo": "Código vacío"}
+    return _variante(db, cod)
+
+
 @router.get("/api/venta")
-def venta(plataforma: str = "", c: str = "", u: Usuario = Depends(acceso)):
+def venta(plataforma: str = "", c: str = "", u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
     """Nº de venta (ML) / nº de orden (TN), o la etiqueta escaneada → la compra en la plataforma."""
     if not (c or "").strip():
         return {"ok": False, "motivo": "Escribí o escaneá el número", "sin_conexion": False}
     r = svc.buscar_venta(plataforma, c)
     r.setdefault("codigo", svc.codigo_de_etiqueta(c))
+    # "Es el mismo artículo": cada prenda de la venta se busca en el catálogo por su SKU para sumarla con un toque
+    for it in r.get("items") or []:
+        v = _variante(db, it["sku"].strip()) if (it.get("sku") or "").strip() else \
+            {"ok": False, "motivo": "La venta no trae el SKU de esta prenda"}
+        it["variante"] = v.get("variante")
+        it["motivo"] = "" if v["ok"] else v["motivo"]
     return r
 
 
@@ -72,7 +83,9 @@ def _venta_ok(v: str) -> str:
 
 
 class ItemIn(BaseModel):
-    articulo_id: int
+    articulo_id: int | None = None   # None solo para un artículo que no vendemos (estado AJENO)
+    descripcion: str = ""            # qué llegó, si es un artículo que no vendemos
+    llego: str = ""                  # MISMO | DISTINTO | AJENO
     cantidad: int = 1
     estado: str = ""       # OPTIMO | FALLA (obligatorio, por prenda; sin valor por defecto)
     plataforma: str = ""   # ML | TN (obligatorio, por prenda)
@@ -93,7 +106,7 @@ def dev_json(d: Devolucion) -> dict:
             "usuario": d.usuario.nombre if d.usuario else "", "usuario_id": d.usuario_id, "drive_ok": d.drive_ok,
             "drive_error": "" if d.drive_ok else d.drive_resp, "drive": resp,
             "items": [{"articulo": i.articulo, "color": i.color, "talle": i.talle, "cantidad": i.cantidad,
-                       "estado": i.estado, "plataforma": i.plataforma or "", "venta": i.venta or "", "sku": i.sku}
+                       "estado": i.estado, "plataforma": i.plataforma or "", "venta": i.venta or "", "llego": i.llego or "", "sku": i.sku}
                       for i in d.items],
             "ventas": list(dict.fromkeys(f"{i.plataforma} {i.venta}" for i in d.items if i.venta))}
 
@@ -118,8 +131,17 @@ def confirmar(body: ConfirmarIn, u: Usuario = Depends(acceso), db: Session = Dep
         if it.plataforma not in ("ML", "TN"):
             raise HTTPException(400, "Cada prenda tiene que tener la plataforma: TN o ML")
         it.estado = (it.estado or "").strip().upper()
-        if it.estado not in ("OPTIMO", "FALLA"):
+        if it.estado == "AJENO":
+            it.descripcion = " ".join((it.descripcion or "").split())[:120]
+            if not it.descripcion:
+                raise HTTPException(400, "Escribí qué artículo llegó (no lo vendemos)")
+            it.articulo_id, it.llego = None, "AJENO"
+        elif it.estado not in ("OPTIMO", "FALLA"):
             raise HTTPException(400, "Cada prenda tiene que tener el estado: Óptimo o Falla")
+        elif it.articulo_id is None:
+            raise HTTPException(400, "Falta el artículo de una prenda")
+        else:
+            it.llego = (it.llego or "").strip().upper() if (it.llego or "").strip().upper() in ("MISMO", "DISTINTO") else ""
         it.venta = _venta_ok(it.venta)
         if not it.venta:
             raise HTTPException(400, "Cada prenda tiene que tener el número de venta (Mercado Libre) "
@@ -129,6 +151,11 @@ def confirmar(body: ConfirmarIn, u: Usuario = Depends(acceso), db: Session = Dep
     d = Devolucion(fecha=hoy(), usuario_id=u.id, plataforma=plataforma)
     db.add(d)
     for it in items:
+        if it.estado == "AJENO":
+            d.items.append(DevolucionItem(articulo_id=None, articulo=it.descripcion, color="", talle="", estado="AJENO",
+                                          plataforma=it.plataforma, venta=it.venta, llego="AJENO",
+                                          cantidad=min(it.cantidad, 999)))
+            continue
         a = db.get(Articulo, it.articulo_id)
         if not a or a.inactivo:
             raise HTTPException(400, "Hay un artículo que no existe o está archivado en Odoo")
@@ -138,7 +165,7 @@ def confirmar(body: ConfirmarIn, u: Usuario = Depends(acceso), db: Session = Dep
         d.items.append(DevolucionItem(articulo_id=a.id, codigo_barras=a.codigo_barras, sku=a.sku,
                                       articulo=a.articulo, color=color, talle=talle,
                                       estado=it.estado,
-                                      plataforma=it.plataforma, venta=it.venta,
+                                      plataforma=it.plataforma, venta=it.venta, llego=it.llego,
                                       cantidad=min(it.cantidad, 999)))
     d.total = sum(i.cantidad for i in d.items)
     db.commit()
@@ -174,7 +201,8 @@ def _lista_etiquetas(db: Session, did: int) -> tuple[Devolucion, list[dict]]:
     nombres = {a.id: a.nombre for a in db.scalars(select(Articulo).where(
         Articulo.id.in_([i.articulo_id for i in d.items if i.articulo_id]))).all()}
     lista = [{"nombre": nombres.get(i.articulo_id, ""), "articulo": i.articulo, "color": i.color, "talle": i.talle,
-              "sku": i.sku, "codigo_barras": i.codigo_barras} for i in d.items for _ in range(i.cantidad)]
+              "sku": i.sku, "codigo_barras": i.codigo_barras} for i in d.items if i.estado != "AJENO"
+             for _ in range(i.cantidad)]
     return d, lista
 
 
