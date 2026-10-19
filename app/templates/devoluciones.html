@@ -216,7 +216,8 @@ function pintarVenta(err) {
   }
   const i = venta.info, n = venta.plataforma === 'ML' ? 'Venta' : 'Orden';
   const prendas = i && i.items.length ? `<div class="mt-2 text-sm flex flex-col gap-0.5">${i.items.map(x => `
-      <div class="flex justify-between gap-2"><span class="truncate">${esc(x.titulo)}${x.color || x.talle ? ` <span class="text-zinc-500">· ${esc([x.color, x.talle].filter(Boolean).join(' · '))}</span>` : ''}</span><b>x${x.cantidad}</b></div>`).join('')}</div>` : '';
+      <div class="flex justify-between gap-2"><span class="min-w-0"><span class="block truncate">${esc(x.titulo)}${x.color || x.talle ? ` <span class="text-zinc-500">· ${esc([x.color, x.talle].filter(Boolean).join(' · '))}</span>` : ''}</span>
+        <span class="block text-xs font-mono text-zinc-600 break-all">SKU: ${x.sku ? esc(x.sku) : '<span class="font-sans text-zinc-400">sin SKU</span>'}</span></span><b>x${x.cantidad}</b></div>`).join('')}</div>` : '';
   const ok = venta.verificada;
   el.innerHTML = `<div class="rounded-xl p-3" style="background:${ok ? '#dcfce7' : '#fef3c7'};border:2px solid ${ok ? '#15803d' : '#d97706'}">
     <div class="flex flex-wrap items-center gap-2">
@@ -530,15 +531,29 @@ async function confirmar() {
     const r = await api('/devoluciones/api/confirmar', { json: { items: items.map(x => ({ articulo_id: x.id, cantidad: x.cantidad, estado: x.estado, plataforma: x.plataforma, venta: x.venta })) } });
     cerrarResumen();
     const desde = +document.getElementById('desde').value || 1;
-    document.getElementById('resultado').innerHTML = tarjetaResultado(r.devolucion);
-    syncFormatoEtiquetas();
     imprimirEtiquetas('devoluciones', r.devolucion.id, { desde });
-    toast(r.devolucion.drive_ok ? 'Devolución guardada en Drive' : 'Devolución guardada en la app (Drive falló)', r.devolucion.drive_ok ? 'ok' : 'warn', 5000);
-    items = []; pintarLista(); limpiarBusqueda(); cambiarVenta();
+    toast(r.devolucion.drive_ok ? `Devolución PD-${r.devolucion.id} guardada en Drive`
+      : `PD-${r.devolucion.id} guardada en la app, pero Drive falló: reintentalo desde "Últimas devoluciones"`,
+      r.devolucion.drive_ok ? 'ok' : 'warn', r.devolucion.drive_ok ? 5000 : 10000);
+    nuevaDevolucion();
     historial();
   } catch (e) { toast(e.message, 'error', 6000); }
   b.textContent = '✔ Confirmar y guardar'; b.disabled = !items.length;
   bs.textContent = '✔ Confirmar y subir'; bs.disabled = false;
+}
+// Después de confirmar queda todo limpio para cargar otra devolución: sin venta, sin canal, sin prendas,
+// sin Óptimo/Falla elegido y sin el recuadro del último escaneo (las etiquetas se reimprimen desde "Últimas devoluciones").
+function nuevaDevolucion() {
+  items = []; ultimoScan = null; pintarLista(); limpiarBusqueda();
+  venta = null; setCanal(''); setEstadoScan('');
+  document.getElementById('venta-num').value = '';
+  document.getElementById('resultado').innerHTML = '';
+  document.getElementById('desde').value = 1;
+  const el = document.getElementById('scan-estado');
+  el.style.background = ''; el.style.borderColor = ''; el.style.borderStyle = '';
+  el.innerHTML = '<div class="text-lg font-bold">Listo para escanear</div><div class="text-sm text-zinc-500">Pasá el lector por el código de barras de la prenda. No hace falta tocar nada antes.</div>';
+  if (camScanner) pararCam();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 async function reintentar(id, b) {
   b.disabled = true;
