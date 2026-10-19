@@ -16,7 +16,8 @@
   <p class="text-sm text-zinc-400 mt-3">✉ {% if cm_auto %}El cierre sale solo por mail a <b>{{ cm_para }}</b> a las <b>{{ cm_hora }}</b> ({{ cm_dias }}), con el Excel del día adjunto.{% else %}<span class="text-amber-400">El mail automático del cierre está apagado (cierre_mail_auto=0).</span>{% endif %}</p>
   <div id="d-archivos" class="text-sm mt-3"></div>
   {% else %}
-  <p class="text-sm text-amber-300">Falta conectar el Apps Script de Drive: Conexiones → Recolección Ecommerce (URL y TOKEN).</p>
+  <p class="text-sm text-amber-300">⚠️ Falta conectar el Apps Script de Drive: sin esto no se guardan los Excel del día ni sale el mail del cierre.
+    <a class="underline font-semibold" href="/admin/conexiones">Ir a Conexiones → Recolección Ecommerce</a> y cargá la URL de la aplicación web y el TOKEN.</p>
   {% endif %}
 </section>
 {% if google %}
