@@ -25,10 +25,11 @@
         <div class="flex flex-wrap gap-2">
           <input id="venta-num" class="input flex-1 min-w-[180px] !text-lg !py-3" autocomplete="off">
           <button class="btn btn-primario" onclick="buscarVenta()">🔍 Buscar</button>
-          <button class="btn btn-gris" onclick="escanearEtiqueta()" title="Lector o cámara del celular">🏷 Escanear etiqueta</button>
+          <button class="btn btn-gris" onclick="escanearEtiqueta()" title="Abre la cámara: lee el QR o el código de barras de la etiqueta">📷 Escanear etiqueta</button>
         </div>
         <p class="text-xs text-zinc-500 mt-1" id="venta-ayuda"></p>
       </div>
+      <div id="venta-cam-slot"></div>
       <div id="venta-res" class="mt-3"></div>
     </section>
 
@@ -47,7 +48,10 @@
         <div class="text-lg font-bold">Listo para escanear</div>
         <div class="text-sm text-zinc-500">Pasá el lector por el código de barras de la prenda. No hace falta tocar nada antes.</div>
       </div>
-      <div id="cam-box" class="hidden mt-3"><div id="qr-reader" class="w-full min-h-[200px] bg-black rounded-xl overflow-hidden"></div></div>
+      <div id="scan-cam-slot"><div id="cam-box" class="hidden mt-3">
+        <div id="cam-modo" class="text-sm font-bold mb-1"></div>
+        <div id="qr-reader" class="w-full min-h-[200px] bg-black rounded-xl overflow-hidden"></div>
+        <button class="btn btn-gris btn-chico mt-2" onclick="pararCam()">✕ Cerrar cámara</button></div></div>
     </section>
 
     <section class="card p-4">
@@ -149,11 +153,20 @@ document.getElementById('venta-num').addEventListener('keydown', e => {
   if (e.key !== 'Enter') return;
   e.preventDefault(); e.stopPropagation(); buscarVenta();
 });
+// 📷 Escanear etiqueta: abre la cámara (lee QR y códigos de barras). La primera lectura busca la venta / orden;
+// con la venta encontrada la cámara sigue abierta y lo que se escanea después son las prendas.
+// El lector USB también sirve: queda el cursor en el campo del número (en la PC).
 function escanearEtiqueta() {
   if (!canal) { faltaCanal(); return; }
   const inp = document.getElementById('venta-num');
-  inp.value = ''; inp.placeholder = 'Pasá el lector por la etiqueta del paquete…'; inp.focus();
-  if (window.matchMedia('(pointer: coarse)').matches) toggleCam('etiqueta', true);   // celular: cámara
+  inp.value = ''; inp.placeholder = 'Escaneá la etiqueta (cámara o lector)…';
+  if (!window.matchMedia('(pointer: coarse)').matches) inp.focus();
+  toggleCam('etiqueta', true);
+}
+function _textoCam() {
+  const el = document.getElementById('cam-modo'); if (!el) return;
+  el.textContent = camModo === 'etiqueta' ? `📷 Apuntá a la etiqueta del paquete (QR o código de barras) para buscar la ${nomVenta(canal)}`
+                                          : '📷 Apuntá al código de barras de cada prenda';
 }
 function faltaCanal() {
   beepError(); _marcarFalta('canal-box', true);
@@ -182,7 +195,7 @@ async function buscarVenta(raw) {
   if (r.ok) {
     venta = { plataforma: r.plataforma, numero: r.numero, verificada: true, info: r }; llegoModo = ''; ajenoAbierto = false;
     inp.value = r.numero; beepOk();
-    if (camModo === 'etiqueta') pararCam();
+    if (camModo === 'etiqueta' && camScanner) { camModo = 'prenda'; _textoCam(); toast('Venta encontrada: ahora escaneá las prendas con la cámara', 'ok', 4000); }
     pintarVenta();
     return;
   }
@@ -196,6 +209,7 @@ function usarSinVerificar(c) {
   document.getElementById('venta-num').value = c; pintarVenta();
 }
 function cambiarVenta() {
+  if (camScanner) { camModo = 'etiqueta'; _textoCam(); }
   venta = null; llegoModo = ''; ajenoAbierto = false; const inp = document.getElementById('venta-num');
   inp.value = ''; pintarVenta(); if (canal) setCanal(canal);
 }
@@ -416,13 +430,16 @@ function deshacerScan() {
 // cámara del celular
 let camScanner = null, _camUlt = '', _camT = 0, camModo = 'prenda';
 async function toggleCam(modo = 'prenda', soloAbrir = false) {
-  if (camScanner) { const cambia = camModo !== modo; camModo = modo; if (cambia || soloAbrir) return; pararCam(); return; }
+  if (camScanner) { const cambia = camModo !== modo; camModo = modo; _textoCam(); if (cambia || soloAbrir) return; pararCam(); return; }
   camModo = modo;
   if (typeof Html5Qrcode === 'undefined') { toast('No se pudo cargar el lector de la cámara (¿sin internet?)', 'error'); return; }
-  document.getElementById('cam-box').classList.remove('hidden');
+  const box = document.getElementById('cam-box');
+  document.getElementById(modo === 'etiqueta' ? 'venta-cam-slot' : 'scan-cam-slot').appendChild(box);   // la cámara aparece donde se tocó
+  box.classList.remove('hidden'); _textoCam();
+  box.scrollIntoView({ behavior: 'smooth', block: 'center' });
   try {
     camScanner = new Html5Qrcode('qr-reader', { verbose: false, experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
-    await camScanner.start({ facingMode: 'environment' }, { fps: 12, qrbox: (w, h) => ({ width: Math.round(w * .9), height: Math.max(80, Math.round(h * .35)) }) },
+    await camScanner.start({ facingMode: 'environment' }, { fps: 12, qrbox: (w, h) => ({ width: Math.round(w * .85), height: Math.max(120, Math.round(h * .7)) }) },   // cuadro alto: QR y códigos de barras
       t => { const n = Date.now(); if (t === _camUlt && n - _camT < 2500) return; _camUlt = t; _camT = n;
              if (camModo === 'etiqueta') { document.getElementById('venta-num').value = t; buscarVenta(t); } else escanear(t); }, () => {});
   } catch (e) { toast('No se pudo abrir la cámara: ' + e, 'error', 6000); pararCam(); }
