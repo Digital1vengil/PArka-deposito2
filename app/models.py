@@ -220,9 +220,10 @@ class DevolucionItem(Base):
     articulo: Mapped[str] = mapped_column(String(120), default="")
     color: Mapped[str] = mapped_column(String(60), default="")
     talle: Mapped[str] = mapped_column(String(20), default="")
-    estado: Mapped[str] = mapped_column(String(10), default="OPTIMO")  # OPTIMO | FALLA
+    estado: Mapped[str] = mapped_column(String(10), default="OPTIMO")  # OPTIMO | FALLA | AJENO (no lo vendemos)
     plataforma: Mapped[str] = mapped_column(String(4), default="")  # ML | TN (por prenda)
     venta: Mapped[str] = mapped_column(String(40), default="")  # nº de venta (ML) o nº de orden (TN)
+    llego: Mapped[str] = mapped_column(String(10), default="")  # MISMO | DISTINTO | AJENO (qué llegó vs la venta)
     cantidad: Mapped[int] = mapped_column(Integer, default=1)
 
     devolucion: Mapped[Devolucion] = relationship(back_populates="items")
