@@ -43,8 +43,8 @@ def test_flujo_devolucion(monkeypatch):
         assert r2[0]["preseleccion"] == v["id"]
         assert c.get("/devoluciones/api/buscar?q=2000000035918").json()["modelos"] == []  # mismo talle, sin marca
         res = c.post("/devoluciones/api/confirmar", json={"plataforma": "ML", "items": [
-            {"articulo_id": v["id"], "cantidad": 3, "estado": "OPTIMO"},
-            {"articulo_id": v["id"], "cantidad": 1, "estado": "FALLA"}]}).json()
+            {"articulo_id": v["id"], "cantidad": 3, "estado": "OPTIMO", "venta": "2000012345678901"},
+            {"articulo_id": v["id"], "cantidad": 1, "estado": "FALLA", "venta": "2000012345678901"}]}).json()
         d = res["devolucion"]
         assert d["drive_ok"] and d["total"] == 4 and d["drive"]["id"] == "D-001"
         assert enviados[0].items[1].estado == "FALLA" and enviados[0].items[0].talle == "M"
@@ -70,7 +70,7 @@ def test_drive_falla_y_reintento(monkeypatch):
     with TestClient(app) as c:
         _login(c)
         v = c.get("/devoluciones/api/buscar?q=2000000035901").json()["modelos"][0]["variantes"][0]
-        d = c.post("/devoluciones/api/confirmar", json={"plataforma": "ML", "items": [{"articulo_id": v["id"], "cantidad": 1, "estado": "OPTIMO"}]}).json()["devolucion"]
+        d = c.post("/devoluciones/api/confirmar", json={"plataforma": "ML", "items": [{"articulo_id": v["id"], "cantidad": 1, "estado": "OPTIMO", "venta": "2000012345678901"}]}).json()["devolucion"]
         assert not d["drive_ok"] and "sin conexión" in d["drive_error"]
         monkeypatch.setattr(svc, "enviar", lambda dev: {"ok": True, "id": "D-2"})
         assert c.post(f"/devoluciones/api/{d['id']}/reintentar").json()["devolucion"]["drive_ok"]
@@ -146,8 +146,8 @@ def test_plataforma_por_prenda(monkeypatch):
         r = c.post("/devoluciones/api/confirmar", json={"items": [{"articulo_id": v["id"], "cantidad": 1, "plataforma": "ML"}]})
         assert r.status_code == 400 and "estado" in r.json()["detail"]
         d = c.post("/devoluciones/api/confirmar", json={"items": [
-            {"articulo_id": v["id"], "cantidad": 2, "estado": "OPTIMO", "plataforma": "tn"},
-            {"articulo_id": v["id"], "cantidad": 1, "estado": "FALLA", "plataforma": "ML"}]}).json()["devolucion"]
+            {"articulo_id": v["id"], "cantidad": 2, "estado": "OPTIMO", "plataforma": "tn", "venta": "#1234"},
+            {"articulo_id": v["id"], "cantidad": 1, "estado": "FALLA", "plataforma": "ML", "venta": "2000012345678901"}]}).json()["devolucion"]
         assert d["plataforma"] == "ML+TN"
         assert [(i["plataforma"], i["estado"], i["cantidad"]) for i in d["items"]] == [("TN", "OPTIMO", 2), ("ML", "FALLA", 1)]
         # al Apps Script: plataforma por prenda (también en "sector" para que se vea en el Excel)
@@ -177,6 +177,10 @@ def test_payload_sector_plataforma(monkeypatch):
     svc.enviar(d)
     it = capt["body"]["items"][0]
     assert it["plataforma"] == "TN" and it["sector"] == "TN"
+    d.items[0].venta = "1234"
+    svc.enviar(d)
+    it = capt["body"]["items"][0]
+    assert it["venta"] == "1234" and it["sector"] == "TN · 1234"
 
 
 def test_busqueda_equivalencias():
@@ -192,3 +196,94 @@ def test_busqueda_equivalencias():
         assert arts == ["ABBA 02003"]
         # una letra que no es de ningún SKU con ese número no trae nada raro
         assert c.get("/conteo/api/buscar?q=Q7").json()["modelos"] == []
+
+
+def test_venta_obligatoria_por_prenda(monkeypatch):
+    enviados = []
+    monkeypatch.setattr(svc, "enviar", lambda dev: enviados.append(dev) or {"ok": True, "id": "D-10"})
+    with TestClient(app) as c:
+        _login(c)
+        v = c.get("/devoluciones/api/buscar?q=2000000035901").json()["modelos"][0]["variantes"][0]
+        r = c.post("/devoluciones/api/confirmar", json={"items": [
+            {"articulo_id": v["id"], "cantidad": 1, "estado": "OPTIMO", "plataforma": "ML"}]})
+        assert r.status_code == 400 and "número de venta" in r.json()["detail"]
+        d = c.post("/devoluciones/api/confirmar", json={"items": [
+            {"articulo_id": v["id"], "cantidad": 1, "estado": "OPTIMO", "plataforma": "ML", "venta": "2000099998888777"},
+            {"articulo_id": v["id"], "cantidad": 1, "estado": "OPTIMO", "plataforma": "TN", "venta": "#5521"}]}).json()["devolucion"]
+        assert [i["venta"] for i in d["items"]] == ["2000099998888777", "5521"]
+        assert d["ventas"] == ["ML 2000099998888777", "TN 5521"]
+        assert enviados[-1].items[1].venta == "5521"
+        html = c.get("/devoluciones").text
+        assert "venta-num" in html and "Escanear etiqueta" in html
+
+
+def test_codigo_de_etiqueta():
+    f = svc.codigo_de_etiqueta
+    assert f('{"id":"47383333425","t":"lm"}') == "47383333425"
+    assert f('LA,{"id":"47383333425","t":"lm"}') == "47383333425"
+    assert f('¨id¨Ñ¨47383333425¨,¨t¨Ñ¨lm¨*') == "47383333425"   # QR leído con el teclado en español
+    assert f("]C047383333425") == "47383333425" and f(">:47383333425") == "47383333425"
+    assert f(" #1234 ") == "1234" and f("2000 0123 4567 8901") == "2000012345678901"
+
+
+def test_buscar_venta_ml(monkeypatch):
+    from app.services import meli
+    llamadas = []
+    datos = {
+        "/shipments/47383333425": {"id": 47383333425, "order_id": 2000011111111111},
+        "/orders/2000011111111111": {"id": 2000011111111111, "status": "paid", "date_created": "2026-10-10T12:00:00-04:00",
+                                     "buyer": {"nickname": "COMPRADOR1"}, "pack_id": None, "shipping": {"id": 47383333425},
+                                     "order_items": [{"quantity": 1, "item": {"title": "Campera Abba 02003 Negra", "seller_sku": "1-CAMP-W-02003-BLK-M-PARK",
+                                                      "variation_attributes": [{"name": "Color", "value_name": "Negro"}, {"name": "Talle", "value_name": "M"}]}}]},
+        "/orders/2000022222222222": {"id": 2000022222222222, "status": "paid", "pack_id": 2000033333333333,
+                                     "date_created": "2026-10-11T10:00:00-04:00", "order_items": []},
+        "/orders/2000044444444444": {"id": 2000044444444444, "status": "cancelled", "pack_id": 2000033333333333, "order_items": []},
+        "/packs/2000033333333333": {"orders": [{"id": 2000022222222222}, {"id": 2000044444444444}]},
+    }
+
+    def fake_get(path, api_version=None):
+        llamadas.append(path)
+        if path in datos:
+            return datos[path]
+        raise meli.MeliError("no", 404)
+    monkeypatch.setattr(meli, "configurado", lambda: True)
+    monkeypatch.setattr(meli, "get", fake_get)
+    with TestClient(app) as c:
+        _login(c)
+        r = c.get("/devoluciones/api/venta", params={"plataforma": "ML", "c": 'LA,{"id":"47383333425","t":"lm"}'}).json()
+        assert r["ok"] and r["numero"] == "2000011111111111" and r["envio"] == "47383333425" and r["fecha"] == "10/10/2026"
+        assert r["items"][0]["color"] == "Negro" and r["items"][0]["talle"] == "M" and r["comprador"] == "COMPRADOR1"
+        # venta de un carrito → se muestra el nº del pack con todas sus ventas
+        r = c.get("/devoluciones/api/venta", params={"plataforma": "ML", "c": "2000022222222222"}).json()
+        assert r["ok"] and r["numero"] == "2000033333333333" and len(r["ventas"]) == 2 and not r["cancelada"]
+        # el nº del pack también sirve
+        assert c.get("/devoluciones/api/venta", params={"plataforma": "ML", "c": "2000033333333333"}).json()["numero"] == "2000033333333333"
+        r = c.get("/devoluciones/api/venta", params={"plataforma": "ML", "c": "2000099999999999"}).json()
+        assert not r["ok"] and not r["sin_conexion"]
+        assert not c.get("/devoluciones/api/venta", params={"plataforma": "", "c": "1"}).json()["ok"]
+    monkeypatch.setattr(meli, "configurado", lambda: False)
+    with TestClient(app) as c:
+        _login(c)
+        r = c.get("/devoluciones/api/venta", params={"plataforma": "ML", "c": "2000011111111111"}).json()
+        assert not r["ok"] and r["sin_conexion"] and r["codigo"] == "2000011111111111"
+
+
+def test_buscar_venta_tn(monkeypatch):
+    from app.services import tiendanube as tn
+    vistos = []
+    orden = {"id": 99, "number": 1234, "status": "closed", "shipping_status": "delivered", "created_at": "2026-10-05T09:00:00-03:00",
+             "contact_name": "Ana Perez", "products": [{"name": "Campera Holy (Negro, L)", "sku": "1-CAMP-W-00007-BLK-L-PARK", "quantity": 1}]}
+
+    def fake_get(path, **params):
+        vistos.append(params)
+        return [orden] if params.get("q") == "1234" else []
+    monkeypatch.setattr(tn, "configurado", lambda db=None: True)
+    monkeypatch.setattr(tn, "get", fake_get)
+    with TestClient(app) as c:
+        _login(c)
+        r = c.get("/devoluciones/api/venta", params={"plataforma": "TN", "c": "#1234"}).json()
+        assert r["ok"] and r["numero"] == "1234" and r["fecha"] == "05/10/2026" and "entregada" in r["estado"]
+        assert r["items"][0]["sku"] == "1-CAMP-W-00007-BLK-L-PARK" and r["comprador"] == "Ana Perez"
+        assert vistos[0]["status"] == "any"     # también órdenes archivadas
+        r = c.get("/devoluciones/api/venta", params={"plataforma": "TN", "c": "777"}).json()
+        assert not r["ok"] and "777" in r["motivo"]
