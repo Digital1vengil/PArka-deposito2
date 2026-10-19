@@ -115,7 +115,11 @@ def buscar_modelos(db: Session, q: str, limite: int = 30, filtro=None) -> list[d
 
 
 def enviar(dev: Devolucion) -> dict:
-    """Manda la devolución al Apps Script (crea Crédito y Reingreso en Drive y avisa por mail)."""
+    """Manda la devolución al Apps Script (crea Crédito y Reingreso en Drive y avisa por mail).
+    Los artículos que no vendemos (estado AJENO) no van: no son crédito ni reingreso de stock."""
+    propias = [i for i in dev.items if i.estado != "AJENO"]
+    if not propias:
+        return {"ok": True, "id": "", "nota": "Solo artículos que no vendemos: no se sube a Drive"}
     payload = {
         "responsable": dev.usuario.nombre if dev.usuario else "PARKA Depósito",
         "sesion": f"PD-{dev.id}",
@@ -126,7 +130,7 @@ def enviar(dev: Devolucion) -> dict:
         "items": [{"codigo": i.codigo_barras or i.sku, "articulo": i.articulo, "color": i.color, "talle": i.talle,
                    "estado": i.estado, "cantidad": i.cantidad,
                    "sector": " · ".join(x for x in (i.plataforma or "", i.venta or "") if x),
-                   "plataforma": i.plataforma or "", "venta": i.venta or ""} for i in dev.items],
+                   "plataforma": i.plataforma or "", "venta": i.venta or ""} for i in propias],
     }
     req = urllib.request.Request(config.DEVOL_URL, data=json.dumps(payload).encode("utf-8"), method="POST",
                                  headers={"Content-Type": "text/plain;charset=utf-8"})
