@@ -174,8 +174,8 @@ ANCHO_DESP = [8, 20, 18, 26, 40, 18, 7, 14, 28]
 ENC_SP = ["Hora", "Plataforma", "Nombre", "Artículo", "Nº guía", "Guardado en Drive"]
 ANCHO_SP = [8, 10, 26, 36, 20, 16]
 ENC_DEV = ["Hora", "Devolución", "Responsable", "Plataforma", "Nº venta / orden", "Código", "SKU", "Artículo", "Color", "Talle",
-           "Estado", "Cantidad", "Llegó", "Ubicación"]
-ANCHO_DEV = [8, 12, 16, 10, 20, 16, 18, 30, 16, 8, 12, 9, 18, 18]
+           "Estado", "Cantidad", "Llegó", "Ubicación", "Devuelto al rack"]
+ANCHO_DEV = [8, 12, 16, 10, 20, 16, 18, 30, 16, 8, 12, 9, 18, 18, 20]
 LLEGO = {"MISMO": "Mismo artículo", "DISTINTO": "Artículo distinto", "AJENO": "No lo vendemos"}
 ENC_CON = ["Hora", "Conteo", "Ubicación / nota", "Operario", "Código", "SKU", "Artículo", "Color", "Talle",
            "Marca", "Cantidad"]
@@ -195,8 +195,21 @@ def _filas_dev(devs: list[Devolucion]) -> list[list]:
     return [[d.creado_at.strftime("%H:%M"), f"PD-{d.id}", d.usuario.nombre if d.usuario else "",
              i.plataforma or d.plataforma, i.venta or "", i.codigo_barras, i.sku, i.articulo, i.color, i.talle,
              "NO LO VENDEMOS" if i.estado == "AJENO" else i.estado, i.cantidad, LLEGO.get(i.llego or "", ""),
-             i.ubicacion or ("Sin devolver al rack" if d.ruta_estado == "SIN_DEVOLVER" and i.estado != "AJENO" else "")]
+             i.ubicacion or ("Sin devolver al rack" if d.ruta_estado == "SIN_DEVOLVER" and i.estado != "AJENO" else ""),
+             devuelto_al_rack(d, i)]
             for d in devs for i in d.items]
+
+
+def devuelto_al_rack(d: Devolucion, i) -> str:
+    """Columna del Excel: se completa sola a medida que cada prenda se confirma en su rack (ruta de devolución)."""
+    if not d.ruta_estado or i.estado == "AJENO":
+        return ""
+    n = i.devuelto_cant or 0
+    if n >= i.cantidad:
+        return "Sí" + (f" · {i.devuelto_at.strftime('%H:%M')}" if i.devuelto_at else "")
+    if d.ruta_estado == "SIN_DEVOLVER":
+        return "No (sin devolver)" if not n else f"No ({n} de {i.cantidad})"
+    return f"Pendiente ({n} de {i.cantidad})"
 
 
 def _filas_con(conteos: list[Conteo]) -> list[list]:
