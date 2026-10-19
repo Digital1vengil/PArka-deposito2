@@ -33,12 +33,26 @@ CLAVES = {
     "odoo_usuario": ("ODOO_USUARIO", "", False),
     "odoo_api_key": ("ODOO_API_KEY", "", True),
     "odoo_sync_minutos": ("ODOO_SYNC_MINUTOS", "60", False),
+    # Rótulos de entrega (Zebra 10x15, 300 dpi): el remitente sale de la compañía en Odoo; el teléfono se carga acá
+    "rotulo_remitente_tel": ("ROTULO_REMITENTE_TEL", "", False),
+    "rotulo_arriba_mm": ("ROTULO_ARRIBA_MM", "40", False),   # mm en blanco arriba (la parte que se separa en la de ML)
+    "rotulo_desplaz_x": ("ROTULO_DESPLAZ_X", "0", False),   # mm, corrimiento del ZPL si la Zebra imprime corrido
+    "rotulo_desplaz_y": ("ROTULO_DESPLAZ_Y", "0", False),
+    "rotulo_oscuridad": ("ROTULO_OSCURIDAD", "0", False),   # ^MD de la Zebra (-30 a 30)
     # Recolección Ecommerce: Apps Script "Recolección Ecommerce — Backend Drive" (carpeta del día)
     "re_url": ("RE_URL", "", False),
     "re_token": ("RE_TOKEN", "", True),
+    # DEPOSITO PARKA en Drive (mismo Apps Script): Despachos / Devoluciones / Conteos / Cierre, un Excel por día
+    "deposito_drive_auto": ("DEPOSITO_DRIVE_AUTO", "1", False),   # 1 = se actualizan solos cada 15 min
+    # Mail del cierre (lo manda el mismo Apps Script con MailApp, con el Excel del Cierre adjunto)
+    "cierre_mail_auto": ("CIERRE_MAIL_AUTO", "1", False),
+    "cierre_mail_para": ("CIERRE_MAIL_PARA", "gerencia@magontex.com.ar", False),
+    "cierre_mail_copia": ("CIERRE_MAIL_COPIA", "", False),
+    "cierre_mail_hora": ("CIERRE_MAIL_HORA", "17:00", False),
+    "cierre_mail_dias": ("CIERRE_MAIL_DIAS", "mon-fri", False),   # formato de APScheduler: mon-fri, mon-sat…
     # Búsqueda automática: revisa ML + TN cada N minutos, suma las ventas nuevas y avisa cancelaciones
     "re_auto": ("RE_AUTO", "1", False),
-    "re_auto_min": ("RE_AUTO_MIN", "3", False),
+    "re_auto_min": ("RE_AUTO_MIN", "2", False),
     "re_auto_estado": ("RE_AUTO_ESTADO", "", False),
     "re_fix_arrastre": ("RE_FIX_ARRASTRE", "", False),   # 1 = ya se deshizo el arrastre de días anteriores
     "re_box_cant": ("RE_BOX_CANT", "5", False),            # BOX: prendas por caja (se habilita al juntar esa cantidad)
