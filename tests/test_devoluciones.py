@@ -287,3 +287,54 @@ def test_buscar_venta_tn(monkeypatch):
         assert vistos[0]["status"] == "any"     # también órdenes archivadas
         r = c.get("/devoluciones/api/venta", params={"plataforma": "TN", "c": "777"}).json()
         assert not r["ok"] and "777" in r["motivo"]
+
+
+def test_mismo_distinto_y_ajeno(monkeypatch):
+    """Venta encontrada → cada prenda trae su variante del catálogo (por SKU) para sumarla con Óptimo / Falla;
+    un artículo que no vendemos se guarda sin artículo, no va al Apps Script ni lleva etiqueta."""
+    from app.services import tiendanube as tn
+    enviados = []
+    monkeypatch.setattr(svc, "enviar", lambda dev: enviados.append([i.estado for i in dev.items]) or {"ok": True, "id": "D-11"})
+    with TestClient(app) as c:
+        _login(c)
+        v = c.get("/devoluciones/api/buscar?q=2000000035925").json()["modelos"][0]["variantes"]
+        v = next(x for x in v if x["codigo_barras"] == "2000000035925")
+        orden = {"id": 5, "number": 1264, "status": "closed", "products": [
+            {"name": "Campera ABBA (Negro, M)", "sku": v["sku"], "quantity": 1},
+            {"name": "Otra cosa", "sku": "", "quantity": 1}]}
+        monkeypatch.setattr(tn, "configurado", lambda db=None: True)
+        monkeypatch.setattr(tn, "get", lambda path, **p: [orden])
+        r = c.get("/devoluciones/api/venta", params={"plataforma": "TN", "c": "1264"}).json()
+        assert r["items"][0]["variante"]["id"] == v["id"] and r["items"][0]["motivo"] == ""
+        assert r["items"][1]["variante"] is None and "SKU" in r["items"][1]["motivo"]
+        # artículo que no vendemos: hace falta la descripción
+        mal = c.post("/devoluciones/api/confirmar", json={"items": [
+            {"cantidad": 1, "estado": "AJENO", "plataforma": "TN", "venta": "1264"}]})
+        assert mal.status_code == 400
+        d = c.post("/devoluciones/api/confirmar", json={"items": [
+            {"articulo_id": v["id"], "cantidad": 1, "estado": "FALLA", "plataforma": "TN", "venta": "1264", "llego": "MISMO"},
+            {"cantidad": 2, "estado": "AJENO", "descripcion": "Buzo gris  otra marca", "plataforma": "TN", "venta": "1264"}]}).json()["devolucion"]
+        assert [(i["estado"], i["llego"], i["articulo"]) for i in d["items"]] == [
+            ("FALLA", "MISMO", "ABBA 02003"), ("AJENO", "AJENO", "Buzo gris otra marca")]
+        # etiquetas: solo la prenda nuestra
+        html = c.get(f"/devoluciones/{d['id']}/etiquetas.html").text
+        assert html.count("2000000035925") >= 1 and "Buzo gris" not in html
+    # al Apps Script no va el artículo ajeno
+    from app.models import Devolucion, DevolucionItem
+    from datetime import datetime
+    capt = {}
+
+    class R:
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def read(self): return b'{"ok": true}'
+    monkeypatch.undo()
+    monkeypatch.setattr(svc.urllib.request, "urlopen", lambda req, timeout=0: capt.setdefault("b", json.loads(req.data)) and R() or R())
+    dv = Devolucion(id=9, creado_at=datetime(2026, 10, 19, 12), plataforma="TN")
+    dv.items = [DevolucionItem(codigo_barras="1", articulo="A", estado="OPTIMO", cantidad=1, plataforma="TN", venta="1"),
+                DevolucionItem(articulo="Ajeno", estado="AJENO", cantidad=1, plataforma="TN", venta="1")]
+    svc.enviar(dv)
+    assert [i["articulo"] for i in capt["b"]["items"]] == ["A"]
+    solo = Devolucion(id=10, creado_at=datetime(2026, 10, 19, 12), plataforma="TN")
+    solo.items = [DevolucionItem(articulo="Ajeno", estado="AJENO", cantidad=1, plataforma="TN", venta="1")]
+    assert svc.enviar(solo)["ok"]
