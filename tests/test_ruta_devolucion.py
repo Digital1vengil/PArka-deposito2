@@ -83,3 +83,40 @@ def test_flujo_ruta_devolucion(monkeypatch):
             {"articulo_id": v2["id"], "cantidad": 1, "estado": "OPTIMO", "plataforma": "TN", "venta": "1235"}]}).json()
         assert res3["devolucion"]["drive_ok"] and "ruta" not in res3 and len(enviados) == 3
         assert c.get("/mapeo").status_code == 200 and "croquis.js" in c.get("/devoluciones").text
+
+
+def test_cada_prenda_se_confirma_al_instante(monkeypatch):
+    from app.services import ruta_devolucion as ruta_svc
+    from app.services import deposito_drive
+    enviados, excel = [], []
+    monkeypatch.setattr(svc, "enviar", lambda d: enviados.append(d.id) or {"ok": True, "id": "D-7"})
+    monkeypatch.setattr(ruta_svc, "actualizar_excel_dia", lambda fecha: excel.append(fecha))
+    with TestClient(app) as c:
+        _login(c)
+        c.post("/mapeo/api/croquis/cargar")
+        ubs = {u["codigo"]: u for u in c.get("/mapeo/api/croquis").json()["ubicaciones"]}
+        m = next(x for x in c.get("/devoluciones/api/buscar?q=abba 02003").json()["modelos"] if x["articulo"] == "ABBA 02003")
+        v = m["variantes"][0]
+        c.post("/mapeo/api/asignar", json={"ubicacion_id": ubs["A01"]["id"], "articulo_id": v["id"]})
+        res = c.post("/devoluciones/api/confirmar", json={"ruta": True, "items": [
+            {"articulo_id": v["id"], "cantidad": 2, "estado": "OPTIMO", "plataforma": "ML", "venta": "2000099999999999"}]}).json()
+        did, it = res["devolucion"]["id"], res["ruta"]["paradas"][0]["items"][0]
+        assert excel   # el Excel del día ya la muestra pendiente
+        r1 = c.post(f"/devoluciones/api/{did}/guardar", json={"item_id": it["item_id"], "codigo": "a01"}).json()
+        assert r1["guardados"] == {"A01": 1} and not r1["completa"] and not enviados and len(excel) == 2
+        # el Excel del día muestra la prenda pendiente (1 de 2) con su rack
+        from app.db import SessionLocal
+        from app.models import Devolucion
+        with SessionLocal() as db:
+            d = db.get(Devolucion, did)
+            fila = deposito_drive._filas_dev([d])[0]
+            assert fila[-2] == "A01 x1" and fila[-1] == "Pendiente (1 de 2)"
+        # retomar la ruta trae lo confirmado desde el servidor
+        assert c.get(f"/devoluciones/api/{did}/ruta").json()["paradas"][0]["items"][0]["guardados"] == {"A01": 1}
+        r2 = c.post(f"/devoluciones/api/{did}/guardar", json={"item_id": it["item_id"], "codigo": "A01"}).json()
+        assert r2["completa"] and r2["devolucion"]["ruta_estado"] == "DEVUELTO" and enviados == [did]   # se sube sola
+        assert c.post(f"/devoluciones/api/{did}/guardar", json={"item_id": it["item_id"], "codigo": "A01"}).status_code == 409
+        with SessionLocal() as db:
+            fila = deposito_drive._filas_dev([db.get(Devolucion, did)])[0]
+            assert fila[-2] == "A01" and fila[-1].startswith("Sí · ")
+        assert deposito_drive.ENC_DEV[-2:] == ["Ubicación", "Devuelto al rack"]
