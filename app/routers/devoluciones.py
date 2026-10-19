@@ -1,6 +1,7 @@
 """Sección Devoluciones: buscar artículo → color → talle → cantidad → confirmar (Drive + etiquetas)."""
 from sqlalchemy.orm import selectinload
 import json
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
@@ -55,11 +56,27 @@ def por_codigo(c: str = "", u: Usuario = Depends(acceso), db: Session = Depends(
                                      "sku": a.sku, "codigo_barras": a.codigo_barras, "nombre": a.nombre}}
 
 
+@router.get("/api/venta")
+def venta(plataforma: str = "", c: str = "", u: Usuario = Depends(acceso)):
+    """Nº de venta (ML) / nº de orden (TN), o la etiqueta escaneada → la compra en la plataforma."""
+    if not (c or "").strip():
+        return {"ok": False, "motivo": "Escribí o escaneá el número", "sin_conexion": False}
+    r = svc.buscar_venta(plataforma, c)
+    r.setdefault("codigo", svc.codigo_de_etiqueta(c))
+    return r
+
+
+def _venta_ok(v: str) -> str:
+    v = svc.codigo_de_etiqueta(v)
+    return v[:40] if re.fullmatch(r"[0-9A-Za-z\-]{3,40}", v or "") else ""
+
+
 class ItemIn(BaseModel):
     articulo_id: int
     cantidad: int = 1
     estado: str = ""       # OPTIMO | FALLA (obligatorio, por prenda; sin valor por defecto)
     plataforma: str = ""   # ML | TN (obligatorio, por prenda)
+    venta: str = ""        # nº de venta (ML) o nº de orden (TN) — obligatorio, por prenda
 
 
 class ConfirmarIn(BaseModel):
@@ -76,7 +93,9 @@ def dev_json(d: Devolucion) -> dict:
             "usuario": d.usuario.nombre if d.usuario else "", "usuario_id": d.usuario_id, "drive_ok": d.drive_ok,
             "drive_error": "" if d.drive_ok else d.drive_resp, "drive": resp,
             "items": [{"articulo": i.articulo, "color": i.color, "talle": i.talle, "cantidad": i.cantidad,
-                       "estado": i.estado, "plataforma": i.plataforma or "", "sku": i.sku} for i in d.items]}
+                       "estado": i.estado, "plataforma": i.plataforma or "", "venta": i.venta or "", "sku": i.sku}
+                      for i in d.items],
+            "ventas": list(dict.fromkeys(f"{i.plataforma} {i.venta}" for i in d.items if i.venta))}
 
 
 def _enviar(db: Session, d: Devolucion) -> None:
@@ -101,6 +120,10 @@ def confirmar(body: ConfirmarIn, u: Usuario = Depends(acceso), db: Session = Dep
         it.estado = (it.estado or "").strip().upper()
         if it.estado not in ("OPTIMO", "FALLA"):
             raise HTTPException(400, "Cada prenda tiene que tener el estado: Óptimo o Falla")
+        it.venta = _venta_ok(it.venta)
+        if not it.venta:
+            raise HTTPException(400, "Cada prenda tiene que tener el número de venta (Mercado Libre) "
+                                     "o el número de orden (Tienda Nube)")
     usadas = sorted({it.plataforma for it in items})
     plataforma = "+".join(usadas)
     d = Devolucion(fecha=hoy(), usuario_id=u.id, plataforma=plataforma)
@@ -115,11 +138,12 @@ def confirmar(body: ConfirmarIn, u: Usuario = Depends(acceso), db: Session = Dep
         d.items.append(DevolucionItem(articulo_id=a.id, codigo_barras=a.codigo_barras, sku=a.sku,
                                       articulo=a.articulo, color=color, talle=talle,
                                       estado=it.estado,
-                                      plataforma=it.plataforma,
+                                      plataforma=it.plataforma, venta=it.venta,
                                       cantidad=min(it.cantidad, 999)))
     d.total = sum(i.cantidad for i in d.items)
     db.commit()
-    registrar(db, u, "devolucion", f"PD-{d.id} · {plataforma} · {d.total} unidades", "devoluciones")
+    ventas = ", ".join(dict.fromkeys(f"{i.plataforma} {i.venta}" for i in d.items))
+    registrar(db, u, "devolucion", f"PD-{d.id} · {ventas} · {d.total} unidades", "devoluciones")
     _enviar(db, d)
     return {"ok": True, "devolucion": dev_json(d)}
 
