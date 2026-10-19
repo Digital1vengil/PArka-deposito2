@@ -227,6 +227,9 @@ class DevolucionItem(Base):
     venta: Mapped[str] = mapped_column(String(40), default="")  # nº de venta (ML) o nº de orden (TN)
     llego: Mapped[str] = mapped_column(String(10), default="")  # MISMO | DISTINTO | AJENO (qué llegó vs la venta)
     ubicacion: Mapped[str] = mapped_column(String(80), default="")  # rack donde se guardó (ruta de devolución)
+    guardados: Mapped[str] = mapped_column(Text, default="")  # JSON {rack: unidades} confirmadas en la ruta
+    devuelto_cant: Mapped[int] = mapped_column(Integer, default=0)  # unidades ya confirmadas en su rack
+    devuelto_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)  # última confirmación
     cantidad: Mapped[int] = mapped_column(Integer, default=1)
 
     devolucion: Mapped[Devolucion] = relationship(back_populates="items")
