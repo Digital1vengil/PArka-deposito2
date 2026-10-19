@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from ..actividad import registrar
 from ..auth import requiere
 from ..db import get_db, hoy
-from ..models import Articulo, Devolucion, DevolucionItem, UbicacionArticulo, Usuario
+from ..models import Articulo, Devolucion, DevolucionItem, Usuario
 from ..services import devoluciones as svc
 from ..services import ruta_devolucion as ruta_svc
 from ..services.etiquetas import pdf_etiquetas
@@ -109,7 +109,7 @@ def dev_json(d: Devolucion) -> dict:
             "drive_error": "" if d.drive_ok else d.drive_resp, "drive": resp, "ruta_estado": d.ruta_estado or "",
             "items": [{"articulo": i.articulo, "color": i.color, "talle": i.talle, "cantidad": i.cantidad,
                        "estado": i.estado, "plataforma": i.plataforma or "", "venta": i.venta or "", "llego": i.llego or "", "sku": i.sku,
-                       "ubicacion": i.ubicacion or ""}
+                       "ubicacion": i.ubicacion or "", "devuelto_cant": i.devuelto_cant or 0}
                       for i in d.items],
             "ventas": list(dict.fromkeys(f"{i.plataforma} {i.venta}" for i in d.items if i.venta))}
 
@@ -177,6 +177,7 @@ def confirmar(body: ConfirmarIn, u: Usuario = Depends(acceso), db: Session = Dep
     if body.ruta and any(i.estado != "AJENO" for i in d.items):
         d.ruta_estado = "PENDIENTE"   # Drive recién al marcar como devuelto (o "Guardar en Drive sin devolver")
         db.commit()
+        ruta_svc.actualizar_excel_dia(d.fecha)   # el Excel del día ya la muestra "Pendiente"
         return {"ok": True, "devolucion": dev_json(d), "ruta": ruta_svc.armar(db, d)}
     _enviar(db, d)
     return {"ok": True, "devolucion": dev_json(d)}
@@ -215,44 +216,58 @@ class DevueltoIn(BaseModel):
     guardados: list[GuardadoIn] = []
 
 
-@router.post("/api/{did}/devuelto")
-def devuelto(did: int, body: DevueltoIn, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
-    """Fin de la ruta: guarda en qué rack quedó cada prenda, aprende las ubicaciones nuevas y sube a Drive."""
-    d = _dev(db, did)
-    if d.ruta_estado != "PENDIENTE":
-        raise HTTPException(409, "Esta devolución ya se cerró")
-    items = {i.id: i for i in d.items}
-    por_item: dict[int, dict[str, int]] = {}
-    for g in body.guardados:
-        it = items.get(g.item_id)
-        x = ruta_svc.ubicacion(db, g.codigo)
-        if not it or it.estado == "AJENO":
-            raise HTTPException(400, "Hay una prenda que no es de esta devolución")
-        if not x:
-            raise HTTPException(400, f"{g.codigo} no es un rack cargado en Mapeo")
-        c = por_item.setdefault(it.id, {})
-        c[x.codigo] = c.get(x.codigo, 0) + max(1, g.cantidad)
-    rack_fallas = ruta_svc.ubicacion(db, ruta_svc.ajustes.leer("mapa_rack_fallas", db))
-    from ..services.mapeo import ubicaciones_de
-    aprendidas = 0
-    for iid, cods in por_item.items():
-        it = items[iid]
-        it.ubicacion = ", ".join(k if n >= it.cantidad else f"{k} x{n}" for k, n in cods.items())[:80]
-        if it.estado != "OPTIMO" or not it.articulo_id:
-            continue
-        a = db.get(Articulo, it.articulo_id)
-        conocidas = {x.codigo for x in ubicaciones_de(db, a)} if a else set()
-        for k in cods:   # la prenda quedó en un rack que la app no conocía: se aprende para la próxima
-            x = ruta_svc.ubicacion(db, k)
-            if a and x and k not in conocidas and not (rack_fallas and k == rack_fallas.codigo):
-                db.add(UbicacionArticulo(ubicacion_id=x.id, modelo=a.articulo, color="", articulo_id=a.id,
-                                         nota=f"Aprendido en la devolución PD-{d.id}", creado_por_id=u.id))
-                conocidas.add(k)
-                aprendidas += 1
+def _cerrar_devuelta(db: Session, d: Devolucion, u: Usuario) -> None:
     d.ruta_estado = "DEVUELTO"
     db.commit()
     registrar(db, u, "devolucion", f"PD-{d.id} devuelta a los racks", "devoluciones")
     _enviar(db, d)
+
+
+@router.post("/api/{did}/guardar")
+def guardar_en_rack(did: int, body: GuardadoIn, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    """Se confirmó una prenda en su rack: queda guardado al instante y se actualiza el Excel del día en Drive.
+    Cuando se confirma la última prenda, la devolución se marca devuelta y se sube sola (Crédito y Reingreso)."""
+    d = _dev(db, did)
+    if d.ruta_estado != "PENDIENTE":
+        raise HTTPException(409, "Esta devolución ya se cerró")
+    it = next((i for i in d.items if i.id == body.item_id), None)
+    if not it or it.estado == "AJENO":
+        raise HTTPException(400, "Esa prenda no es de esta devolución")
+    x = ruta_svc.ubicacion(db, body.codigo)
+    if not x:
+        raise HTTPException(400, f"{body.codigo} no es un rack cargado en Mapeo")
+    try:
+        aprendidas = ruta_svc.guardar_prenda(db, d, it, x.codigo, body.cantidad, u.id)
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
+    db.commit()
+    completa = ruta_svc.completa(d)
+    if completa:
+        _cerrar_devuelta(db, d, u)
+    ruta_svc.actualizar_excel_dia(d.fecha)
+    return {"ok": True, "item_id": it.id, "guardados": ruta_svc.guardados(it), "completa": completa,
+            "aprendidas": aprendidas, "devolucion": dev_json(d)}
+
+
+@router.post("/api/{did}/devuelto")
+def devuelto(did: int, body: DevueltoIn = DevueltoIn(), u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    """Cierra la ruta aunque falten prendas (las confirmadas ya están guardadas) y sube a Drive."""
+    d = _dev(db, did)
+    if d.ruta_estado != "PENDIENTE":
+        raise HTTPException(409, "Esta devolución ya se cerró")
+    aprendidas = 0
+    items = {i.id: i for i in d.items}
+    for g in body.guardados:   # compatibilidad: progreso que quedó solo en el equipo (versión anterior)
+        it, x = items.get(g.item_id), ruta_svc.ubicacion(db, g.codigo)
+        if not it or it.estado == "AJENO":
+            raise HTTPException(400, "Hay una prenda que no es de esta devolución")
+        if not x:
+            raise HTTPException(400, f"{g.codigo} no es un rack cargado en Mapeo")
+        ya = ruta_svc.guardados(it).get(x.codigo, 0)
+        if g.cantidad > ya and (it.devuelto_cant or 0) < it.cantidad:
+            aprendidas += ruta_svc.guardar_prenda(db, d, it, x.codigo, g.cantidad - ya, u.id)
+    _cerrar_devuelta(db, d, u)
+    ruta_svc.actualizar_excel_dia(d.fecha)
     return {"ok": True, "devolucion": dev_json(d), "aprendidas": aprendidas}
 
 
@@ -264,6 +279,7 @@ def sin_devolver(did: int, u: Usuario = Depends(acceso), db: Session = Depends(g
         d.ruta_estado = "SIN_DEVOLVER"
         db.commit()
         registrar(db, u, "devolucion", f"PD-{d.id} guardada en Drive sin devolver a los racks", "devoluciones")
+        ruta_svc.actualizar_excel_dia(d.fecha)
     if not d.drive_ok:
         _enviar(db, d)
     return {"ok": True, "devolucion": dev_json(d)}
