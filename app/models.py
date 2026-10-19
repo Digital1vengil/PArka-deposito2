@@ -205,6 +205,8 @@ class Devolucion(Base):
     plataforma: Mapped[str] = mapped_column(String(8), default="")  # resumen: ML | TN | ML+TN
     drive_ok: Mapped[bool] = mapped_column(Boolean, default=False)
     drive_resp: Mapped[str] = mapped_column(Text, default="")  # respuesta del script (JSON) o error
+    # Ruta de devolución: "" (se subió directo) | PENDIENTE (guardando en racks) | DEVUELTO | SIN_DEVOLVER
+    ruta_estado: Mapped[str] = mapped_column(String(14), default="")
 
     usuario: Mapped[Optional[Usuario]] = relationship()
     items: Mapped[list["DevolucionItem"]] = relationship(back_populates="devolucion", cascade="all, delete-orphan")
@@ -224,6 +226,7 @@ class DevolucionItem(Base):
     plataforma: Mapped[str] = mapped_column(String(4), default="")  # ML | TN (por prenda)
     venta: Mapped[str] = mapped_column(String(40), default="")  # nº de venta (ML) o nº de orden (TN)
     llego: Mapped[str] = mapped_column(String(10), default="")  # MISMO | DISTINTO | AJENO (qué llegó vs la venta)
+    ubicacion: Mapped[str] = mapped_column(String(80), default="")  # rack donde se guardó (ruta de devolución)
     cantidad: Mapped[int] = mapped_column(Integer, default=1)
 
     devolucion: Mapped[Devolucion] = relationship(back_populates="items")
