@@ -126,7 +126,7 @@ function _pintarPlat(sel, p, extra) {
   document.querySelectorAll(sel).forEach(b => { b.className = `btn ${extra} ${sel.slice(1)} ${clsPlat(b.dataset.p, b.dataset.p === p)}`; });
 }
 function _marcarFalta(id, on) { const b = document.getElementById(id); if (!b) return; b.style.outline = on ? '2px solid #dc2626' : ''; b.style.outlineOffset = on ? '3px' : ''; }
-const clave = x => x.id + '|' + x.estado + '|' + x.plataforma + '|' + (x.venta || '');
+const clave = x => (x.id ?? ('x:' + x.articulo)) + '|' + x.estado + '|' + x.plataforma + '|' + (x.venta || '');
 const nomVenta = p => p === 'TN' ? 'orden' : 'venta';
 
 // ── Venta / orden ──
@@ -180,7 +180,7 @@ async function buscarVenta(raw) {
   catch (e) { r = { ok: false, motivo: e.message, sin_conexion: true, codigo: v.replace(/^#/, '') }; }
   _buscandoVenta = false;
   if (r.ok) {
-    venta = { plataforma: r.plataforma, numero: r.numero, verificada: true, info: r };
+    venta = { plataforma: r.plataforma, numero: r.numero, verificada: true, info: r }; llegoModo = ''; ajenoAbierto = false;
     inp.value = r.numero; beepOk();
     if (camModo === 'etiqueta') pararCam();
     pintarVenta();
@@ -196,7 +196,7 @@ function usarSinVerificar(c) {
   document.getElementById('venta-num').value = c; pintarVenta();
 }
 function cambiarVenta() {
-  venta = null; const inp = document.getElementById('venta-num');
+  venta = null; llegoModo = ''; ajenoAbierto = false; const inp = document.getElementById('venta-num');
   inp.value = ''; pintarVenta(); if (canal) setCanal(canal);
 }
 function pintarVenta(err) {
@@ -215,9 +215,46 @@ function pintarVenta(err) {
     return;
   }
   const i = venta.info, n = venta.plataforma === 'ML' ? 'Venta' : 'Orden';
-  const prendas = i && i.items.length ? `<div class="mt-2 text-sm flex flex-col gap-0.5">${i.items.map(x => `
+  const hay = i && i.items.length;
+  // ¿Lo que llegó es lo que se vendió? MISMO → Óptimo / Falla en cada prenda de la venta; DISTINTO → buscarlo o "no lo vendemos"
+  const pregunta = `<div class="mt-3">
+      <div class="text-sm font-bold mb-2">¿Qué llegó en el paquete?</div>
+      <div class="flex flex-wrap gap-2">
+        <button class="btn ${llegoModo === 'MISMO' ? 'btn-primario' : 'btn-gris'}" onclick="setLlego('MISMO')">✔ Es el mismo artículo</button>
+        <button class="btn ${llegoModo === 'DISTINTO' ? 'btn-primario' : 'btn-gris'}" onclick="setLlego('DISTINTO')">↔ Es un artículo distinto</button>
+      </div></div>`;
+  const nAgregadas = v => items.filter(y => y.id === v.id && y.venta === venta.numero && y.llego === 'MISMO').reduce((a, y) => a + y.cantidad, 0);
+  const prenda = (x, k) => {
+    let acc = '';
+    if (llegoModo === 'MISMO') {
+      if (x.variante) {
+        const ya = nAgregadas(x.variante);
+        acc = `<div class="flex flex-wrap items-center gap-2 mt-1">
+          <button class="btn btn-turq btn-chico" onclick="agregarDeVenta(${k}, 'OPTIMO')">+ Óptimo</button>
+          <button class="btn btn-rojo btn-chico" onclick="agregarDeVenta(${k}, 'FALLA')">+ Falla</button>
+          <span class="text-xs ${ya ? 'font-bold text-teal-700' : 'text-zinc-500'}">${ya ? `✔ agregadas ${ya} de ${x.cantidad}` : 'Tocá Óptimo o Falla por cada unidad que llegó'}</span></div>`;
+      } else {
+        acc = `<div class="text-xs mt-1" style="color:#b45309">⚠ ${esc(x.motivo || 'No está en el catálogo')} ·
+          <button class="underline font-semibold" onclick="buscarAMano(${k})">buscarlo a mano</button></div>`;
+      }
+    }
+    return `<div class="py-1.5 border-b border-zinc-200 last:border-0">
       <div class="flex justify-between gap-2"><span class="min-w-0"><span class="block truncate">${esc(x.titulo)}${x.color || x.talle ? ` <span class="text-zinc-500">· ${esc([x.color, x.talle].filter(Boolean).join(' · '))}</span>` : ''}</span>
-        <span class="block text-xs font-mono text-zinc-600 break-all">SKU: ${x.sku ? esc(x.sku) : '<span class="font-sans text-zinc-400">sin SKU</span>'}</span></span><b>x${x.cantidad}</b></div>`).join('')}</div>` : '';
+        <span class="block text-xs font-mono text-zinc-600 break-all">SKU: ${x.sku ? esc(x.sku) : '<span class="font-sans text-zinc-400">sin SKU</span>'}</span></span><b>x${x.cantidad}</b></div>${acc}</div>`;
+  };
+  const prendas = hay ? `<div class="mt-2 text-sm flex flex-col">${i.items.map(prenda).join('')}</div>` : '';
+  const distinto = llegoModo === 'DISTINTO' || (!hay && llegoModo) ? `<div class="mt-3 text-sm">
+      <div class="mb-2">Escaneá o buscá abajo el artículo que llegó (Óptimo o Falla en el escáner o al buscarlo).</div>
+      ${ajenoAbierto ? `<div class="rounded-lg p-3 bg-white border border-zinc-300">
+          <label class="lbl" for="ajeno-desc">Artículo que no vendemos — ¿qué llegó?</label>
+          <input id="ajeno-desc" class="input mb-2" placeholder="Ej: buzo gris de otra marca" autocomplete="off">
+          <div class="flex flex-wrap items-center gap-2">
+            <label class="text-sm">Cantidad</label>
+            <input id="ajeno-cant" type="number" min="1" max="999" value="1" class="input !w-20">
+            <button class="btn btn-primario" onclick="agregarAjeno()">+ Agregar</button>
+            <button class="btn btn-gris btn-chico" onclick="ajenoAbierto = false; pintarVenta()">Cancelar</button>
+          </div></div>`
+        : `<button class="btn btn-gris btn-chico" onclick="abrirAjeno()">🚫 Es un artículo que no vendemos</button>`}</div>` : '';
   const ok = venta.verificada;
   el.innerHTML = `<div class="rounded-xl p-3" style="background:${ok ? '#dcfce7' : '#fef3c7'};border:2px solid ${ok ? '#15803d' : '#d97706'}">
     <div class="flex flex-wrap items-center gap-2">
@@ -227,8 +264,36 @@ function pintarVenta(err) {
     </div>
     ${i && i.comprador ? `<div class="text-sm text-zinc-600">Comprador: ${esc(i.comprador)}${i.ventas && i.ventas.length > 1 ? ` · carrito de ${i.ventas.length} ventas` : ''}</div>` : ''}
     ${i && i.cancelada ? '<div class="text-sm font-bold text-red-600 mt-1">⚠ La venta figura CANCELADA en la plataforma</div>' : ''}
-    ${prendas}
-    <div class="text-xs text-zinc-500 mt-2">Ahora escaneá o buscá las prendas de esta ${nomVenta(venta.plataforma)}.</div></div>`;
+    ${pregunta}${prendas}${distinto}</div>`;
+}
+let llegoModo = '', ajenoAbierto = false;
+function setLlego(m) { llegoModo = m; ajenoAbierto = false; pintarVenta(); }
+function abrirAjeno() { ajenoAbierto = true; pintarVenta(); document.getElementById('ajeno-desc').focus(); }
+function agregarDeVenta(k, est) {
+  const x = venta.info.items[k], v = x.variante;
+  if (!v) return;
+  const it = { id: v.id, estado: est, plataforma: venta.plataforma, venta: venta.numero };
+  const ya = items.find(y => clave(y) === clave(it) && y.llego === 'MISMO');
+  if (ya) ya.cantidad += 1;
+  else items.push({ ...it, articulo: v.articulo, color: v.color, talle: v.talle, marca: v.marca, sku: v.sku, cantidad: 1, llego: 'MISMO' });
+  beepOk(); pintarLista(clave(it)); pintarVenta();
+  toast(`Agregado: ${v.articulo} ${v.color} ${v.talle} · ${est === 'FALLA' ? 'Falla' : 'Óptimo'}`);
+}
+function buscarAMano(k) {
+  const x = venta.info.items[k];
+  q.value = (x.titulo.match(/\b[A-Z][A-Z0-9]+\s+\d{3,5}\b/) || [x.titulo.split(/[(,]/)[0]])[0].trim();
+  q.focus(); buscar(); q.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+function agregarAjeno() {
+  const d = document.getElementById('ajeno-desc'), desc = d.value.trim().replace(/\s+/g, ' ');
+  const n = Math.max(1, Math.min(999, parseInt(document.getElementById('ajeno-cant').value) || 1));
+  if (!desc) { beepError(); toast('Escribí qué artículo llegó', 'warn'); d.focus(); return; }
+  const it = { id: null, articulo: desc.slice(0, 120), color: '', talle: '', marca: '', sku: '', cantidad: n, estado: 'AJENO',
+               plataforma: venta.plataforma, venta: venta.numero, llego: 'AJENO' };
+  const ya = items.find(y => clave(y) === clave(it));
+  if (ya) ya.cantidad += n; else items.push(it);
+  ajenoAbierto = false; beepOk(); pintarLista(clave(it)); pintarVenta();
+  toast(`Agregado como artículo que no vendemos: ${desc}`, 'info');
 }
 // ¿La prenda está en la venta? (aviso, no bloquea: ML / TN no siempre traen el SKU de Odoo)
 function enVenta(v) {
@@ -237,6 +302,7 @@ function enVenta(v) {
   const sku = String(v.sku || '').toUpperCase(), art = String(v.articulo || '').toUpperCase();
   const num = (art.match(/\d{4,5}/) || [''])[0];
   return it.some(x => {
+    if (x.variante && v.id && x.variante.id === v.id) return true;
     const xs = String(x.sku || '').toUpperCase(), xt = String(x.titulo || '').toUpperCase();
     return (sku && xs === sku) || (art && (xt.includes(art) || xs.includes(art))) || (num && (xs.includes(num) || xt.includes(num)));
   });
@@ -316,13 +382,13 @@ async function _escanear(cod) {
   const k = { id: v.id, estado: estadoScan, plataforma: venta.plataforma, venta: venta.numero };
   const ya = items.find(x => clave(x) === clave(k));
   if (ya) ya.cantidad += 1;
-  else items.push({ id: v.id, articulo: v.articulo, color: v.color, talle: v.talle, marca: v.marca, sku: v.sku, cantidad: 1, estado: estadoScan, plataforma: venta.plataforma, venta: venta.numero });
+  else items.push({ id: v.id, articulo: v.articulo, color: v.color, talle: v.talle, marca: v.marca, sku: v.sku, cantidad: 1, estado: estadoScan, plataforma: venta.plataforma, venta: venta.numero, llego: enVenta(v) ? 'MISMO' : 'DISTINTO' });
   ultimoScan = k;
   beepOk();
   pintarLista(clave(k));
   const n = items.find(x => clave(x) === clave(k)).cantidad;
   pintarScan(true, `${v.articulo} · ${v.color} · ${v.talle}`, cod, `${venta.plataforma} #${venta.numero} · ${estadoScan === 'FALLA' ? 'Falla' : 'Óptimo'} · llevás ${n} de esta`,
-    enVenta(v) ? '' : `Ojo: esta prenda no figura en la ${nomVenta(venta.plataforma)} #${venta.numero}. Revisá que sea la correcta.`);
+    enVenta(v) || llegoModo === 'DISTINTO' ? '' : `Ojo: esta prenda no figura en la ${nomVenta(venta.plataforma)} #${venta.numero}. Revisá que sea la correcta.`);
 }
 function pintarScan(ok, texto, cod, extra = '', aviso = '') {
   const el = document.getElementById('scan-estado');
@@ -444,11 +510,12 @@ function agregar() {
     const k = { id, estado, plataforma: venta.plataforma, venta: venta.numero };
     const ya = items.find(x => clave(x) === clave(k));
     if (ya) ya.cantidad += n;
-    else items.push({ id, articulo: modelo.articulo, color: v.color, talle: v.talle, marca: v.marca, sku: v.sku, cantidad: n, estado, plataforma: venta.plataforma, venta: venta.numero });
+    else items.push({ id, articulo: modelo.articulo, color: v.color, talle: v.talle, marca: v.marca, sku: v.sku, cantidad: n, estado, plataforma: venta.plataforma, venta: venta.numero,
+                      llego: enVenta({ id, sku: v.sku, articulo: modelo.articulo }) ? 'MISMO' : 'DISTINTO' });
     ultima = clave(k); total += n;
   });
   toast(`Agregado: ${modelo.articulo} ${color} · ${total} prenda${total === 1 ? '' : 's'} · ${venta.plataforma} #${venta.numero} · ${estado === 'FALLA' ? 'Falla' : 'Óptimo'}`);
-  if (!enVenta({ sku: modelo.variantes.find(x => x.id === ids[0]).sku, articulo: modelo.articulo }))
+  if (llegoModo !== 'DISTINTO' && !enVenta({ id: ids[0], sku: modelo.variantes.find(x => x.id === ids[0]).sku, articulo: modelo.articulo }))
     toast(`Ojo: ${modelo.articulo} no figura en la ${nomVenta(venta.plataforma)} #${venta.numero}. Revisá que sea la correcta.`, 'warn', 6000);
   pintarLista(ultima);
   limpiarBusqueda();
@@ -469,12 +536,13 @@ function pintarLista(resaltar = '') {
   const total = items.reduce((a, x) => a + x.cantidad, 0);
   document.getElementById('total').textContent = `${total} unidad${total === 1 ? '' : 'es'}`;
   document.getElementById('btn-confirmar').disabled = !items.length;
+  if (venta && llegoModo === 'MISMO') pintarVenta();
   if (!items.length) { el.innerHTML = '<p class="text-sm text-zinc-500 text-center py-6">Todavía no agregaste artículos</p>'; return; }
   el.innerHTML = items.map((x, i) => `
     <div class="flex items-center gap-2 py-2 border-b border-zinc-700 last:border-0 rounded-lg transition-colors" ${resaltar === clave(x) ? 'style="background:#dcfce7"' : ''}>
       <div class="flex-1 min-w-0">
         <div class="font-semibold text-sm truncate">${chipPlat(x.plataforma)} ${esc(x.articulo)} <span class="text-xs font-normal text-zinc-500">#${esc(x.venta)}</span></div>
-        <div class="text-xs text-zinc-500">${esc(x.color)} · ${esc(x.talle)}${x.marca ? ' · ' + esc(x.marca) : ''} · <span class="${x.estado === 'FALLA' ? 'text-red-600 font-semibold' : 'text-teal-600'}">${x.estado === 'FALLA' ? 'Falla' : 'Óptimo'}</span></div>
+        <div class="text-xs text-zinc-500">${[x.color, x.talle, x.marca].filter(Boolean).map(esc).join(' · ')}${x.color || x.talle ? ' · ' : ''}<span class="${x.estado === 'FALLA' ? 'text-red-600 font-semibold' : x.estado === 'AJENO' ? 'font-semibold' : 'text-teal-600'}" ${x.estado === 'AJENO' ? 'style="color:#b45309"' : ''}>${x.estado === 'FALLA' ? 'Falla' : x.estado === 'AJENO' ? 'No lo vendemos' : 'Óptimo'}</span>${x.llego === 'DISTINTO' ? ' · <span class="text-zinc-500">distinto a la venta</span>' : ''}</div>
       </div>
       <button class="btn btn-gris btn-chico !w-8" onclick="cantItem(${i},-1)">−</button>
       <span class="w-7 text-center font-bold">${x.cantidad}</span>
@@ -510,15 +578,16 @@ function abrirResumen() {
   const op = n('OPTIMO'), fa = n('FALLA');
   document.getElementById('r-optimo').textContent = op;
   document.getElementById('r-falla').textContent = fa;
-  document.getElementById('r-total').textContent = op + fa;
+  document.getElementById('r-total').textContent = items.reduce((a, x) => a + x.cantidad, 0);
   const bloque = (e, titulo, cls) => {
     const xs = items.filter(x => x.estado === e);
     if (!xs.length) return '';
     return `<h3 class="text-xs font-bold uppercase tracking-wider mb-1 ${cls}">${titulo}</h3>` + xs.map(x => `
       <div class="flex justify-between gap-2 py-1 border-b border-zinc-200 last:border-0">
-        <span class="truncate">${chipPlat(x.plataforma)} ${esc(x.articulo)} · ${esc(x.color)} · ${esc(x.talle)} <span class="text-zinc-500">#${esc(x.venta)}</span></span><b>x${x.cantidad}</b></div>`).join('') + '<div class="mb-3"></div>';
+        <span class="truncate">${chipPlat(x.plataforma)} ${esc([x.articulo, x.color, x.talle].filter(Boolean).join(' · '))} <span class="text-zinc-500">#${esc(x.venta)}</span></span><b>x${x.cantidad}</b></div>`).join('') + '<div class="mb-3"></div>';
   };
-  document.getElementById('r-detalle').innerHTML = bloque('OPTIMO', 'Óptimas', 'text-teal-700') + bloque('FALLA', 'Fallas', 'text-red-600');
+  document.getElementById('r-detalle').innerHTML = bloque('OPTIMO', 'Óptimas', 'text-teal-700') + bloque('FALLA', 'Fallas', 'text-red-600')
+    + bloque('AJENO', 'No lo vendemos (no se reingresan ni llevan etiqueta)', 'text-zinc-600');
   document.getElementById('modal-resumen').classList.remove('hidden');
   document.getElementById('btn-subir').focus();
 }
@@ -528,10 +597,10 @@ async function confirmar() {
   const bs = document.getElementById('btn-subir'); bs.disabled = true; bs.textContent = 'Subiendo a Drive…';
   const b = document.getElementById('btn-confirmar'); b.disabled = true; b.textContent = 'Guardando en Drive…';
   try {
-    const r = await api('/devoluciones/api/confirmar', { json: { items: items.map(x => ({ articulo_id: x.id, cantidad: x.cantidad, estado: x.estado, plataforma: x.plataforma, venta: x.venta })) } });
+    const r = await api('/devoluciones/api/confirmar', { json: { items: items.map(x => ({ articulo_id: x.id, descripcion: x.id ? '' : x.articulo, llego: x.llego || '', cantidad: x.cantidad, estado: x.estado, plataforma: x.plataforma, venta: x.venta })) } });
     cerrarResumen();
     const desde = +document.getElementById('desde').value || 1;
-    imprimirEtiquetas('devoluciones', r.devolucion.id, { desde });
+    if (r.devolucion.items.some(i => i.estado !== 'AJENO')) imprimirEtiquetas('devoluciones', r.devolucion.id, { desde });
     toast(r.devolucion.drive_ok ? `Devolución PD-${r.devolucion.id} guardada en Drive`
       : `PD-${r.devolucion.id} guardada en la app, pero Drive falló: reintentalo desde "Últimas devoluciones"`,
       r.devolucion.drive_ok ? 'ok' : 'warn', r.devolucion.drive_ok ? 5000 : 10000);
@@ -545,7 +614,7 @@ async function confirmar() {
 // sin Óptimo/Falla elegido y sin el recuadro del último escaneo (las etiquetas se reimprimen desde "Últimas devoluciones").
 function nuevaDevolucion() {
   items = []; ultimoScan = null; pintarLista(); limpiarBusqueda();
-  venta = null; setCanal(''); setEstadoScan('');
+  venta = null; llegoModo = ''; ajenoAbierto = false; setCanal(''); setEstadoScan('');
   document.getElementById('venta-num').value = '';
   document.getElementById('resultado').innerHTML = '';
   document.getElementById('desde').value = 1;
