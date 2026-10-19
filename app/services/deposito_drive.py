@@ -173,9 +173,9 @@ ENC_DESP = ["Hora", "Nº de envío", "Venta", "Comprador", "Producto", "SKU", "C
 ANCHO_DESP = [8, 20, 18, 26, 40, 18, 7, 14, 28]
 ENC_SP = ["Hora", "Plataforma", "Nombre", "Artículo", "Nº guía", "Guardado en Drive"]
 ANCHO_SP = [8, 10, 26, 36, 20, 16]
-ENC_DEV = ["Hora", "Devolución", "Responsable", "Plataforma", "Código", "SKU", "Artículo", "Color", "Talle",
+ENC_DEV = ["Hora", "Devolución", "Responsable", "Plataforma", "Nº venta / orden", "Código", "SKU", "Artículo", "Color", "Talle",
            "Estado", "Cantidad"]
-ANCHO_DEV = [8, 12, 16, 10, 16, 18, 30, 16, 8, 10, 9]
+ANCHO_DEV = [8, 12, 16, 10, 20, 16, 18, 30, 16, 8, 10, 9]
 ENC_CON = ["Hora", "Conteo", "Ubicación / nota", "Operario", "Código", "SKU", "Artículo", "Color", "Talle",
            "Marca", "Cantidad"]
 ANCHO_CON = [8, 10, 22, 14, 16, 18, 30, 16, 8, 10, 9]
@@ -192,7 +192,7 @@ def _filas_sp(envios: list[EnvioManual]) -> list[list]:
 
 def _filas_dev(devs: list[Devolucion]) -> list[list]:
     return [[d.creado_at.strftime("%H:%M"), f"PD-{d.id}", d.usuario.nombre if d.usuario else "",
-             i.plataforma or d.plataforma, i.codigo_barras, i.sku, i.articulo, i.color, i.talle, i.estado, i.cantidad]
+             i.plataforma or d.plataforma, i.venta or "", i.codigo_barras, i.sku, i.articulo, i.color, i.talle, i.estado, i.cantidad]
             for d in devs for i in d.items]
 
 
