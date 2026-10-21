@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 import time
 from datetime import datetime
@@ -235,6 +236,67 @@ def por_codigo(db: Session, codigo: str, consultar_odoo: bool = True) -> Articul
 
 
 DOMINIO_ACTIVOS_Y_NO = ["|", ["active", "=", True], ["active", "=", False]]
+
+
+# ───────────── SKU de Mercado Libre / Tienda Nube ↔ SKU de Odoo ─────────────
+# Odoo: 1-CAMP-W-02055-BEIG-L-PARK  (nº-CATEGORÍA-género-modelo-color-talle-MARCA)
+# ML/TN: W-2055-BEIG-L               (género-modelo-color-talle, sin ceros adelante)
+# Los dos dan la misma clave "W-2055-BEIG-L".
+MARCAS_SKU_PREFERIDAS = ("-PARK", "-PUFE")
+
+
+def clave_sku(sku: str) -> str:
+    """SKU (de Odoo o de la plataforma) → clave comparable: sin prefijo nº-CATEGORÍA, sin marca y sin ceros a la izquierda."""
+    t = [x for x in re.split(r"[-_\s/.]+", (sku or "").upper().strip()) if x]
+    if len(t) >= 4 and t[0].isdigit() and re.fullmatch(r"[A-Z]{2,5}", t[1]):
+        t = t[2:]
+        if len(t) >= 3 and re.fullmatch(r"[A-Z0-9]{4}", t[-1]) and not t[-1].isdigit():
+            t = t[:-1]
+    elif len(t) >= 5 and re.fullmatch(r"[A-Z]{4}", t[-1]):
+        t = t[:-1]   # SKU de plataforma que trae la marca al final (W-2055-BEIG-L-PARK)
+    return "-".join(x.lstrip("0") or "0" for x in t)
+
+
+def _patron_sku(clave: str) -> str:
+    """Patrón LIKE amplio para traer candidatos (después se filtran por clave exacta)."""
+    return "%" + "-".join("%" + x for x in clave.split("-")) + "%"
+
+
+def _mejor(cands: list[Articulo], clave: str) -> Articulo | None:
+    ok = [a for a in cands if clave_sku(a.sku) == clave]
+    ok.sort(key=lambda a: (bool(a.inactivo), not a.codigo_barras,
+                           not (a.sku or "").upper().endswith(MARCAS_SKU_PREFERIDAS), a.sku))
+    return ok[0] if ok else None
+
+
+def por_sku_plataforma(db: Session, sku: str, consultar_odoo: bool = True) -> Articulo | None:
+    """SKU de Mercado Libre / Tienda Nube (ej. W-2055-BEIG-L) → artículo de Odoo (1-CAMP-W-02055-BEIG-L-PARK).
+    Primero exacto (por si la plataforma ya trae el SKU de Odoo), después por clave equivalente."""
+    a = por_codigo(db, sku, consultar_odoo=consultar_odoo)
+    if a is not None:
+        return a
+    clave = clave_sku(sku)
+    if clave.count("-") < 2 or not re.search(r"[A-Z]", clave):   # muy corto o sólo números: no adivinar
+        return None
+    patron = _patron_sku(clave)
+    a = _mejor(list(db.scalars(select(Articulo).where(Articulo.sku.ilike(patron)).limit(200))), clave)
+    if a is not None or not consultar_odoo or not odoo.configurado(db):
+        return a
+    k = "SKU:" + clave
+    if time.time() - _NO_ESTA.get(k, 0) < NO_ESTA_SEG:
+        return None
+    try:
+        c = odoo.cliente(db, timeout=8)
+        productos = odoo.leer_productos(c, dominio=[["default_code", "=ilike", patron]] + DOMINIO_ACTIVOS_Y_NO, limite=40)
+    except odoo.OdooError as e:
+        log.info("Consulta a Odoo por SKU %s: %s", sku, e)
+        return None
+    productos = [p for p in productos if clave_sku(p.get("sku") or "") == clave]
+    if not productos:
+        _NO_ESTA[k] = time.time()
+        return None
+    guardar_productos(db, productos, completo=False)
+    return _mejor(list(db.scalars(select(Articulo).where(Articulo.sku.ilike(patron)).limit(200))), clave)
 
 
 def buscar(db: Session, q: str, limite: int = 100, marca: str = "", con_codigo: bool = False,
