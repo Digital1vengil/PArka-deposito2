@@ -228,6 +228,7 @@ class DevolucionItem(Base):
     llego: Mapped[str] = mapped_column(String(10), default="")  # MISMO | DISTINTO | AJENO (qué llegó vs la venta)
     reemplaza: Mapped[str] = mapped_column(String(200), default="")  # si llegó un artículo distinto: en lugar de qué prenda de la venta
     ubicacion: Mapped[str] = mapped_column(String(80), default="")  # rack donde se guardó (ruta de devolución)
+    ubic_odoo: Mapped[str] = mapped_column(String(80), default="")  # ubicación del producto en Odoo (se verifica al guardar)
     guardados: Mapped[str] = mapped_column(Text, default="")  # JSON {rack: unidades} confirmadas en la ruta
     devuelto_cant: Mapped[int] = mapped_column(Integer, default=0)  # unidades ya confirmadas en su rack
     devuelto_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)  # última confirmación
