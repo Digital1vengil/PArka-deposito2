@@ -1,6 +1,8 @@
 """Ruta de devolución: a qué rack va cada prenda devuelta y en qué orden recorrerlos.
 
-- Óptimo → la ubicación asignada en Mapeo (variante > color > modelo). Si el modelo está en varios racks se
+- Óptimo → la ubicación del producto en Odoo (regla de almacenamiento, o donde tiene stock). Si Odoo no tiene
+  ninguna, la asignada en Mapeo (variante > color > modelo).
+  Al guardar se verifica que el rack escaneado coincida con la ubicación de Odoo. Si el modelo está en varios racks se
   elige el que ya es parada de la ruta o, si no, el más cerca de la persiana de salida.
 - Falla → el rack de fallas (Mapeo → Croquis). Sin rack de fallas configurado, queda "sin ubicación".
 - Sin ubicación conocida → parada final: se escanea el rack donde se deja y la app lo aprende para la próxima.
@@ -10,24 +12,109 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db import SessionLocal, ahora
 from ..models import Articulo, Devolucion, Ubicacion, UbicacionArticulo
-from . import ajustes, croquis
+from . import ajustes, croquis, odoo
 from .mapeo import normalizar_codigo, ubicaciones_de
 
 log = logging.getLogger(__name__)
 
 
 def ubicacion(db: Session, codigo: str) -> Ubicacion | None:
+    """El rack escaneado. Si no está en Mapeo pero es una ubicación de Odoo, se agrega a Mapeo."""
     cod = normalizar_codigo(codigo)
     if not cod:
         return None
     u = db.scalar(select(Ubicacion).where(Ubicacion.codigo == cod))
-    return u if u and u.activa else None
+    if u:
+        return u if u.activa else None
+    if cod in ubicaciones_odoo(db):
+        return asegurar_ubicacion(db, cod)
+    return None
+
+
+def asegurar_ubicacion(db: Session, cod: str) -> Ubicacion:
+    u = db.scalar(select(Ubicacion).where(Ubicacion.codigo == cod))
+    if not u:
+        p = croquis.partes(cod)
+        u = Ubicacion(codigo=cod, zona=p[0][:1] if p else "", pasillo=p[0] if p else "",
+                      descripcion=(croquis.describir(cod) or "Ubicación de Odoo")[:200])
+        db.add(u)
+        db.flush()
+    return u
+
+
+# ─────────────── Ubicaciones de Odoo (stock.location dentro de WH/Existencias) ───────────────
+_cache: dict = {"ubics": (0.0, {}), "prod": {}}
+_TTL = 600
+
+
+def _cod_loc(loc: dict) -> str:
+    return normalizar_codigo(loc.get("barcode") or loc.get("name") or "")
+
+
+def ubicaciones_odoo(db: Session) -> dict[int, str]:
+    """{codigo: id} de las ubicaciones internas hijas de Existencias (ej. B01-C07-N0). {} si Odoo no responde."""
+    t, val = _cache["ubics"]
+    if val and time.time() - t < _TTL:
+        return val
+    if not odoo.configurado(db):
+        return {}
+    try:
+        locs = odoo.cliente(db, timeout=20).call("stock.location", "search_read",
+                                                 [["usage", "=", "internal"], ["location_id.usage", "=", "internal"]],
+                                                 fields=["name", "barcode"])
+    except Exception:  # noqa: BLE001 — sin Odoo se sigue con Mapeo
+        log.exception("No se pudieron leer las ubicaciones de Odoo")
+        return val or {}
+    val = {_cod_loc(x): x["id"] for x in locs if _cod_loc(x)}
+    _cache["ubics"] = (time.time(), val)
+    return val
+
+
+def ubicacion_de_producto(db: Session, a: Articulo | None) -> str:
+    """Dónde va el producto según Odoo: su regla de almacenamiento (putaway) o, si no tiene, donde tiene stock."""
+    if not a or not odoo.configurado(db):
+        return ""
+    clave = a.odoo_id or a.sku
+    t, val = _cache["prod"].get(clave, (0.0, None))
+    if val is not None and time.time() - t < _TTL:
+        return val
+    ubics = ubicaciones_odoo(db)
+    if not ubics:
+        return ""
+    por_id = {v: k for k, v in ubics.items()}
+    cod = ""
+    try:
+        c = odoo.cliente(db, timeout=20)
+        pid = a.odoo_id
+        if not pid and a.sku:
+            ids = c.call("product.product", "search", [["default_code", "=", a.sku]], limit=1,
+                         context={"active_test": False})
+            pid = ids[0] if ids else None
+        if pid:
+            reglas = c.call("stock.putaway.rule", "search_read", [["product_id", "=", pid]],
+                            fields=["location_out_id"], limit=5)
+            for r in reglas:
+                lid = (r.get("location_out_id") or [None])[0]
+                if lid in por_id:
+                    cod = por_id[lid]
+                    break
+            if not cod:
+                quants = c.call("stock.quant", "search_read",
+                                [["product_id", "=", pid], ["location_id", "in", list(por_id)], ["quantity", ">", 0]],
+                                fields=["location_id"], limit=5, order="quantity desc")
+                cod = next((por_id[q["location_id"][0]] for q in quants if q["location_id"][0] in por_id), "")
+    except Exception:  # noqa: BLE001
+        log.exception("No se pudo leer la ubicación en Odoo de %s", a.sku)
+        return ""
+    _cache["prod"][clave] = (time.time(), cod)
+    return cod
 
 
 def _cerca(codigo: str, desde: str) -> int:
@@ -36,7 +123,7 @@ def _cerca(codigo: str, desde: str) -> int:
 
 
 def item_json(i) -> dict:
-    return {"item_id": i.id, "articulo": i.articulo, "color": i.color, "talle": i.talle, "sku": i.sku,
+    return {"item_id": i.id, "articulo": i.articulo, "color": i.color, "talle": i.talle, "sku": i.sku, "odoo": i.ubic_odoo or "",
             "codigo_barras": i.codigo_barras, "cantidad": i.cantidad, "estado": i.estado,
             "venta": i.venta or "", "plataforma": i.plataforma or "", "guardados": guardados(i)}
 
@@ -134,7 +221,13 @@ def armar(db: Session, d: Devolucion) -> dict:
             cods = [fallas.codigo] if fallas else []
         else:
             a = db.get(Articulo, i.articulo_id)
-            cods = [u.codigo for u in ubicaciones_de(db, a)] if a else []
+            if not i.ubic_odoo:
+                i.ubic_odoo = ubicacion_de_producto(db, a)
+            if i.ubic_odoo:   # Odoo manda: es el único rack válido para esta prenda
+                asegurar_ubicacion(db, i.ubic_odoo)
+                cods = [i.ubic_odoo]
+            else:
+                cods = [u.codigo for u in ubicaciones_de(db, a)] if a else []
         candidatos.append((i, cods))
     paradas: dict[str, list] = {}
     sin: list = []
@@ -146,6 +239,7 @@ def armar(db: Session, d: Devolucion) -> dict:
         ya = [c for c in cods if c in paradas]
         elegido = ya[0] if ya else min(cods, key=lambda c: (_cerca(c, desde), cods.index(c)))
         paradas.setdefault(elegido, []).append((i, cods))
+    db.commit()   # guarda la ubicación de Odoo de cada prenda (para verificarla al guardar)
     r = croquis.ordenar(list(paradas), desde)
     salida = []
     for n, (cod, tramo) in enumerate(zip(r["orden"], r["tramos"]), start=1):
