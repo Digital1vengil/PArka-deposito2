@@ -110,3 +110,10 @@ def enviar_mail(db: Session | None, para: str, asunto: str, html: str, adjuntos:
     return _post(db, "enviarMail", timeout=120, para=para, copia=copia, asunto=asunto, html=html,
                  adjuntos=[{"nombre": n, "base64": base64.b64encode(b).decode("ascii")}
                            for n, b in (adjuntos or {}).items()])
+
+
+def guardar_deposito_archivo(db: Session | None, seccion: str, nombre: str, contenido: bytes) -> dict:
+    """Sube un archivo con nombre propio a DEPOSITO PARKA/<Sección>/ (ej. IN_DEV_2026-10-21_PD-14.xlsx).
+    Si ya existe uno con ese nombre se reemplaza. Necesita el Apps Script 2026.10.21-1 o posterior."""
+    return _post(db, "guardarDepositoArchivo", timeout=120, seccion=seccion, nombre=nombre,
+                 base64=base64.b64encode(contenido).decode("ascii"))
