@@ -182,6 +182,7 @@ def confirmar(body: ConfirmarIn, u: Usuario = Depends(acceso), db: Session = Dep
         db.commit()
         ruta_svc.actualizar_excel_dia(d.fecha)   # el Excel del día ya la muestra "Pendiente"
         return {"ok": True, "devolucion": dev_json(d), "ruta": ruta_svc.armar(db, d)}
+    ruta_svc.actualizar_excel_dia(d.fecha)   # el Excel del día se sube ya (en paralelo con Crédito y Reingreso)
     _enviar(db, d)
     return {"ok": True, "devolucion": dev_json(d)}
 
@@ -245,9 +246,9 @@ def guardar_en_rack(did: int, body: GuardadoIn, u: Usuario = Depends(acceso), db
         raise HTTPException(409, str(e)) from e
     db.commit()
     completa = ruta_svc.completa(d)
+    ruta_svc.actualizar_excel_dia(d.fecha)   # primero el Excel del día (en segundo plano), después Crédito y Reingreso
     if completa:
         _cerrar_devuelta(db, d, u)
-    ruta_svc.actualizar_excel_dia(d.fecha)
     return {"ok": True, "item_id": it.id, "guardados": ruta_svc.guardados(it), "completa": completa,
             "aprendidas": aprendidas, "devolucion": dev_json(d)}
 
@@ -269,8 +270,10 @@ def devuelto(did: int, body: DevueltoIn = DevueltoIn(), u: Usuario = Depends(acc
         ya = ruta_svc.guardados(it).get(x.codigo, 0)
         if g.cantidad > ya and (it.devuelto_cant or 0) < it.cantidad:
             aprendidas += ruta_svc.guardar_prenda(db, d, it, x.codigo, g.cantidad - ya, u.id)
-    _cerrar_devuelta(db, d, u)
+    d.ruta_estado = "DEVUELTO"
+    db.commit()
     ruta_svc.actualizar_excel_dia(d.fecha)
+    _cerrar_devuelta(db, d, u)
     return {"ok": True, "devolucion": dev_json(d), "aprendidas": aprendidas}
 
 
