@@ -215,7 +215,7 @@ def devuelto_al_rack(d: Devolucion, i) -> str:
         return ""
     n = i.devuelto_cant or 0
     if n >= i.cantidad:
-        return "Sí" + (f" · {i.devuelto_at.strftime('%H:%M')}" if i.devuelto_at else "")
+        return f"Devuelto a {i.ubicacion}" + (f" · {i.devuelto_at.strftime('%H:%M')}" if i.devuelto_at else "")
     if d.ruta_estado == "SIN_DEVOLVER":
         return "No (sin devolver)" if not n else f"No ({n} de {i.cantidad})"
     return f"Pendiente ({n} de {i.cantidad})"
