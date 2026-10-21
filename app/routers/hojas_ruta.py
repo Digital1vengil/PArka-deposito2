@@ -19,6 +19,7 @@ from ..auth import intentar_login, requiere
 from ..db import get_db
 from ..models import HojaRuta, ParadaRuta, Usuario
 from ..services import ajustes, odoo, rotulos
+from ..services import despachos as dsp
 from ..services import hojas_ruta as svc
 from ..templating import render
 
@@ -204,24 +205,57 @@ def reparto_login(body: LoginIn, _: None = Depends(reparto_habilitado), db: Sess
     return {"token": _serializador().dumps(u.id), "nombre": u.nombre, "horas": TOKEN_HORAS}
 
 
+def _usa_despachos(db: Session) -> bool:
+    """Con Despachos configurado (Conexiones → Despachos), la hoja del chofer sale de la app de Gonzalo."""
+    return dsp.configurado(db)
+
+
+def _despacho(db: Session, chofer: Usuario, hid: str) -> dict:
+    try:
+        d = dsp.despacho(db, chofer, hid)
+    except dsp.DespachosError as e:
+        raise HTTPException(502, str(e)) from e
+    if not d:
+        raise HTTPException(404, "No tenés ese despacho (o ya se entregó)")
+    return d
+
+
+def _hoja_vieja(db: Session, chofer: Usuario, hid: str) -> HojaRuta:
+    if not hid.isdigit():
+        raise HTTPException(404, "No tenés esa hoja de ruta")
+    return _hoja_chofer(db, chofer, int(hid))
+
+
 @router.get("/api/reparto/hojas")
 def reparto_hojas(chofer: Usuario = Depends(chofer_actual), db: Session = Depends(get_db)):
-    return {"chofer": chofer.nombre, "hojas": svc.hojas_de_chofer(db, chofer)}
+    if _usa_despachos(db):
+        try:
+            hojas = [dsp.resumen(db, d) for d in dsp.despachos_del_chofer(db, chofer)]
+        except dsp.DespachosError as e:
+            raise HTTPException(502, str(e)) from e
+        return {"chofer": chofer.nombre, "hojas": hojas, "origen": "despachos"}
+    return {"chofer": chofer.nombre, "hojas": svc.hojas_de_chofer(db, chofer), "origen": "deposito"}
 
 
 @router.get("/api/reparto/hojas/{hid}")
-def reparto_hoja(hid: int, chofer: Usuario = Depends(chofer_actual), db: Session = Depends(get_db)):
-    return svc.detalle(db, _hoja_chofer(db, chofer, hid))
+def reparto_hoja(hid: str, chofer: Usuario = Depends(chofer_actual), db: Session = Depends(get_db)):
+    if _usa_despachos(db):
+        return dsp.hoja(db, _despacho(db, chofer, hid))
+    return svc.detalle(db, _hoja_vieja(db, chofer, hid))
 
 
 class EscaneoIn(BaseModel):
-    parada_id: int
+    parada_id: str | int
     codigo: str
 
 
 @router.post("/api/reparto/hojas/{hid}/escanear")
-def reparto_escanear(hid: int, body: EscaneoIn, chofer: Usuario = Depends(chofer_actual), db: Session = Depends(get_db)):
-    return svc.escanear(db, chofer, _hoja_chofer(db, chofer, hid), body.parada_id, body.codigo)
+def reparto_escanear(hid: str, body: EscaneoIn, chofer: Usuario = Depends(chofer_actual), db: Session = Depends(get_db)):
+    if _usa_despachos(db):
+        return dsp.escanear(db, chofer, _despacho(db, chofer, hid), str(body.parada_id), body.codigo)
+    if not str(body.parada_id).isdigit():
+        raise HTTPException(400, "Parada inválida")
+    return svc.escanear(db, chofer, _hoja_vieja(db, chofer, hid), int(body.parada_id), body.codigo)
 
 
 class CerrarParadaIn(BaseModel):
@@ -229,10 +263,15 @@ class CerrarParadaIn(BaseModel):
 
 
 @router.post("/api/reparto/hojas/{hid}/paradas/{pid}/cerrar")
-def reparto_cerrar_parada(hid: int, pid: int, body: CerrarParadaIn = CerrarParadaIn(),
+def reparto_cerrar_parada(hid: str, pid: str, body: CerrarParadaIn = CerrarParadaIn(),
                           chofer: Usuario = Depends(chofer_actual), db: Session = Depends(get_db)):
-    h = _hoja_chofer(db, chofer, hid)
-    p = db.get(ParadaRuta, pid)
+    if _usa_despachos(db):
+        try:
+            return dsp.cerrar_parada(db, chofer, _despacho(db, chofer, hid), pid, body.nota.strip())
+        except dsp.DespachosError as e:
+            raise HTTPException(404, str(e)) from e
+    h = _hoja_vieja(db, chofer, hid)
+    p = db.get(ParadaRuta, int(pid)) if pid.isdigit() else None
     if not p or p.hoja_id != h.id:
         raise HTTPException(404, "Esa parada no es de esta hoja")
     return svc.cerrar_parada(db, chofer, h, p, body.nota.strip())

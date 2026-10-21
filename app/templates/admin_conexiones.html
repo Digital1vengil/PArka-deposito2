@@ -236,6 +236,19 @@
   </div>
 </form>
 
+<form class="card p-5 mb-5" onsubmit="event.preventDefault(); guardar(this, 'despachos');">
+  <h2 class="text-lg font-bold mb-1">Despachos · app de Gonzalo</h2>
+  <p class="text-sm text-zinc-500 mb-4">De <b>magontex-despachos</b> sale la hoja de ruta del chofer en PARKA Reparto: cada despacho (su etiqueta es
+    el chofer, ej. "Juani") con sus pedidos en orden de entrega, cliente, expreso, dirección y bultos. Con la llave cargada, la app del chofer
+    usa Despachos; sin llave, usa las Hojas de ruta de esta app.</p>
+  <div class="grid sm:grid-cols-4 gap-3">
+    <div class="sm:col-span-2"><label class="lbl">Dirección de la API</label><input class="input" name="despachos_url" value="{{ aj.despachos_url.valor }}"></div>
+    <div class="sm:col-span-2"><label class="lbl">Llave (X-API-Key) {{ '✅' if aj.despachos_api_key.cargado }}</label>
+      <input class="input" name="despachos_api_key" type="password" value="{{ aj.despachos_api_key.valor }}" autocomplete="off" placeholder="dsp_live_…"></div>
+  </div>
+  <div class="flex flex-wrap gap-2 justify-end mt-4 items-center"><button class="btn btn-primario btn-chico">Guardar</button></div>
+</form>
+
 <form class="card p-5 mb-5" onsubmit="event.preventDefault(); guardar(this, 'reparto');">
   <h2 class="text-lg font-bold mb-1">App del chofer · PARKA Reparto</h2>
   <p class="text-sm text-zinc-500 mb-4">La app del chofer es un proyecto aparte (Worker de Cloudflare <code>parka-reparto</code>) que pide las hojas de ruta a esta app.

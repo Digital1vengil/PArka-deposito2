@@ -74,6 +74,9 @@ def guardar(body: AjustesIn, u: Usuario = Depends(solo_admin), db: Session = Dep
             continue  # secreto sin cambios (se muestra enmascarado)
         ajustes.guardar(db, k, v)
         cambiados.append(k)
+    if any(k.startswith("despachos_") for k in cambiados):
+        from ..services import despachos
+        despachos.olvidar()
     if any(k.startswith("cambios_") for k in cambiados):
         from ..services import cambios
         cambios.olvidar()

@@ -122,12 +122,14 @@ def test_pedidos_rotulos(monkeypatch):
         # bultos corregidos a mano y ZPL 300 dpi
         z = c.get("/rotulos/412/rotulo.zpl?bultos=2")
         assert z.status_code == 200 and z.text.count("^XA") == 2 and "^PW1181^LL1772" in z.text
-        assert "^FDCLI-011387^FS" in z.text and "QA,http://testserver/b/412-1-2" in z.text and "QA,http://testserver/b/412-2-2" in z.text and "2 de 2" in z.text
+        assert "^FDCLI-011387^FS" in z.text and "QA,http://testserver/b/S01413-1-2" in z.text and "QA,http://testserver/b/S01413-2-2" in z.text and "2 de 2" in z.text
         assert c.get("/rotulos/999/rotulo.html").status_code == 404
         # el QR del bulto, escaneado con la cámara común, abre la ficha del cliente
         r = c.get("/b/412-2-3", follow_redirects=False)
         assert r.status_code == 303 and r.headers["location"] == "/clientes/11387"
         assert c.get("/b/412-4-3").status_code == 404
+        r = c.get("/b/S01413-2-3", follow_redirects=False)   # QR nuevo: venta-bulto-total
+        assert r.status_code == 303 and r.headers["location"] == "/clientes/11387"
         assert out["cliente"]["expreso_dir"]["calle"] == "av int. francisco rabanal 2756"
 
 

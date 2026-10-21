@@ -367,18 +367,21 @@ def remitente(db: Session | None = None) -> dict:
 
 
 # ───────────────────────── rótulos ─────────────────────────
-def codigo_bulto(picking_id: int, bulto: int, total: int) -> str:
-    """Código de un bulto en el QR del rótulo: <id del pedido en Odoo>-<bulto>-<total> (ej. 412-3-7)."""
-    return f"{int(picking_id)}-{int(bulto)}-{int(total)}"
+def codigo_bulto(venta: str, bulto: int, total: int) -> str:
+    """Código de un bulto en el QR del rótulo: <venta>-<bulto>-<total> (ej. S01104-3-9), igual que en Despachos."""
+    return f"{venta}-{int(bulto)}-{int(total)}"
 
 
-def leer_codigo_bulto(texto: str) -> tuple[int, int, int] | None:
-    """Lo que lee la cámara del QR ("https://…/b/412-3-7" o "412-3-7") → (pedido, bulto, total)."""
-    m = re.search(r"(?:^|/b/)(\d{1,9})-(\d{1,2})-(\d{1,2})\s*$", (texto or "").strip())
+def leer_codigo_bulto(texto: str) -> tuple[str | int, int, int] | None:
+    """Lo que lee la cámara del QR → (venta, bulto, total). "https://…/b/S01104-3-9" o "S01104-3-9" → ("S01104", 3, 9).
+    Los rótulos viejos traían el id del pedido de Odoo ("…/b/412-3-7") → (412, 3, 7)."""
+    m = re.search(r"(?:^|/b/)([A-Za-z]{1,4}\d{1,9}|\d{1,9})-(\d{1,2})-(\d{1,2})\s*$", (texto or "").strip())
     if not m:
         return None
-    pid, b, t = (int(x) for x in m.groups())
-    return (pid, b, t) if 1 <= b <= t else None
+    ref, b, t = m.group(1), int(m.group(2)), int(m.group(3))
+    if not 1 <= b <= t:
+        return None
+    return (int(ref) if ref.isdigit() else ref.upper(), b, t)
 
 
 def lista_rotulos(ped: dict | None, cli: dict, rem: dict, bultos: int, url_ficha: str, fecha: str = "",
@@ -390,9 +393,9 @@ def lista_rotulos(ped: dict | None, cli: dict, rem: dict, bultos: int, url_ficha
             "pedido": (ped or {}).get("origen", ""), "picking": (ped or {}).get("nombre", ""),
             "tipo": (ped or {}).get("tipo", ""), "total": bultos, "peso": (ped or {}).get("peso", 0),
             "obs": (ped or {}).get("obs", ""), "tracking": (ped or {}).get("tracking", "")}
-    pid = (ped or {}).get("id")
-    if pid and url_base:
-        return [{**base, "bulto": i, "url": f"{url_base}/b/{codigo_bulto(pid, i, bultos)}"} for i in range(1, bultos + 1)]
+    venta = (ped or {}).get("origen") or ""
+    if venta and url_base:
+        return [{**base, "bulto": i, "url": f"{url_base}/b/{codigo_bulto(venta, i, bultos)}"} for i in range(1, bultos + 1)]
     return [{**base, "bulto": i} for i in range(1, bultos + 1)]
 
 

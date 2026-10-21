@@ -208,8 +208,9 @@ def escanear(db: Session, chofer: Usuario, hoja: HojaRuta, parada_id: int, texto
     cod = rotulos.leer_codigo_bulto(texto)
     if not cod:
         return {"ok": False, "tipo": "invalido", "mensaje": "No es el QR de un rótulo de bulto"}
-    pid, nb, total = cod
-    b = db.scalar(select(BultoRuta).where(BultoRuta.hoja_id == hoja.id, BultoRuta.picking_id == pid, BultoRuta.bulto == nb))
+    ref, nb, total = cod
+    campo = BultoRuta.origen if isinstance(ref, str) else BultoRuta.picking_id
+    b = db.scalar(select(BultoRuta).where(BultoRuta.hoja_id == hoja.id, campo == ref, BultoRuta.bulto == nb))
     if not b:
         return {"ok": False, "tipo": "no_esta", "mensaje": f"El bulto {nb} de {total} no está en esta hoja de ruta"}
     info = {"cliente": b.cliente_nombre, "pedido": b.origen or b.picking_nombre, "bulto": b.bulto, "total": b.total}

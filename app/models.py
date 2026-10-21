@@ -679,3 +679,33 @@ class BultoRuta(Base):
     total: Mapped[int] = mapped_column(Integer, default=1)
     entregado_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     entregado_por: Mapped[Optional[int]] = mapped_column(ForeignKey("usuarios.id"), nullable=True)
+
+
+class EntregaDespacho(Base):
+    """Bulto entregado por el chofer en un despacho de la app Despachos (S01104 · bulto 3 de 9).
+    enviado=False hasta que se le avisa a Despachos (falta la ruta de escritura de su API)."""
+    __tablename__ = "entregas_despacho"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    despacho_id: Mapped[str] = mapped_column(String(40), index=True)
+    pedido: Mapped[str] = mapped_column(String(40), index=True)
+    cliente: Mapped[str] = mapped_column(String(160), default="")
+    bulto: Mapped[int] = mapped_column(Integer, default=1)
+    total: Mapped[int] = mapped_column(Integer, default=1)
+    chofer_id: Mapped[Optional[int]] = mapped_column(ForeignKey("usuarios.id"), nullable=True)
+    at: Mapped[datetime] = mapped_column(DateTime, default=ahora)
+    enviado: Mapped[bool] = mapped_column(Boolean, default=False)
+    error: Mapped[str] = mapped_column(String(300), default="")
+
+
+class CierreParadaDespacho(Base):
+    """El chofer terminó una parada de un despacho (entregada o incompleta), con su nota."""
+    __tablename__ = "cierres_parada_despacho"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    despacho_id: Mapped[str] = mapped_column(String(40), index=True)
+    parada: Mapped[str] = mapped_column(String(20))
+    nombre: Mapped[str] = mapped_column(String(160), default="")
+    estado: Mapped[str] = mapped_column(String(20), default="entregada")
+    nota: Mapped[str] = mapped_column(String(300), default="")
+    chofer_id: Mapped[Optional[int]] = mapped_column(ForeignKey("usuarios.id"), nullable=True)
+    at: Mapped[datetime] = mapped_column(DateTime, default=ahora)
+    enviado: Mapped[bool] = mapped_column(Boolean, default=False)

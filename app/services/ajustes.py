@@ -37,7 +37,10 @@ CLAVES = {
     "rotulo_remitente_tel": ("ROTULO_REMITENTE_TEL", "", False),
     "rotulo_arriba_mm": ("ROTULO_ARRIBA_MM", "40", False),
     # App del chofer PARKA Reparto (Worker aparte): clave compartida que manda en cada pedido a /api/reparto
-    "reparto_clave": ("REPARTO_CLAVE", "", True),   # mm en blanco arriba (la parte que se separa en la de ML)
+    "reparto_clave": ("REPARTO_CLAVE", "", True),
+    # App Despachos (Gonzalo): de ahí salen los despachos del chofer (llave "Escaneo de bultos en entrega")
+    "despachos_url": ("DESPACHOS_URL", "https://magontex-despachos.pages.dev/api", False),
+    "despachos_api_key": ("DESPACHOS_API_KEY", "", True),   # mm en blanco arriba (la parte que se separa en la de ML)
     "rotulo_desplaz_x": ("ROTULO_DESPLAZ_X", "0", False),   # mm, corrimiento del ZPL si la Zebra imprime corrido
     "rotulo_desplaz_y": ("ROTULO_DESPLAZ_Y", "0", False),
     "rotulo_oscuridad": ("ROTULO_OSCURIDAD", "0", False),   # ^MD de la Zebra (-30 a 30)

@@ -93,7 +93,7 @@ def test_hoja_de_ruta_completa(monkeypatch):
         assert esc(jup["id"], "412-1-3")["tipo"] == "ya"
         assert esc(jup["id"], "500-1-2")["tipo"] == "otra_parada"
         assert esc(jup["id"], "999-1-1")["tipo"] == "no_esta"
-        assert esc(jup["id"], "412-2-3")["ok"] is True
+        assert esc(jup["id"], "https://x/b/S01413-2-3")["ok"] is True   # QR nuevo (venta)
         # cerrar con un bulto sin escanear → incompleta
         r = c.post(f"/api/reparto/hojas/{h['id']}/paradas/{jup['id']}/cerrar", headers=A, json={"nota": "falta el 3"}).json()
         assert r == {"estado": "incompleta", "faltan": 1}

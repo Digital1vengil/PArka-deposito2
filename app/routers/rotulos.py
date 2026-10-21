@@ -85,7 +85,11 @@ def abrir_bulto(codigo: str, u: Usuario = Depends(acceso_cli), db: Session = Dep
     b = svc.leer_codigo_bulto(codigo)
     if not b:
         raise HTTPException(404, "Código de bulto inválido")
-    p = _odoo(svc.pedido, db, b[0])
+    if isinstance(b[0], str):   # venta (S01104): se busca su pedido en Odoo
+        peds = _odoo(svc.leer_pedidos, odoo.cliente(db), [["origin", "=", b[0]]] + svc.DOMINIO_BASE, 1)
+        p = peds[0] if peds else None
+    else:
+        p = _odoo(svc.pedido, db, b[0])
     if not p or not p["cliente"]:
         raise HTTPException(404, "No se encontró el pedido en Odoo")
     return RedirectResponse(f"/clientes/{p['cliente']['id']}", status_code=303)
