@@ -131,7 +131,9 @@ def enviar(dev: Devolucion) -> dict:
                    "estado": i.estado, "cantidad": i.cantidad,
                    "sector": " · ".join(x for x in (i.plataforma or "", i.venta or "") if x),
                    "plataforma": i.plataforma or "", "venta": i.venta or "",
-                   "ubicacion": i.ubicacion or ""} for i in propias],
+                   "ubicacion": i.ubicacion or "",
+                   # artículo distinto: Crédito y Reingreso son de lo que llegó; esto es solo informativo
+                   "correspondia": i.reemplaza or ""} for i in propias],
     }
     req = urllib.request.Request(config.DEVOL_URL, data=json.dumps(payload).encode("utf-8"), method="POST",
                                  headers={"Content-Type": "text/plain;charset=utf-8"})
