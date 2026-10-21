@@ -362,3 +362,19 @@ def test_distinto_en_lugar_de(monkeypatch):
         col = deposito_drive.ENC_DEV.index("Artículo de la venta (informativo)")
         assert filas[0][col] == "Campera ZETA 01234 · Negro · L · SKU 1-PARK-X" and filas[1][col] == ""
         assert filas[0][deposito_drive.ENC_DEV.index("Llegó")] == "Artículo distinto"
+
+
+def test_guardar_en_drive_actualiza_excel_del_dia(monkeypatch):
+    """"Guardar en Drive sin devolver" desde el resumen: el Excel del día se sube enseguida (no espera los 15 min)."""
+    from app.services import ruta_devolucion
+    llamadas = []
+    monkeypatch.setattr(svc, "enviar", lambda dev: {"ok": True, "id": "D-13"})
+    monkeypatch.setattr(ruta_devolucion, "actualizar_excel_dia", lambda f: llamadas.append(f))
+    with TestClient(app) as c:
+        _login(c)
+        v = c.get("/devoluciones/api/buscar?q=2000000035925").json()["modelos"][0]["variantes"]
+        v = next(x for x in v if x["codigo_barras"] == "2000000035925")
+        r = c.post("/devoluciones/api/confirmar", json={"items": [
+            {"articulo_id": v["id"], "cantidad": 1, "estado": "OPTIMO", "plataforma": "TN", "venta": "1262", "llego": "MISMO"}]})
+        assert r.json()["devolucion"]["items"][0]["llego"] == "MISMO"
+    assert len(llamadas) == 1
