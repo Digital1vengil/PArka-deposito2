@@ -15,6 +15,7 @@ from ..db import get_db, hoy
 from ..models import Articulo, Devolucion, DevolucionItem, Usuario
 from ..services import devoluciones as svc
 from ..services import ruta_devolucion as ruta_svc
+from ..services import in_odoo
 from ..services.etiquetas import pdf_etiquetas
 from ..services.etiquetas_html import html_etiquetas
 from ..services import etiquetas_rollo as rollo
@@ -243,12 +244,14 @@ class DevueltoIn(BaseModel):
     guardados: list[GuardadoIn] = []
 
 
-def _cerrar_devuelta(db: Session, d: Devolucion, u: Usuario) -> None:
+def _cerrar_devuelta(db: Session, d: Devolucion, u: Usuario) -> dict:
     d.ruta_estado = "DEVUELTO"
     db.commit()
     registrar(db, u, "devolucion", f"PD-{d.id} devuelta a los racks", "devoluciones")
     if not d.drive_ok:   # normalmente ya se subió al confirmar
         _enviar(db, d)
+    # Paso 2 confirmado en los racks: Excel para el IN de Odoo (solo OPTIMO) → Drive / Devoluciones
+    return in_odoo.generar_y_subir(db, d, u)
 
 
 @router.post("/api/{did}/guardar")
@@ -274,9 +277,8 @@ def guardar_en_rack(did: int, body: GuardadoIn, u: Usuario = Depends(acceso), db
     db.commit()
     completa = ruta_svc.completa(d)
     ruta_svc.actualizar_excel_dia(d.fecha)   # primero el Excel del día (en segundo plano), después Crédito y Reingreso
-    if completa:
-        _cerrar_devuelta(db, d, u)
-    return {"ok": True, "item_id": it.id, "guardados": ruta_svc.guardados(it), "completa": completa,
+    in_odoo_r = _cerrar_devuelta(db, d, u) if completa else None
+    return {"ok": True, "in_odoo": in_odoo_r, "item_id": it.id, "guardados": ruta_svc.guardados(it), "completa": completa,
             "aprendidas": aprendidas, "devolucion": dev_json(d)}
 
 
@@ -302,8 +304,8 @@ def devuelto(did: int, body: DevueltoIn = DevueltoIn(), u: Usuario = Depends(acc
     d.ruta_estado = "DEVUELTO"
     db.commit()
     ruta_svc.actualizar_excel_dia(d.fecha)
-    _cerrar_devuelta(db, d, u)
-    return {"ok": True, "devolucion": dev_json(d), "aprendidas": aprendidas}
+    in_odoo_r = _cerrar_devuelta(db, d, u)
+    return {"ok": True, "devolucion": dev_json(d), "aprendidas": aprendidas, "in_odoo": in_odoo_r}
 
 
 @router.post("/api/{did}/sin-devolver")
@@ -331,6 +333,29 @@ def reintentar(did: int, u: Usuario = Depends(acceso), db: Session = Depends(get
     if not d.drive_ok:
         raise HTTPException(502, d.drive_resp)
     return {"ok": True, "devolucion": dev_json(d)}
+
+
+@router.get("/{did}/in-odoo.xlsx")
+def in_odoo_xlsx(did: int, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    """Excel del IN de Odoo de la devolución (para bajarlo si no se pudo subir a Drive)."""
+    d = _dev(db, did)
+    contenido, _n, _avisos = in_odoo.excel(d)
+    if contenido is None:
+        raise HTTPException(404, "Esta devolución no tiene prendas OPTIMO guardadas en rack para el IN")
+    return Response(contenido, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{in_odoo.nombre_archivo(d)}"'})
+
+
+@router.post("/api/{did}/in-odoo")
+def in_odoo_drive(did: int, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    """Vuelve a armar y subir a Drive el Excel del IN (ej. si falló la subida al cerrar la ruta)."""
+    d = _dev(db, did)
+    if d.ruta_estado != "DEVUELTO":
+        raise HTTPException(409, "El IN se genera cuando la devolución está confirmada en los racks")
+    r = in_odoo.generar_y_subir(db, d, u)
+    if not r["ok"]:
+        raise HTTPException(502, r["error"])
+    return r
 
 
 @router.get("/api/historial")
