@@ -2821,6 +2821,7 @@ async function finalizarDespacho() {
         skus: [],
         cantidad: 0,
         allDespachado: true,
+        tn: !!p.tn,
       });
     }
     const g = groupsMap.get(key);
@@ -2831,8 +2832,13 @@ async function finalizarDespacho() {
     if (p.estado !== 'despachado') g.allDespachado = false;
     if (!g.comprador && p.comprador) g.comprador = p.comprador;
   });
-  const reportItems = Array.from(groupsMap.values()).map((g, i) => ({
+  // Flex lleva Mercado Libre y Tienda Nube (SmartPost): primero los de ML y después los de TN, con su plataforma
+  const esFlex = resolveDispatchType() === 'flex';
+  const grupos = Array.from(groupsMap.values());
+  if (esFlex) grupos.sort((a, b) => (a.tn ? 1 : 0) - (b.tn ? 1 : 0));
+  const reportItems = grupos.map((g, i) => ({
     'Paquetes Despachados': i + 1,
+    ...(esFlex ? { 'Plataforma': g.tn ? 'Tienda Nube' : 'Mercado Libre' } : {}),
     'Numero de Etiqueta':   g.trackingIds.join(', '),
     'ID de Venta':          g.ventaId,
     'Nombre de la Persona': g.comprador,

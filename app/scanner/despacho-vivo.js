@@ -471,6 +471,13 @@
     }).join('') + '</div>';
   }
   var NUEVA = '<span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:999px;background:#15803d;color:#fff;font:700 10px system-ui;vertical-align:middle">NUEVA</span>';
+  // Flex lleva envíos de Mercado Libre y órdenes de Tienda Nube (SmartPost): cada tarjeta dice de cuál es
+  function chipPlataforma(pkg) {
+    if (!state || state.dispatchType !== 'flex') return '';
+    return pkg.tn
+      ? '<span style="display:inline-block;margin-right:6px;padding:1px 7px;border-radius:999px;background:#0d9488;color:#fff;font:800 10px system-ui;vertical-align:middle">TIENDA NUBE</span>'
+      : '<span style="display:inline-block;margin-right:6px;padding:1px 7px;border-radius:999px;background:#facc15;color:#1e293b;font:800 10px system-ui;vertical-align:middle">MERCADO LIBRE</span>';
+  }
   if (typeof renderCard === 'function') {
     var cardInterno = renderCard;
     renderCard = function (pkg) {
@@ -478,6 +485,8 @@
       var sk = lineasSku(pkg);
       if (sk) h = h.replace('<p class="text-slate-400 text-xs mt-1 font-mono">', sk + '<p class="text-slate-400 text-xs mt-1 font-mono">');
       if (pkg.nueva && pkg.estado !== 'despachado') h = h.replace(/(<p class="text-slate-800 font-semibold text-sm truncate">[^<]*)/, '$1' + NUEVA);
+      var chip = chipPlataforma(pkg);
+      if (chip) h = h.replace('<p class="text-slate-800 font-semibold text-sm truncate">', '<p class="text-slate-800 font-semibold text-sm truncate">' + chip);
       return h;
     };
     window.renderCard = renderCard;
@@ -519,6 +528,11 @@
                : '📡 En vivo · ' + esc(ddmm(state.fecha)) + ' · las ventas nuevas se suman solas cada 2 min' +
                  (horaRevision ? ' (última revisión ' + esc(horaRevision) + ')' : '') +
                  ' · <a href="#" style="font-weight:700;text-decoration:underline" onclick="event.preventDefault(); pkBuscarNuevas()">⟳ Buscar ahora</a>') + '</p>';
+    if (state.dispatchType === 'flex' && state.packages.some(function (x) { return x.tn; })) {
+      var pend = state.packages.filter(function (x) { return x.estado !== 'despachado'; });
+      var nTn = pend.filter(function (x) { return x.tn; }).length;
+      html += '<p class="text-[11px] text-slate-600 mt-1">Pendientes: <b>' + (pend.length - nTn) + '</b> de Mercado Libre · <b>' + nTn + '</b> de Tienda Nube</p>';
+    }
     if (canc.length) html += desplegableCanceladas(canc, canc.some(function (x) { return x.yaEscaneada; }));
     html += '</div>';
     lp.insertAdjacentHTML('afterbegin', html);

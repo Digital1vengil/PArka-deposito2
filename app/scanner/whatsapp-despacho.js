@@ -32,7 +32,8 @@
     var total = (d.total || 0) + manual;
     var l = ['*PARKA · Despacho del día*', fechaTexto(d.fecha), '',
       'Colecta: ' + (t.colecta || 0),
-      'Flex: ' + (t.flex || 0),
+      'Flex Mercado Libre: ' + (t.flex || 0),
+      'Flex Tienda Nube: ' + (t.flex_tn || 0),
       'Tienda Nube: ' + (t.tiendanube || 0)];
     if (t.cambios) l.push('Cambios: ' + t.cambios);
     if (manual) l.push('Envíos manuales (SmartPost): ' + manual);
