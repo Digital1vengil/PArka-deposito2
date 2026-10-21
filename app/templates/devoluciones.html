@@ -819,6 +819,22 @@ function nuevaDevolucion() {
   if (camScanner) pararCam();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
+// IN de Odoo (paso 2): Excel con las prendas OPTIMO guardadas en rack → Drive / Devoluciones
+function avisoIN(r, id) {
+  if (!r) return;
+  setTimeout(() => {
+    if (!r.ok) toast(`IN de Odoo PD-${id}: ${r.error || 'no se pudo generar'} — bajalo o reintentalo desde "Últimas devoluciones"`, 'error', 10000);
+    else if (!r.nombre) toast(`PD-${id}: ${r.motivo || 'sin prendas OPTIMO para el IN'}`, 'info', 6000);
+    else toast(`IN de Odoo en Drive: ${r.nombre} (${r.filas} prenda${r.filas === 1 ? '' : 's'})`, 'ok', 7000);
+    (r.avisos || []).forEach((a, k) => setTimeout(() => toast(a, 'warn', 10000), 900 * (k + 1)));
+  }, 1500);
+}
+async function subirIN(id, b) {
+  b.disabled = true;
+  try { const r = await api(`/devoluciones/api/${id}/in-odoo`, { method: 'POST' }); avisoIN(r, id); }
+  catch (e) { toast(e.message, 'error', 8000); }
+  b.disabled = false;
+}
 async function reintentar(id, b) {
   b.disabled = true;
   try { const r = await api(`/devoluciones/api/${id}/reintentar`, { method: 'POST' }); document.getElementById('resultado').innerHTML = tarjetaResultado(r.devolucion); toast('Guardada en Drive'); historial(); }
@@ -833,7 +849,7 @@ async function historial() {
       <span class="flex-1 min-w-[200px] truncate">${(x.ventas || []).length ? `<b>${x.ventas.map(esc).join(', ')}</b> · ` : ''}${x.items.map(i => `${i.plataforma ? esc(i.plataforma) + ' ' : ''}${esc(i.articulo)} ${esc(i.color)} ${esc(i.talle)} x${i.cantidad}`).join(' · ')}</span>
       ${x.ruta_estado === 'PENDIENTE' ? `${x.drive_ok ? '<span class="chip chip-hecha">☁ Drive</span>' : `<button class="btn btn-gris btn-chico" onclick="reintentar(${x.id}, this)">⚠ Reintentar Drive</button>`}<button class="btn btn-amarillo btn-chico" onclick="seguirRuta(${x.id}, this)">🗺 Seguir la ruta</button>`
         : x.drive_ok ? '<span class="chip chip-hecha">☁ Drive</span>' : `<button class="btn btn-gris btn-chico" onclick="reintentar(${x.id}, this)">⚠ Reintentar Drive</button>`}
-      ${x.ruta_estado === 'DEVUELTO' ? '<span class="chip chip-hecha">✔ En racks</span>' : x.ruta_estado === 'SIN_DEVOLVER' ? '<span class="chip chip-pendiente">Sin devolver</span>' : ''}
+      ${x.ruta_estado === 'DEVUELTO' ? `<span class="chip chip-hecha">✔ En racks</span><a class="btn btn-gris btn-chico" href="/devoluciones/${x.id}/in-odoo.xlsx">⬇ IN Odoo</a><button class="btn btn-gris btn-chico" onclick="subirIN(${x.id}, this)">☁ IN a Drive</button>` : x.ruta_estado === 'SIN_DEVOLVER' ? '<span class="chip chip-pendiente">Sin devolver</span>' : ''}
       <button class="btn btn-primario btn-chico" onclick="marcarVisto(${x.id}); imprimirEtiquetas('devoluciones', ${x.id}, { btn: this })">🖨 Imprimir etiquetas</button>
     </div>`).join('') : '<p class="text-zinc-500">Todavía no hay devoluciones.</p>';
 }
@@ -1052,6 +1068,7 @@ async function escanearRuta(raw) {
       pintarRuta();
       _estadoRuta(true, '¡Devolución completa!', x.devolucion.drive_ok ? 'Todas las prendas en su rack · guardada en Drive' : 'Todas las prendas en su rack · Drive falló: reintentalo desde "Últimas devoluciones"');
       toast(x.devolucion.drive_ok ? `PD-${r.did} devuelta a los racks y guardada en Drive` : `PD-${r.did} devuelta, pero Drive falló: reintentalo desde "Últimas devoluciones"`, x.devolucion.drive_ok ? 'ok' : 'warn', 8000);
+      avisoIN(x.in_odoo, r.did);
       setTimeout(() => { if (rutaAct && rutaAct.did === r.did) cerrarRuta(); }, 2500);
       return;
     }
@@ -1080,6 +1097,7 @@ async function marcarDevuelto() {
   b.disabled = true; b.textContent = 'Guardando en Drive…';
   try {
     const x = await api(`/devoluciones/api/${r.did}/devuelto`, { json: { guardados: _guardados() } });
+    avisoIN(x.in_odoo, r.did);
     try { localStorage.removeItem(_clave(r.did)); } catch {}
     toast(x.devolucion.drive_ok ? `PD-${r.did} devuelta a los racks y guardada en Drive` : `PD-${r.did} devuelta, pero Drive falló: reintentalo desde "Últimas devoluciones"`,
       x.devolucion.drive_ok ? 'ok' : 'warn', 8000);
