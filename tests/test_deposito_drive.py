@@ -80,7 +80,8 @@ def test_excels_y_subida(monkeypatch):
     assert ["ML", 2, 1, 3] in dev["Resumen"] and len(dev["Detalle"]) == 3
     # después de "Plataforma" (D) va el nº de venta (ML) / orden (TN) en la columna E
     assert dev["Detalle"][0][3:5] == ["Plataforma", "Nº venta / orden"] and dev["Detalle"][1][3:5] == ["ML", "2000012345678901"]
-    assert dev["Detalle"][0][-3] == "Llegó" and dev["Detalle"][1][-3] == "Mismo artículo"
+    enc = dev["Detalle"][0]
+    assert enc[-4:-2] == ["Llegó", "Artículo de la venta (informativo)"] and dev["Detalle"][1][enc.index("Llegó")] == "Mismo artículo"
     assert dev["Detalle"][0][-2:] == ["Ubicación", "Devuelto al rack"]
 
     con = _hojas(archivos["conteos"])
