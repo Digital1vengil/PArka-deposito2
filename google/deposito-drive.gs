@@ -1,5 +1,5 @@
 /**
- * PARKA Depósito — Backend Drive (Apps Script)  ·  versión 2026.10.16-2
+ * PARKA Depósito — Backend Drive (Apps Script)  ·  versión 2026.10.21-1
  * (antes "Recolección Ecommerce — Backend Drive": este archivo lo reemplaza completo)
  *
  * Solo se ocupa de Drive. Toda la lógica y los datos están en PARKA Depósito (Python), que arma los Excel.
@@ -19,7 +19,7 @@
  * Después: Implementar → Administrar implementaciones → editar → Versión nueva (la URL /exec no cambia).
  */
 
-var VERSION = '2026.10.16-2';
+var VERSION = '2026.10.21-1';
 
 var CONFIG = {
   NOMBRE_DEPOSITO: 'DEPOSITO PARKA',
@@ -275,6 +275,22 @@ function guardarDeposito_(body) {
   });
 }
 
+/**
+ * DEPOSITO PARKA: guarda UN archivo con nombre propio en la carpeta de una sección (reemplaza el del mismo nombre).
+ * body.seccion = 'devoluciones' | …, body.nombre = 'IN_DEV_2026-10-21_PD-14.xlsx', body.base64, body.mime?
+ * Lo usa el IN de devoluciones para Odoo (se arma al confirmar la devolución en los racks).
+ * Devuelve {seccion, id, nombre, url}.
+ */
+function guardarDepositoArchivo_(body) {
+  var nombre = String(body.nombre || '').replace(/[\\/:*?"<>|]/g, '_').trim();
+  if (!/\.xlsx$/i.test(nombre)) throw new Error('Nombre de archivo inválido: ' + body.nombre);
+  return conLock_(function () {
+    var r = reemplazarArchivo_(carpetaSeccion_(body.seccion), nombre, body.base64, body.mime);
+    r.seccion = body.seccion;
+    return r;
+  });
+}
+
 /** DEPOSITO PARKA: carpetas y (si se pide fecha) los archivos de ese día. */
 function estadoDeposito_(fecha) {
   var dep = carpetaDeposito_(), out = { id: dep.getId(), url: dep.getUrl(), secciones: {} };
@@ -365,6 +381,8 @@ function doPost(e) {
         return guardarArchivo_(body.fecha, body.nombre, body.base64, body.mime);
       case 'guardarDeposito':
         return guardarDeposito_(body);
+      case 'guardarDepositoArchivo':
+        return guardarDepositoArchivo_(body);
       case 'enviarMail':
         return enviarMail_(body);
       default:
