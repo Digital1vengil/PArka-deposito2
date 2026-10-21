@@ -83,6 +83,9 @@ def _venta_ok(v: str) -> str:
     return v[:40] if re.fullmatch(r"[0-9A-Za-z\-]{3,40}", v or "") else ""
 
 
+NO_ES_NUESTRO = "No es nuestro artículo"
+
+
 class ItemIn(BaseModel):
     articulo_id: int | None = None   # None solo para un artículo que no vendemos (estado AJENO)
     descripcion: str = ""            # qué llegó, si es un artículo que no vendemos
@@ -135,10 +138,8 @@ def confirmar(body: ConfirmarIn, u: Usuario = Depends(acceso), db: Session = Dep
         if it.plataforma not in ("ML", "TN"):
             raise HTTPException(400, "Cada prenda tiene que tener la plataforma: TN o ML")
         it.estado = (it.estado or "").strip().upper()
-        if it.estado == "AJENO":
-            it.descripcion = " ".join((it.descripcion or "").split())[:120]
-            if not it.descripcion:
-                raise HTTPException(400, "Escribí qué artículo llegó (no lo vendemos)")
+        if it.estado == "AJENO":   # no es nuestro artículo: solo nº de venta + el artículo que correspondía (informativo)
+            it.descripcion = " ".join((it.descripcion or "").split())[:120] or NO_ES_NUESTRO
             it.articulo_id, it.llego = None, "AJENO"
         elif it.estado not in ("OPTIMO", "FALLA"):
             raise HTTPException(400, "Cada prenda tiene que tener el estado: Óptimo o Falla")
