@@ -378,3 +378,25 @@ def test_guardar_en_drive_actualiza_excel_del_dia(monkeypatch):
             {"articulo_id": v["id"], "cantidad": 1, "estado": "OPTIMO", "plataforma": "TN", "venta": "1262", "llego": "MISMO"}]})
         assert r.json()["devolucion"]["items"][0]["llego"] == "MISMO"
     assert len(llamadas) == 1
+
+
+def test_sku_ml_equivale_a_odoo(monkeypatch):
+    """El SKU de ML / TN (W-2003-BLCK-M) encuentra el artículo de Odoo (1-CAMP-W-02003-BLCK-M-PARK),
+    prefiriendo Parka / Puffers sobre No Brand cuando los dos tienen la misma clave."""
+    from app.services.catalogo import clave_sku
+    from app.services import tiendanube as tn
+    assert clave_sku("1-CAMP-W-02055-BEIG-L-PARK") == clave_sku("W-2055-BEIG-L") == "W-2055-BEIG-L"
+    assert clave_sku("W-02055-BEIG-L") == clave_sku("w-2055-beig-l-park") == "W-2055-BEIG-L"
+    assert clave_sku("4-GORR-M-04001-BLCK-PARK") == "M-4001-BLCK"
+    with TestClient(app) as c:
+        _login(c)
+        r = c.get("/devoluciones/api/codigo?c=W-2003-BLCK-M").json()
+        assert r["ok"] and r["variante"]["sku"] == "1-CAMP-W-02003-BLCK-M-PARK" and r["variante"]["marca"] == "Parka"
+        no = c.get("/devoluciones/api/codigo?c=W-9999-BLCK-M").json()
+        assert not no["ok"] and "no está en el catálogo" in no["motivo"]
+        orden = {"id": 6, "number": 1265, "status": "closed", "products": [
+            {"name": "Campera ABBA (Negro, M)", "sku": "W-2003-BLCK-M", "quantity": 1}]}
+        monkeypatch.setattr(tn, "configurado", lambda db=None: True)
+        monkeypatch.setattr(tn, "get", lambda path, **p: [orden])
+        it = c.get("/devoluciones/api/venta", params={"plataforma": "TN", "c": "1265"}).json()["items"][0]
+        assert it["sku"] == "W-2003-BLCK-M" and it["variante"]["sku"] == "1-CAMP-W-02003-BLCK-M-PARK" and it["motivo"] == ""
