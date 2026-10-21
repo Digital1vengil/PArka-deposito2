@@ -532,7 +532,7 @@ async function _escanear(cod) {
   const k = { id: v.id, estado: estadoScan, plataforma: venta.plataforma, venta: venta.numero };
   const ya = items.find(x => clave(x) === clave(k));
   if (ya) ya.cantidad += 1;
-  else items.push({ id: v.id, articulo: v.articulo, color: v.color, talle: v.talle, marca: v.marca, sku: v.sku, cantidad: 1, estado: estadoScan, plataforma: venta.plataforma, venta: venta.numero, llego: enVenta(v) ? 'MISMO' : 'DISTINTO' });
+  else items.push({ id: v.id, articulo: v.articulo, color: v.color, talle: v.talle, marca: v.marca, sku: v.sku, cantidad: 1, estado: estadoScan, plataforma: venta.plataforma, venta: venta.numero, llego: 'MISMO' });   // DISTINTO solo si se eligió "Es un artículo distinto"
   ultimoScan = k;
   beepOk();
   pintarLista(clave(k));
@@ -680,7 +680,7 @@ function agregar() {
     const ya = items.find(x => clave(x) === clave(k));
     if (ya) ya.cantidad += n;
     else items.push({ ...k, articulo: modelo.articulo, color: v.color, talle: v.talle, marca: v.marca, sku: v.sku, cantidad: n,
-                      llego: dd ? 'DISTINTO' : enVenta({ id, sku: v.sku, articulo: modelo.articulo }) ? 'MISMO' : 'DISTINTO' });
+                      llego: dd ? 'DISTINTO' : 'MISMO' });
     ultima = clave(k); total += n;
   });
   toast(`Agregado: ${modelo.articulo} ${color} · ${total} prenda${total === 1 ? '' : 's'} · ${venta.plataforma} #${venta.numero} · ${estado === 'FALLA' ? 'Falla' : 'Óptimo'}`);
