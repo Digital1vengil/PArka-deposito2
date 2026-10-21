@@ -73,7 +73,7 @@ def test_generar_y_subir(monkeypatch):
     monkeypatch.setattr("app.actividad.registrar", lambda *a, **k: None)
     r = in_odoo.generar_y_subir(None, _dev())
     assert r["ok"] and r["filas"] == 4 and r["url"] == "https://drive/x"
-    assert subidos and subidos[0][:2] == ("devoluciones", "IN_DEV_2026-10-21_PD-15.xlsx")
+    assert subidos and subidos[0][:2] == ("credito_odoo", "IN_DEV_2026-10-21_PD-15.xlsx")
 
     def falla(*a):
         raise re_drive.REDriveError("Acción desconocida: guardarDepositoArchivo")
@@ -112,7 +112,7 @@ def test_endpoints_in_odoo(monkeypatch):
             r = c.post(f"/devoluciones/api/{did}/guardar", json={"item_id": item_id, "codigo": "A01", "cantidad": 1})
         x = r.json()
         assert x["completa"] and x["in_odoo"]["ok"] and x["in_odoo"]["filas"] == 1
-        assert subidos[-1][0] == "devoluciones" and subidos[-1][1].endswith(f"_PD-{did}.xlsx")
+        assert subidos[-1][0] == "credito_odoo" and subidos[-1][1].endswith(f"_PD-{did}.xlsx")
         xl = c.get(f"/devoluciones/{did}/in-odoo.xlsx")
         assert xl.status_code == 200 and f"PD-{did}.xlsx" in xl.headers["content-disposition"]
         assert c.post(f"/devoluciones/api/{did}/in-odoo").json()["ok"]
