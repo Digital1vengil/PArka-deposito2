@@ -226,6 +226,7 @@ class DevolucionItem(Base):
     plataforma: Mapped[str] = mapped_column(String(4), default="")  # ML | TN (por prenda)
     venta: Mapped[str] = mapped_column(String(40), default="")  # nº de venta (ML) o nº de orden (TN)
     llego: Mapped[str] = mapped_column(String(10), default="")  # MISMO | DISTINTO | AJENO (qué llegó vs la venta)
+    reemplaza: Mapped[str] = mapped_column(String(200), default="")  # si llegó un artículo distinto: en lugar de qué prenda de la venta
     ubicacion: Mapped[str] = mapped_column(String(80), default="")  # rack donde se guardó (ruta de devolución)
     guardados: Mapped[str] = mapped_column(Text, default="")  # JSON {rack: unidades} confirmadas en la ruta
     devuelto_cant: Mapped[int] = mapped_column(Integer, default=0)  # unidades ya confirmadas en su rack
