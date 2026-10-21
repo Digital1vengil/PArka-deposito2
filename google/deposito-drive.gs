@@ -1,5 +1,5 @@
 /**
- * PARKA Depósito — Backend Drive (Apps Script)  ·  versión 2026.10.21-1
+ * PARKA Depósito — Backend Drive (Apps Script)  ·  versión 2026.10.21-2
  * (antes "Recolección Ecommerce — Backend Drive": este archivo lo reemplaza completo)
  *
  * Solo se ocupa de Drive. Toda la lógica y los datos están en PARKA Depósito (Python), que arma los Excel.
@@ -19,7 +19,7 @@
  * Después: Implementar → Administrar implementaciones → editar → Versión nueva (la URL /exec no cambia).
  */
 
-var VERSION = '2026.10.21-1';
+var VERSION = '2026.10.21-2';
 
 var CONFIG = {
   NOMBRE_DEPOSITO: 'DEPOSITO PARKA',
@@ -37,6 +37,11 @@ var SECCIONES = {
   cierre:       'Cierre'
 };
 
+/** Carpetas extra de DEPOSITO PARKA (archivos con nombre propio, no un Excel por día). */
+var CARPETAS_EXTRA = {
+  credito_odoo: 'Plantilla credito odoo'   // IN de devoluciones para importar en Odoo (IN_DEV_AAAA-MM-DD_PD-xx.xlsx)
+};
+
 var MIME_SHEET = 'application/vnd.google-apps.spreadsheet';
 var MIME_XLSX  = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
@@ -49,6 +54,7 @@ function configurar() {
   }
   var dep = carpetaDeposito_();
   Object.keys(SECCIONES).forEach(function (k) { carpetaSeccion_(k); });
+  Object.keys(CARPETAS_EXTRA).forEach(function (k) { carpetaExtraOSeccion_(k); });
   var raiz = carpetaRaiz_();
   instalarDisparador();
   var hoy = crearCarpetaHoy();
@@ -114,6 +120,14 @@ function carpetaSeccion_(seccion) {
   var nombre = SECCIONES[seccion];
   if (!nombre) throw new Error('Sección inválida: ' + seccion + ' (usar ' + Object.keys(SECCIONES).join(', ') + ')');
   return carpetaGuardada_('SECCION_' + seccion.toUpperCase() + '_ID', nombre, carpetaDeposito_());
+}
+
+/** Carpeta extra (CARPETAS_EXTRA) o subcarpeta de sección de DEPOSITO PARKA. */
+function carpetaExtraOSeccion_(clave) {
+  if (CARPETAS_EXTRA[clave]) {
+    return carpetaGuardada_('CARPETA_' + clave.toUpperCase() + '_ID', CARPETAS_EXTRA[clave], carpetaDeposito_());
+  }
+  return carpetaSeccion_(clave);
 }
 
 /** Carpeta "Recolección Ecommerce". Las instalaciones nuevas la crean adentro de DEPOSITO PARKA. */
@@ -285,7 +299,7 @@ function guardarDepositoArchivo_(body) {
   var nombre = String(body.nombre || '').replace(/[\\/:*?"<>|]/g, '_').trim();
   if (!/\.xlsx$/i.test(nombre)) throw new Error('Nombre de archivo inválido: ' + body.nombre);
   return conLock_(function () {
-    var r = reemplazarArchivo_(carpetaSeccion_(body.seccion), nombre, body.base64, body.mime);
+    var r = reemplazarArchivo_(carpetaExtraOSeccion_(body.seccion), nombre, body.base64, body.mime);
     r.seccion = body.seccion;
     return r;
   });
