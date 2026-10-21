@@ -87,6 +87,7 @@ class ItemIn(BaseModel):
     articulo_id: int | None = None   # None solo para un artículo que no vendemos (estado AJENO)
     descripcion: str = ""            # qué llegó, si es un artículo que no vendemos
     llego: str = ""                  # MISMO | DISTINTO | AJENO
+    reemplaza: str = ""              # artículo distinto / no lo vendemos: en lugar de qué prenda de la venta llegó
     cantidad: int = 1
     estado: str = ""       # OPTIMO | FALLA (obligatorio, por prenda; sin valor por defecto)
     plataforma: str = ""   # ML | TN (obligatorio, por prenda)
@@ -108,7 +109,7 @@ def dev_json(d: Devolucion) -> dict:
             "usuario": d.usuario.nombre if d.usuario else "", "usuario_id": d.usuario_id, "drive_ok": d.drive_ok,
             "drive_error": "" if d.drive_ok else d.drive_resp, "drive": resp, "ruta_estado": d.ruta_estado or "",
             "items": [{"articulo": i.articulo, "color": i.color, "talle": i.talle, "cantidad": i.cantidad,
-                       "estado": i.estado, "plataforma": i.plataforma or "", "venta": i.venta or "", "llego": i.llego or "", "sku": i.sku,
+                       "estado": i.estado, "plataforma": i.plataforma or "", "venta": i.venta or "", "llego": i.llego or "", "reemplaza": i.reemplaza or "", "sku": i.sku,
                        "ubicacion": i.ubicacion or "", "devuelto_cant": i.devuelto_cant or 0}
                       for i in d.items],
             "ventas": list(dict.fromkeys(f"{i.plataforma} {i.venta}" for i in d.items if i.venta))}
@@ -145,6 +146,7 @@ def confirmar(body: ConfirmarIn, u: Usuario = Depends(acceso), db: Session = Dep
             raise HTTPException(400, "Falta el artículo de una prenda")
         else:
             it.llego = (it.llego or "").strip().upper() if (it.llego or "").strip().upper() in ("MISMO", "DISTINTO") else ""
+        it.reemplaza = " ".join((it.reemplaza or "").split())[:200] if it.llego in ("DISTINTO", "AJENO") else ""
         it.venta = _venta_ok(it.venta)
         if not it.venta:
             raise HTTPException(400, "Cada prenda tiene que tener el número de venta (Mercado Libre) "
@@ -156,7 +158,7 @@ def confirmar(body: ConfirmarIn, u: Usuario = Depends(acceso), db: Session = Dep
     for it in items:
         if it.estado == "AJENO":
             d.items.append(DevolucionItem(articulo_id=None, articulo=it.descripcion, color="", talle="", estado="AJENO",
-                                          plataforma=it.plataforma, venta=it.venta, llego="AJENO",
+                                          plataforma=it.plataforma, venta=it.venta, llego="AJENO", reemplaza=it.reemplaza,
                                           cantidad=min(it.cantidad, 999)))
             continue
         a = db.get(Articulo, it.articulo_id)
@@ -168,7 +170,7 @@ def confirmar(body: ConfirmarIn, u: Usuario = Depends(acceso), db: Session = Dep
         d.items.append(DevolucionItem(articulo_id=a.id, codigo_barras=a.codigo_barras, sku=a.sku,
                                       articulo=a.articulo, color=color, talle=talle,
                                       estado=it.estado,
-                                      plataforma=it.plataforma, venta=it.venta, llego=it.llego,
+                                      plataforma=it.plataforma, venta=it.venta, llego=it.llego, reemplaza=it.reemplaza,
                                       cantidad=min(it.cantidad, 999)))
     d.total = sum(i.cantidad for i in d.items)
     db.commit()
