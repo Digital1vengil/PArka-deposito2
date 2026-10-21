@@ -36,10 +36,11 @@ def buscar(q: str = "", u: Usuario = Depends(acceso), db: Session = Depends(get_
 
 def _variante(db: Session, cod: str) -> dict:
     """Código de barras o SKU → variante lista para sumar a la devolución, o {ok: False, motivo}."""
-    from ..services.catalogo import por_codigo as buscar_codigo
-    a = buscar_codigo(db, cod)
+    from ..services.catalogo import por_sku_plataforma
+    # Código de barras, SKU de Odoo o SKU de ML / TN (W-2055-BEIG-L ↔ 1-CAMP-W-02055-BEIG-L-PARK)
+    a = por_sku_plataforma(db, cod)
     if a is None:
-        return {"ok": False, "motivo": f"El código {cod} no está en el catálogo"}
+        return {"ok": False, "motivo": f"El código {cod} no está en el catálogo (ni con su equivalente de Odoo)"}
     if a.inactivo:
         return {"ok": False, "motivo": f"{a.nombre}: está archivado en Odoo"}
     if not a.codigo_barras:
