@@ -307,10 +307,10 @@ def test_mismo_distinto_y_ajeno(monkeypatch):
         r = c.get("/devoluciones/api/venta", params={"plataforma": "TN", "c": "1264"}).json()
         assert r["items"][0]["variante"]["id"] == v["id"] and r["items"][0]["motivo"] == ""
         assert r["items"][1]["variante"] is None and "SKU" in r["items"][1]["motivo"]
-        # artículo que no vendemos: hace falta la descripción
-        mal = c.post("/devoluciones/api/confirmar", json={"items": [
-            {"cantidad": 1, "estado": "AJENO", "plataforma": "TN", "venta": "1264"}]})
-        assert mal.status_code == 400
+        # no es nuestro artículo: alcanza con el nº de venta (y el artículo que correspondía, informativo)
+        aj = c.post("/devoluciones/api/confirmar", json={"items": [
+            {"cantidad": 1, "estado": "AJENO", "plataforma": "TN", "venta": "1264", "reemplaza": "Campera ABBA · M"}]}).json()["devolucion"]
+        assert [(i["articulo"], i["llego"], i["reemplaza"]) for i in aj["items"]] == [("No es nuestro artículo", "AJENO", "Campera ABBA · M")]
         d = c.post("/devoluciones/api/confirmar", json={"items": [
             {"articulo_id": v["id"], "cantidad": 1, "estado": "FALLA", "plataforma": "TN", "venta": "1264", "llego": "MISMO"},
             {"cantidad": 2, "estado": "AJENO", "descripcion": "Buzo gris  otra marca", "plataforma": "TN", "venta": "1264"}]}).json()["devolucion"]
@@ -338,3 +338,27 @@ def test_mismo_distinto_y_ajeno(monkeypatch):
     solo = Devolucion(id=10, creado_at=datetime(2026, 10, 19, 12), plataforma="TN")
     solo.items = [DevolucionItem(articulo="Ajeno", estado="AJENO", cantidad=1, plataforma="TN", venta="1")]
     assert svc.enviar(solo)["ok"]
+
+
+def test_distinto_en_lugar_de(monkeypatch):
+    """Artículo distinto: se guarda lo que llegó (va al rack) y en lugar de qué prenda de la venta; sale en el Excel."""
+    from app.db import SessionLocal
+    from app.models import Devolucion
+    from app.services import deposito_drive
+    monkeypatch.setattr(svc, "enviar", lambda dev: {"ok": True, "id": "D-12"})
+    with TestClient(app) as c:
+        _login(c)
+        v = c.get("/devoluciones/api/buscar?q=2000000035925").json()["modelos"][0]["variantes"]
+        v = next(x for x in v if x["codigo_barras"] == "2000000035925")
+        d = c.post("/devoluciones/api/confirmar", json={"items": [
+            {"articulo_id": v["id"], "cantidad": 1, "estado": "OPTIMO", "plataforma": "ML", "venta": "2000012345678901",
+             "llego": "DISTINTO", "reemplaza": "Campera  ZETA 01234 · Negro · L · SKU 1-PARK-X"},
+            {"articulo_id": v["id"], "cantidad": 1, "estado": "FALLA", "plataforma": "ML", "venta": "2000012345678901",
+             "llego": "MISMO", "reemplaza": "no se guarda si es el mismo"}]}).json()["devolucion"]
+        assert [(i["llego"], i["reemplaza"]) for i in d["items"]] == [
+            ("DISTINTO", "Campera ZETA 01234 · Negro · L · SKU 1-PARK-X"), ("MISMO", "")]
+    with SessionLocal() as db:
+        filas = deposito_drive._filas_dev([db.get(Devolucion, d["id"])])
+        col = deposito_drive.ENC_DEV.index("Artículo de la venta (informativo)")
+        assert filas[0][col] == "Campera ZETA 01234 · Negro · L · SKU 1-PARK-X" and filas[1][col] == ""
+        assert filas[0][deposito_drive.ENC_DEV.index("Llegó")] == "Artículo distinto"
