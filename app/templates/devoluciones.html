@@ -161,7 +161,7 @@ function _pintarPlat(sel, p, extra) {
   document.querySelectorAll(sel).forEach(b => { b.className = `btn ${extra} ${sel.slice(1)} ${clsPlat(b.dataset.p, b.dataset.p === p)}`; });
 }
 function _marcarFalta(id, on) { const b = document.getElementById(id); if (!b) return; b.style.outline = on ? '2px solid #dc2626' : ''; b.style.outlineOffset = on ? '3px' : ''; }
-const clave = x => (x.id ?? ('x:' + x.articulo)) + '|' + x.estado + '|' + x.plataforma + '|' + (x.venta || '');
+const clave = x => (x.id ?? ('x:' + x.articulo)) + '|' + x.estado + '|' + x.plataforma + '|' + (x.venta || '') + '|' + (x.reemplaza || '');
 const nomVenta = p => p === 'TN' ? 'orden' : 'venta';
 
 // ── Venta / orden ──
@@ -224,7 +224,7 @@ async function buscarVenta(raw) {
   catch (e) { r = { ok: false, motivo: e.message, sin_conexion: true, codigo: v.replace(/^#/, '') }; }
   _buscandoVenta = false;
   if (r.ok) {
-    venta = { plataforma: r.plataforma, numero: r.numero, verificada: true, info: r }; llegoModo = ''; ajenoAbierto = false;
+    venta = { plataforma: r.plataforma, numero: r.numero, verificada: true, info: r }; llegoModo = ''; ajenoAbierto = false; resetDistinto();
     inp.value = r.numero; beepOk();
     if (camModo === 'etiqueta' && camScanner) { camModo = 'prenda'; _textoCam(); toast('Venta encontrada: ahora escaneá las prendas con la cámara', 'ok', 4000); }
     pintarVenta();
@@ -240,6 +240,8 @@ function usarSinVerificar(c) {
   document.getElementById('venta-num').value = c; pintarVenta();
 }
 function cambiarVenta() {
+  if (faltaDistinto()) { avisarFaltaDistinto(); return; }
+  resetDistinto();
   if (camScanner) { camModo = 'etiqueta'; _textoCam(); }
   venta = null; llegoModo = ''; ajenoAbierto = false; const inp = document.getElementById('venta-num');
   inp.value = ''; pintarVenta(); if (canal) setCanal(canal);
@@ -282,24 +284,17 @@ function pintarVenta(err) {
         acc = `<div class="text-xs mt-1" style="color:#b45309">⚠ ${esc(x.motivo || 'No está en el catálogo')} ·
           <button class="underline font-semibold" onclick="buscarAMano(${k})">buscarlo a mano</button></div>`;
       }
+    } else if (llegoModo === 'DISTINTO') {
+      const sel = dReemp === k;
+      acc = `<button class="btn btn-chico mt-1 ${sel ? 'btn-primario' : 'btn-gris'}" onclick="elegirReemp(${k})">${sel ? '✔ Llegó en lugar de esta' : 'Llegó en lugar de esta'}</button>`;
     }
     return `<div class="py-1.5 border-b border-zinc-200 last:border-0">
       <div class="flex justify-between gap-2"><span class="min-w-0"><span class="block truncate">${esc(x.titulo)}${x.color || x.talle ? ` <span class="text-zinc-500">· ${esc([x.color, x.talle].filter(Boolean).join(' · '))}</span>` : ''}</span>
         <span class="block text-xs font-mono text-zinc-600 break-all">SKU: ${x.sku ? esc(x.sku) : '<span class="font-sans text-zinc-400">sin SKU</span>'}</span></span><b>x${x.cantidad}</b></div>${acc}</div>`;
   };
   const prendas = hay ? `<div class="mt-2 text-sm flex flex-col">${i.items.map(prenda).join('')}</div>` : '';
-  const distinto = llegoModo === 'DISTINTO' || (!hay && llegoModo) ? `<div class="mt-3 text-sm">
-      <div class="mb-2">Escaneá o buscá abajo el artículo que llegó (Óptimo o Falla en el escáner o al buscarlo).</div>
-      ${ajenoAbierto ? `<div class="rounded-lg p-3 bg-white border border-zinc-300">
-          <label class="lbl" for="ajeno-desc">Artículo que no vendemos — ¿qué llegó?</label>
-          <input id="ajeno-desc" class="input mb-2" placeholder="Ej: buzo gris de otra marca" autocomplete="off">
-          <div class="flex flex-wrap items-center gap-2">
-            <label class="text-sm">Cantidad</label>
-            <input id="ajeno-cant" type="number" min="1" max="999" value="1" class="input !w-20">
-            <button class="btn btn-primario" onclick="agregarAjeno()">+ Agregar</button>
-            <button class="btn btn-gris btn-chico" onclick="ajenoAbierto = false; pintarVenta()">Cancelar</button>
-          </div></div>`
-        : `<button class="btn btn-gris btn-chico" onclick="abrirAjeno()">🚫 Es un artículo que no vendemos</button>`}</div>` : '';
+  const distinto = llegoModo === 'DISTINTO' ? panelDistinto(i, hay)
+    : !hay && llegoModo ? '<div class="mt-3 text-sm">Escaneá o buscá abajo cada prenda que llegó (Óptimo o Falla en el escáner o al buscarla).</div>' : '';
   const ok = venta.verificada;
   el.innerHTML = `<div class="rounded-xl p-3" style="background:${ok ? '#dcfce7' : '#fef3c7'};border:2px solid ${ok ? '#15803d' : '#d97706'}">
     <div class="flex flex-wrap items-center gap-2">
@@ -312,7 +307,125 @@ function pintarVenta(err) {
     ${pregunta}${prendas}${distinto}</div>`;
 }
 let llegoModo = '', ajenoAbierto = false;
-function setLlego(m) { llegoModo = m; ajenoAbierto = false; pintarVenta(); }
+function setLlego(m) {
+  llegoModo = m; ajenoAbierto = false; resetDistinto();
+  const its = venta && venta.info ? venta.info.items : [];
+  if (m === 'DISTINTO' && its.length === 1) dReemp = 0;   // una sola prenda vendida: queda elegida
+  pintarVenta();
+  if (m === 'DISTINTO') setTimeout(() => { const b = document.getElementById('d-q'); if (b && dReemp !== null && !window.matchMedia('(pointer: coarse)').matches) b.focus(); }, 0);
+}
+
+// ── Artículo distinto: qué llegó en el paquete (es lo que vuelve al rack). Obligatorio. ──
+// dReemp = índice de la prenda vendida que debía venir · dEstado = Óptimo/Falla · buscador propio dentro de la tarjeta.
+let dReemp = null, dEstado = '', dQ = '', dModelos = [], dModelo = null, dColor = null, _tDist = null;
+function resetDistinto() { dReemp = null; dEstado = ''; dQ = ''; dModelos = []; dModelo = null; dColor = null; }
+function textoReemp(x) {
+  return [x.titulo, [x.color, x.talle].filter(Boolean).join(' · '), x.sku ? 'SKU ' + x.sku : ''].filter(Boolean).join(' · ').slice(0, 200);
+}
+function reempActual() {   // '' si la venta no trae prendas (sin verificar)
+  const its = venta && venta.info ? venta.info.items : [];
+  return its.length && dReemp !== null && its[dReemp] ? textoReemp(its[dReemp]) : '';
+}
+const _cargadosDistintos = () => venta ? items.filter(y => y.venta === venta.numero && y.plataforma === venta.plataforma && (y.llego === 'DISTINTO' || y.llego === 'AJENO')) : [];
+// ¿Falta cargar el artículo distinto de la venta activa?
+function faltaDistinto() { return !!venta && llegoModo === 'DISTINTO' && !_cargadosDistintos().length; }
+function avisarFaltaDistinto() {
+  beepError(); _marcarFalta('d-panel', true);
+  toast('Marcaste "Es un artículo distinto": cargá qué artículo llegó (o "Es un artículo que no vendemos") antes de seguir', 'warn', 6000);
+  const p = document.getElementById('d-panel'); if (p) p.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+// Datos para una prenda distinta (escaneada, del buscador de la tarjeta o del buscador de abajo). null = falta algo (ya avisó).
+function datosDistinto() {
+  const its = venta && venta.info ? venta.info.items : [];
+  if (its.length && dReemp === null) {
+    beepError(); _marcarFalta('d-panel', true);
+    toast('Elegí primero en lugar de qué prenda de la venta llegó', 'warn', 5000); return null;
+  }
+  return { llego: 'DISTINTO', reemplaza: reempActual() };
+}
+function elegirReemp(k) { dReemp = k; _marcarFalta('d-panel', false); pintarVenta(); const b = document.getElementById('d-q'); if (b) b.focus(); }
+function setDEstado(e) { dEstado = e; pintarVenta(); }
+function panelDistinto(i, hay) {
+  const its = hay ? i.items : [];
+  const cargados = _cargadosDistintos();
+  const paso = (n, t, ok) => `<div class="text-sm font-bold mt-3 mb-1">${ok ? '✔' : n} · ${t}</div>`;
+  let h = `<div id="d-panel" class="mt-3 rounded-lg p-3 bg-white border-2 ${cargados.length ? 'border-teal-500' : 'border-amber-500'}">
+    <div class="font-bold">¿Qué artículo llegó? <span class="text-xs font-normal text-zinc-500">— es el que vuelve al rack (obligatorio)</span></div>`;
+  if (its.length) h += paso(1, dReemp === null ? 'Tocá arriba "Llegó en lugar de esta" en la prenda que debía venir' : 'En lugar de: ' + esc(textoReemp(its[dReemp])), dReemp !== null);
+  const listo = !its.length || dReemp !== null;
+  if (listo) {
+    h += paso(its.length ? 2 : 1, 'Estado de lo que llegó', !!dEstado) + `<div class="flex gap-2">
+        <button class="btn btn-chico ${dEstado === 'OPTIMO' ? 'btn-turq' : 'btn-gris'}" onclick="setDEstado('OPTIMO')">Óptimo</button>
+        <button class="btn btn-chico ${dEstado === 'FALLA' ? 'btn-rojo' : 'btn-gris'}" onclick="setDEstado('FALLA')">Falla</button></div>`;
+  }
+  if (listo && dEstado) {
+    h += paso(its.length ? 3 : 2, 'Escaneá el código de barras de la prenda que llegó, o buscala', false) + `
+      <div class="flex gap-2"><input id="d-q" class="input flex-1" placeholder="Nombre, SKU o código de barras" autocomplete="off" value="${esc(dQ)}"
+        oninput="dBuscarTipeo(this.value)" onkeydown="if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); dBuscarEnter(this.value); }">
+        <button class="btn btn-gris" onclick="toggleCam('prenda', true)" title="Abrir la cámara">📷</button></div>`;
+    if (dModelo) {
+      const cols = [...new Set(dModelo.variantes.map(x => x.color))].sort((a, b) => a.localeCompare(b));
+      if (cols.length === 1) dColor = cols[0];
+      h += `<div class="mt-2 text-sm"><div class="flex items-center gap-2"><b class="flex-1">${esc(dModelo.articulo)}</b>
+          <button class="text-xs underline text-zinc-500" onclick="dModelo = null; dColor = null; pintarVenta()">cambiar</button></div>
+        <div class="opcs mt-1">${cols.map(c => opc(c, c === dColor, `dColor = ${esc(JSON.stringify(c))}; pintarVenta()`)).join('')}</div>
+        ${dColor ? `<div class="text-xs text-zinc-500 mt-2 mb-1">Tocá el talle que llegó (1 unidad por toque)</div><div class="opcs">${dModelo.variantes.filter(x => x.color === dColor)
+          .sort((a, b) => ordTalle(a.talle) - ordTalle(b.talle)).map(x => opc(x.talle + (x.marca ? ' · ' + x.marca : ''), false, `dAgregarVar(${x.id})`)).join('')}</div>` : ''}</div>`;
+    } else if (dModelos.length) {
+      h += `<div class="mt-2 flex flex-col gap-1 max-h-48 overflow-y-auto">${dModelos.map((m, k) =>
+        `<button class="text-left text-sm p-2 rounded-lg border border-zinc-300 hover:bg-zinc-100" onclick="dElegirModelo(${k})">${esc(m.articulo)}</button>`).join('')}</div>`;
+    } else if (dQ.trim().length >= 2) h += '<div class="text-xs text-zinc-500 mt-1">Sin resultados Parka o Puffers.</div>';
+  }
+  if (cargados.length) h += `<div class="mt-3 text-sm rounded-lg p-2" style="background:#dcfce7"><b class="text-teal-700">Cargado:</b> ${cargados.map(y =>
+      `${esc([y.articulo, y.color, y.talle].filter(Boolean).join(' · '))} x${y.cantidad} (${y.estado === 'AJENO' ? 'no lo vendemos' : y.estado === 'FALLA' ? 'Falla' : 'Óptimo'})`).join(' · ')}</div>`;
+  h += ajenoAbierto ? `<div class="rounded-lg p-3 mt-3 bg-zinc-50 border border-zinc-300">
+          <label class="lbl" for="ajeno-desc">Artículo que no vendemos — ¿qué llegó?</label>
+          <input id="ajeno-desc" class="input mb-2" placeholder="Ej: buzo gris de otra marca" autocomplete="off">
+          <div class="flex flex-wrap items-center gap-2">
+            <label class="text-sm">Cantidad</label>
+            <input id="ajeno-cant" type="number" min="1" max="999" value="1" class="input !w-20">
+            <button class="btn btn-primario" onclick="agregarAjeno()">+ Agregar</button>
+            <button class="btn btn-gris btn-chico" onclick="ajenoAbierto = false; pintarVenta()">Cancelar</button>
+          </div></div>`
+    : `<div class="mt-3"><button class="btn btn-gris btn-chico" onclick="abrirAjeno()">🚫 Es un artículo que no vendemos</button></div>`;
+  return h + '</div>';
+}
+function _dFoco() { const b = document.getElementById('d-q'); if (b) { b.focus(); b.setSelectionRange(b.value.length, b.value.length); } }
+function dBuscarTipeo(v) {
+  dQ = v; clearTimeout(_tDist);
+  const t = v.trim();
+  if (esCodigo(t)) { _tDist = setTimeout(() => { if (dQ.trim() === t) { dQ = ''; pintarVenta(); escanear(t); } }, 600); return; }
+  _tDist = setTimeout(dBuscar, 250);
+}
+function dBuscarEnter(v) {
+  clearTimeout(_tDist); dQ = v; const t = v.trim();
+  if (esCodigo(t)) { dQ = ''; pintarVenta(); escanear(t); } else dBuscar();
+}
+async function dBuscar() {
+  const t = dQ.trim(); dModelo = null; dColor = null;
+  if (t.length < 2) { dModelos = []; pintarVenta(); _dFoco(); return; }
+  try { dModelos = (await api('/devoluciones/api/buscar?q=' + encodeURIComponent(t))).modelos; } catch (e) { dModelos = []; toast(e.message, 'error'); }
+  if (dQ.trim() !== t) return;
+  if (dModelos.length === 1) { dModelo = dModelos[0]; const p = dModelo.preseleccion && dModelo.variantes.find(x => x.id === dModelo.preseleccion); if (p) dColor = p.color; }
+  pintarVenta(); _dFoco();
+}
+function dElegirModelo(k) { dModelo = dModelos[k]; dColor = null; pintarVenta(); }
+function dAgregarVar(id) {
+  const v = dModelo.variantes.find(x => x.id === id); if (!v) return;
+  sumarDistinto({ ...v, articulo: dModelo.articulo }, dEstado);
+}
+// Suma 1 unidad de la prenda que llegó (distinta a la venta), con su "en lugar de".
+function sumarDistinto(v, est) {
+  const d = datosDistinto(); if (!d) return null;
+  if (!est) { beepError(); _marcarFalta('d-panel', true); toast('Elegí si lo que llegó está Óptimo o con Falla', 'warn', 4000); return null; }
+  const k = { id: v.id, estado: est, plataforma: venta.plataforma, venta: venta.numero, reemplaza: d.reemplaza };
+  const ya = items.find(x => clave(x) === clave(k));
+  if (ya) ya.cantidad += 1;
+  else items.push({ ...k, articulo: v.articulo, color: v.color, talle: v.talle, marca: v.marca, sku: v.sku, cantidad: 1, llego: 'DISTINTO' });
+  _marcarFalta('d-panel', false); beepOk(); pintarLista(clave(k));
+  toast(`Llegó: ${v.articulo} ${v.color} ${v.talle} · ${est === 'FALLA' ? 'Falla' : 'Óptimo'}${d.reemplaza ? ' — en lugar de ' + d.reemplaza : ''}`, 'ok', 4000);
+  return k;
+}
 function abrirAjeno() { ajenoAbierto = true; pintarVenta(); document.getElementById('ajeno-desc').focus(); }
 function agregarDeVenta(k, est) {
   const x = venta.info.items[k], v = x.variante;
@@ -333,8 +446,9 @@ function agregarAjeno() {
   const d = document.getElementById('ajeno-desc'), desc = d.value.trim().replace(/\s+/g, ' ');
   const n = Math.max(1, Math.min(999, parseInt(document.getElementById('ajeno-cant').value) || 1));
   if (!desc) { beepError(); toast('Escribí qué artículo llegó', 'warn'); d.focus(); return; }
+  const dd = datosDistinto(); if (!dd) return;
   const it = { id: null, articulo: desc.slice(0, 120), color: '', talle: '', marca: '', sku: '', cantidad: n, estado: 'AJENO',
-               plataforma: venta.plataforma, venta: venta.numero, llego: 'AJENO' };
+               plataforma: venta.plataforma, venta: venta.numero, llego: 'AJENO', reemplaza: dd.reemplaza };
   const ya = items.find(y => clave(y) === clave(it));
   if (ya) ya.cantidad += n; else items.push(it);
   ajenoAbierto = false; beepOk(); pintarLista(clave(it)); pintarVenta();
@@ -415,6 +529,7 @@ async function _escanear(cod) {
     return buscarVenta(cod);
   }
   if (!document.getElementById('modal-resumen').classList.contains('hidden')) { beepError(); toast('Cerrá el resumen para seguir escaneando', 'warn'); return; }
+  if (llegoModo === 'DISTINTO') return escanearDistinto(cod);
   if (!estadoScan) { beepError(); _marcarFalta('estado-scan-box', true); pintarScan(false, 'Elegí Óptimo o Falla antes de escanear', cod); return; }
   let r;
   try { r = await api('/devoluciones/api/codigo?c=' + encodeURIComponent(cod)); }
@@ -435,6 +550,20 @@ async function _escanear(cod) {
   const n = items.find(x => clave(x) === clave(k)).cantidad;
   pintarScan(true, `${v.articulo} · ${v.color} · ${v.talle}`, cod, `${venta.plataforma} #${venta.numero} · ${estadoScan === 'FALLA' ? 'Falla' : 'Óptimo'} · llevás ${n} de esta`,
     enVenta(v) || llegoModo === 'DISTINTO' ? '' : `Ojo: esta prenda no figura en la ${nomVenta(venta.plataforma)} #${venta.numero}. Revisá que sea la correcta.`);
+}
+async function escanearDistinto(cod) {
+  if (!datosDistinto()) { pintarScan(false, 'Elegí en lugar de qué prenda de la venta llegó', cod); return; }
+  const est = dEstado || estadoScan;
+  if (!est) { beepError(); _marcarFalta('d-panel', true); pintarScan(false, 'Elegí Óptimo o Falla de lo que llegó (arriba, en la venta)', cod); return; }
+  let r;
+  try { r = await api('/devoluciones/api/codigo?c=' + encodeURIComponent(cod)); }
+  catch (e) { beepError(); pintarScan(false, e.message, cod); return; }
+  if (!r.ok) { beepError(); pintarScan(false, r.motivo + ' — si no es un artículo nuestro, usá "Es un artículo que no vendemos"', cod); return; }
+  const v = r.variante, k = sumarDistinto(v, est);
+  if (!k) return;
+  ultimoScan = k;
+  const n = items.find(x => clave(x) === clave(k)).cantidad;
+  pintarScan(true, `${v.articulo} · ${v.color} · ${v.talle}`, cod, `Artículo distinto · ${est === 'FALLA' ? 'Falla' : 'Óptimo'} · llevás ${n} de esta${k.reemplaza ? ' · en lugar de ' + k.reemplaza : ''}`);
 }
 function pintarScan(ok, texto, cod, extra = '', aviso = '') {
   const el = document.getElementById('scan-estado');
@@ -553,14 +682,16 @@ function agregar() {
   if (!modelo || !ids.length) return;
   if (!venta) { faltaVenta(); return; }
   if (!estado) { beepError(); toast('Elegí el estado de la prenda: Óptimo o Falla', 'warn', 4000); return; }
+  const dd = llegoModo === 'DISTINTO' ? datosDistinto() : null;
+  if (llegoModo === 'DISTINTO' && !dd) return;
   let ultima = '', total = 0;
   ids.forEach(id => {
     const v = modelo.variantes.find(x => x.id === id), n = eCant[id];
-    const k = { id, estado, plataforma: venta.plataforma, venta: venta.numero };
+    const k = { id, estado, plataforma: venta.plataforma, venta: venta.numero, ...(dd ? { reemplaza: dd.reemplaza } : {}) };
     const ya = items.find(x => clave(x) === clave(k));
     if (ya) ya.cantidad += n;
-    else items.push({ id, articulo: modelo.articulo, color: v.color, talle: v.talle, marca: v.marca, sku: v.sku, cantidad: n, estado, plataforma: venta.plataforma, venta: venta.numero,
-                      llego: enVenta({ id, sku: v.sku, articulo: modelo.articulo }) ? 'MISMO' : 'DISTINTO' });
+    else items.push({ ...k, articulo: modelo.articulo, color: v.color, talle: v.talle, marca: v.marca, sku: v.sku, cantidad: n,
+                      llego: dd ? 'DISTINTO' : enVenta({ id, sku: v.sku, articulo: modelo.articulo }) ? 'MISMO' : 'DISTINTO' });
     ultima = clave(k); total += n;
   });
   toast(`Agregado: ${modelo.articulo} ${color} · ${total} prenda${total === 1 ? '' : 's'} · ${venta.plataforma} #${venta.numero} · ${estado === 'FALLA' ? 'Falla' : 'Óptimo'}`);
@@ -585,13 +716,13 @@ function pintarLista(resaltar = '') {
   const total = items.reduce((a, x) => a + x.cantidad, 0);
   document.getElementById('total').textContent = `${total} unidad${total === 1 ? '' : 'es'}`;
   document.getElementById('btn-confirmar').disabled = !items.length;
-  if (venta && llegoModo === 'MISMO') pintarVenta();
+  if (venta && llegoModo) { const f = document.activeElement && document.activeElement.id === 'd-q'; pintarVenta(); if (f) _dFoco(); }
   if (!items.length) { el.innerHTML = '<p class="text-sm text-zinc-500 text-center py-6">Todavía no agregaste artículos</p>'; return; }
   el.innerHTML = items.map((x, i) => `
     <div class="flex items-center gap-2 py-2 border-b border-zinc-700 last:border-0 rounded-lg transition-colors" ${resaltar === clave(x) ? 'style="background:#dcfce7"' : ''}>
       <div class="flex-1 min-w-0">
         <div class="font-semibold text-sm truncate">${chipPlat(x.plataforma)} ${esc(x.articulo)} <span class="text-xs font-normal text-zinc-500">#${esc(x.venta)}</span></div>
-        <div class="text-xs text-zinc-500">${[x.color, x.talle, x.marca].filter(Boolean).map(esc).join(' · ')}${x.color || x.talle ? ' · ' : ''}<span class="${x.estado === 'FALLA' ? 'text-red-600 font-semibold' : x.estado === 'AJENO' ? 'font-semibold' : 'text-teal-600'}" ${x.estado === 'AJENO' ? 'style="color:#b45309"' : ''}>${x.estado === 'FALLA' ? 'Falla' : x.estado === 'AJENO' ? 'No lo vendemos' : 'Óptimo'}</span>${x.llego === 'DISTINTO' ? ' · <span class="text-zinc-500">distinto a la venta</span>' : ''}</div>
+        <div class="text-xs text-zinc-500">${[x.color, x.talle, x.marca].filter(Boolean).map(esc).join(' · ')}${x.color || x.talle ? ' · ' : ''}<span class="${x.estado === 'FALLA' ? 'text-red-600 font-semibold' : x.estado === 'AJENO' ? 'font-semibold' : 'text-teal-600'}" ${x.estado === 'AJENO' ? 'style="color:#b45309"' : ''}>${x.estado === 'FALLA' ? 'Falla' : x.estado === 'AJENO' ? 'No lo vendemos' : 'Óptimo'}</span>${x.llego === 'DISTINTO' ? ' · <span class="text-zinc-500">distinto a la venta</span>' : ''}${x.reemplaza ? `<div class="text-zinc-500 truncate">↔ en lugar de: ${esc(x.reemplaza)}</div>` : ''}</div>
       </div>
       <button class="btn btn-gris btn-chico !w-8" onclick="cantItem(${i},-1)">−</button>
       <span class="w-7 text-center font-bold">${x.cantidad}</span>
@@ -617,6 +748,7 @@ function tarjetaResultado(d) {
     <p class="text-xs text-zinc-500 mt-2" data-solo-rollo>Rollo Honeywell 40×25, de a 2 por fila. Con diálogo: impresora Honeywell, márgenes Ninguno, escala 100 %.</p></div>`;
 }
 function abrirResumen() {
+  if (faltaDistinto()) { avisarFaltaDistinto(); return; }
   if (!items.length) return;
   const vs = [...new Set(items.map(x => x.plataforma + '|' + x.venta))];
   document.getElementById('r-plat').innerHTML = vs.map(k => {
@@ -633,7 +765,7 @@ function abrirResumen() {
     if (!xs.length) return '';
     return `<h3 class="text-xs font-bold uppercase tracking-wider mb-1 ${cls}">${titulo}</h3>` + xs.map(x => `
       <div class="flex justify-between gap-2 py-1 border-b border-zinc-200 last:border-0">
-        <span class="truncate">${chipPlat(x.plataforma)} ${esc([x.articulo, x.color, x.talle].filter(Boolean).join(' · '))} <span class="text-zinc-500">#${esc(x.venta)}</span></span><b>x${x.cantidad}</b></div>`).join('') + '<div class="mb-3"></div>';
+        <span class="min-w-0"><span class="block truncate">${chipPlat(x.plataforma)} ${esc([x.articulo, x.color, x.talle].filter(Boolean).join(' · '))} <span class="text-zinc-500">#${esc(x.venta)}</span></span>${x.reemplaza ? `<span class="block text-xs text-zinc-500 truncate">↔ llegó en lugar de: ${esc(x.reemplaza)}</span>` : ''}</span><b>x${x.cantidad}</b></div>`).join('') + '<div class="mb-3"></div>';
   };
   document.getElementById('r-detalle').innerHTML = bloque('OPTIMO', 'Óptimas', 'text-teal-700') + bloque('FALLA', 'Fallas', 'text-red-600')
     + bloque('AJENO', 'No lo vendemos (no se reingresan ni llevan etiqueta)', 'text-zinc-600');
@@ -647,7 +779,7 @@ async function confirmar(modo = 'ruta') {
   bs.disabled = bd.disabled = true; (modo === 'ruta' ? bs : bd).textContent = modo === 'ruta' ? 'Armando la ruta…' : 'Subiendo a Drive…';
   const b = document.getElementById('btn-confirmar'); b.disabled = true; b.textContent = 'Guardando…';
   try {
-    const r = await api('/devoluciones/api/confirmar', { json: { ruta: modo === 'ruta', items: items.map(x => ({ articulo_id: x.id, descripcion: x.id ? '' : x.articulo, llego: x.llego || '', cantidad: x.cantidad, estado: x.estado, plataforma: x.plataforma, venta: x.venta })) } });
+    const r = await api('/devoluciones/api/confirmar', { json: { ruta: modo === 'ruta', items: items.map(x => ({ articulo_id: x.id, descripcion: x.id ? '' : x.articulo, llego: x.llego || '', reemplaza: x.reemplaza || '', cantidad: x.cantidad, estado: x.estado, plataforma: x.plataforma, venta: x.venta })) } });
     cerrarResumen();
     const desde = +document.getElementById('desde').value || 1;
     if (r.devolucion.items.some(i => i.estado !== 'AJENO')) imprimirEtiquetas('devoluciones', r.devolucion.id, { desde });
@@ -666,7 +798,7 @@ async function confirmar(modo = 'ruta') {
 // sin Óptimo/Falla elegido y sin el recuadro del último escaneo (las etiquetas se reimprimen desde "Últimas devoluciones").
 function nuevaDevolucion() {
   items = []; ultimoScan = null; pintarLista(); limpiarBusqueda();
-  venta = null; llegoModo = ''; ajenoAbierto = false; setCanal(''); setEstadoScan('');
+  venta = null; llegoModo = ''; ajenoAbierto = false; resetDistinto(); setCanal(''); setEstadoScan('');
   document.getElementById('venta-num').value = '';
   document.getElementById('resultado').innerHTML = '';
   document.getElementById('desde').value = 1;
