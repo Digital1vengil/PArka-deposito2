@@ -14,6 +14,7 @@ ROLES = {
     "despacho": "Despacho",
     "deposito": "Depósito",
     "recolector": "Buscador / Recolector",   # entra solo a cada búsqueda nueva de Recolección Ecommerce
+    "chofer": "Chofer",                       # solo la app PARKA Reparto (sus hojas de ruta); no ve secciones
 }
 
 TIPOS_LOTE = {
@@ -630,3 +631,51 @@ class OdooRotulo(Base):
     impreso_por: Mapped[Optional[int]] = mapped_column(ForeignKey("usuarios.id"), nullable=True)
     bultos: Mapped[int] = mapped_column(Integer, default=0)      # bultos del último rótulo impreso
     veces: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class HojaRuta(Base):
+    """Hoja de ruta de un chofer: la arma el depósito con pedidos de Odoo; el chofer la recorre en PARKA Reparto."""
+    __tablename__ = "hojas_ruta"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    fecha: Mapped[date] = mapped_column(Date, index=True)
+    chofer_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), index=True)
+    estado: Mapped[str] = mapped_column(String(20), default="abierta", index=True)   # abierta / cerrada
+    nota: Mapped[str] = mapped_column(String(300), default="")
+    creada_por: Mapped[Optional[int]] = mapped_column(ForeignKey("usuarios.id"), nullable=True)
+    creada_at: Mapped[datetime] = mapped_column(DateTime, default=ahora)
+    cerrada_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class ParadaRuta(Base):
+    """Parada de una hoja de ruta: el depósito de un expreso (con todos sus clientes) o un cliente (expreso PROPIO)."""
+    __tablename__ = "paradas_ruta"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    hoja_id: Mapped[int] = mapped_column(ForeignKey("hojas_ruta.id"), index=True)
+    orden: Mapped[int] = mapped_column(Integer, default=0)
+    tipo: Mapped[str] = mapped_column(String(10), default="expreso")   # expreso / cliente
+    ref_id: Mapped[int] = mapped_column(Integer, default=0)            # id del transportista o del cliente en Odoo
+    nombre: Mapped[str] = mapped_column(String(160), default="")
+    direccion: Mapped[str] = mapped_column(String(250), default="")
+    localidad: Mapped[str] = mapped_column(String(160), default="")
+    telefono: Mapped[str] = mapped_column(String(80), default="")
+    estado: Mapped[str] = mapped_column(String(20), default="pendiente")   # pendiente / entregada / incompleta
+    nota: Mapped[str] = mapped_column(String(300), default="")
+    cerrada_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class BultoRuta(Base):
+    """Un bulto (rótulo "3 de 7") de un pedido dentro de una hoja de ruta. entregado_at = el chofer lo escaneó."""
+    __tablename__ = "bultos_ruta"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    hoja_id: Mapped[int] = mapped_column(ForeignKey("hojas_ruta.id"), index=True)
+    parada_id: Mapped[int] = mapped_column(ForeignKey("paradas_ruta.id"), index=True)
+    picking_id: Mapped[int] = mapped_column(Integer, index=True)
+    picking_nombre: Mapped[str] = mapped_column(String(40), default="")
+    origen: Mapped[str] = mapped_column(String(40), default="")
+    cliente_id: Mapped[int] = mapped_column(Integer, default=0)
+    cliente_nombre: Mapped[str] = mapped_column(String(160), default="")
+    cliente_codigo: Mapped[str] = mapped_column(String(20), default="")
+    bulto: Mapped[int] = mapped_column(Integer, default=1)
+    total: Mapped[int] = mapped_column(Integer, default=1)
+    entregado_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    entregado_por: Mapped[Optional[int]] = mapped_column(ForeignKey("usuarios.id"), nullable=True)

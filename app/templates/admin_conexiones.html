@@ -236,6 +236,21 @@
   </div>
 </form>
 
+<form class="card p-5 mb-5" onsubmit="event.preventDefault(); guardar(this, 'reparto');">
+  <h2 class="text-lg font-bold mb-1">App del chofer · PARKA Reparto</h2>
+  <p class="text-sm text-zinc-500 mb-4">La app del chofer es un proyecto aparte (Worker de Cloudflare <code>parka-reparto</code>) que pide las hojas de ruta a esta app.
+    Usa esta <b>clave compartida</b>: cargá la misma en el Worker de Reparto como secreto <code>REPARTO_CLAVE</code>. Vacía = la app del chofer queda apagada.
+    Los choferes entran con su nombre y PIN: crealos en <a class="underline" href="/admin/usuarios">Usuarios</a> con rol <b>Chofer</b>.</p>
+  <div class="grid sm:grid-cols-4 gap-3">
+    <div class="sm:col-span-3"><label class="lbl">Clave compartida {{ '✅' if aj.reparto_clave.cargado }}</label>
+      <input class="input" id="reparto_clave" name="reparto_clave" type="password" value="{{ aj.reparto_clave.valor }}" autocomplete="off"></div>
+    <div class="flex items-end"><button type="button" class="btn btn-gris btn-chico w-full" onclick="generarClaveReparto()">Generar clave nueva</button></div>
+  </div>
+  <div class="flex flex-wrap gap-2 justify-end mt-4 items-center">
+    <button class="btn btn-primario btn-chico">Guardar</button>
+  </div>
+</form>
+
 <form class="card p-5" onsubmit="event.preventDefault(); guardar(this, 'gemini');">
   <h2 class="text-lg font-bold mb-1">Gemini · asistente</h2>
   <p class="text-sm text-zinc-500 mb-4">Clave gratis en <a class="underline text-violeta" href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com/apikey</a> (la misma del Asistente: también la usa el respondedor de preguntas de ML).</p>
@@ -252,6 +267,12 @@
 {% endblock %}
 {% block scripts %}
 <script>
+function generarClaveReparto() {
+  const b = new Uint8Array(24); crypto.getRandomValues(b);
+  const el = document.getElementById('reparto_clave');
+  el.value = Array.from(b, x => x.toString(16).padStart(2, '0')).join(''); el.type = 'text';
+  toast('Clave generada: copiala para el Worker de Reparto y tocá Guardar', 'info', 6000);
+}
 async function guardar(f) {
   const valores = {};
   f.querySelectorAll('input[name], select[name]').forEach(i => valores[i.name] = i.value);

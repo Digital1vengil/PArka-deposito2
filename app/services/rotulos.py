@@ -185,10 +185,11 @@ def armar_cliente(com: dict, ent: dict | None = None, contactos: list[dict] | No
     contactos: personas del cliente en Odoo, por si el teléfono está cargado ahí."""
     ent = ent or {}
     dire = completar_direccion(_direccion(ent), _direccion(com))
-    expreso = _m2o(com.get("default_transportista")) or _m2o(ent.get("default_transportista"))
+    trans = com.get("default_transportista") or ent.get("default_transportista")
+    expreso, expreso_id = _m2o(trans), _m2o_id(trans)
     return {"id": com["id"], "codigo": codigo_cliente(com["id"]), "nombre": _t(com.get("name")),
             "cuit": _t(com.get("vat")), "telefono": _tel(ent, com, *(contactos or [])), "email": _t(com.get("email")),
-            "expreso": expreso, "empresa": bool(com.get("is_company")), **dire}
+            "expreso": expreso, "expreso_id": expreso_id, "empresa": bool(com.get("is_company")), **dire}
 
 
 def telefonos_contactos(c: "odoo.Cliente", com_ids: list[int]) -> dict[int, list[dict]]:
@@ -245,6 +246,18 @@ def ficha_cliente(db: Session, pid: int) -> dict | None:
 
 
 # ───────────────────────── pedidos ─────────────────────────
+def direcciones_expresos(c: "odoo.Cliente", ids: list[int]) -> dict[int, dict]:
+    """Dirección del depósito de cada expreso (Transportistas de Odoo: calle, ciudad, CP)."""
+    ids = sorted({i for i in ids if i})
+    if not ids:
+        return {}
+    try:
+        filas = c.call("delivery.carrier", "read", ids, fields=["street", "street2", "city", "zip", "state_id"])
+    except odoo.OdooError:
+        return {}
+    return {f["id"]: _direccion(f) for f in filas}
+
+
 def leer_pedidos(c: "odoo.Cliente", dominio: list | None = None, limite: int = 300) -> list[dict]:
     picks = c.call("stock.picking", "search_read", DOMINIO if dominio is None else dominio, fields=CAMPOS_PICK,
                    order="create_date desc", limit=limite)
@@ -261,7 +274,7 @@ def leer_pedidos(c: "odoo.Cliente", dominio: list | None = None, limite: int = 3
         com = ps.get(_m2o_id(ent.get("commercial_partner_id"))) if ent else None
         cli = armar_cliente(com or ent, ent, contactos.get((com or ent or {}).get("id"))) if ent else None
         if cli and not cli["expreso"]:
-            cli["expreso"] = _m2o(p.get("carrier_id"))
+            cli["expreso"], cli["expreso_id"] = _m2o(p.get("carrier_id")), _m2o_id(p.get("carrier_id"))
         tipo = _m2o(p.get("picking_type_id")).split(": ", 1)[-1]
         out.append({"id": p["id"], "nombre": p["name"], "origen": p.get("origin") or "", "tipo": tipo,
                     "estado": p["state"], "estado_txt": ESTADOS.get(p["state"]) or CERRADOS.get(p["state"], p["state"]),
@@ -269,6 +282,10 @@ def leer_pedidos(c: "odoo.Cliente", dominio: list | None = None, limite: int = 3
                     "bultos": max(1, int(p.get("qty_bultos") or 0)), "cliente": cli,
                     "peso": float(p.get("weight") or 0), "obs": _sin_html(p.get("observations")),
                     "tracking": _t(p.get("carrier_tracking_ref"))})
+    dirs = direcciones_expresos(c, [o["cliente"]["expreso_id"] for o in out if o["cliente"] and o["cliente"].get("expreso_id")])
+    for o in out:
+        if o["cliente"]:
+            o["cliente"]["expreso_dir"] = dirs.get(o["cliente"].get("expreso_id"), {})
     return out
 
 
@@ -350,13 +367,32 @@ def remitente(db: Session | None = None) -> dict:
 
 
 # ───────────────────────── rótulos ─────────────────────────
-def lista_rotulos(ped: dict | None, cli: dict, rem: dict, bultos: int, url_ficha: str, fecha: str = "") -> list[dict]:
-    """Un rótulo por bulto ("1/3", "2/3"…)."""
+def codigo_bulto(picking_id: int, bulto: int, total: int) -> str:
+    """Código de un bulto en el QR del rótulo: <id del pedido en Odoo>-<bulto>-<total> (ej. 412-3-7)."""
+    return f"{int(picking_id)}-{int(bulto)}-{int(total)}"
+
+
+def leer_codigo_bulto(texto: str) -> tuple[int, int, int] | None:
+    """Lo que lee la cámara del QR ("https://…/b/412-3-7" o "412-3-7") → (pedido, bulto, total)."""
+    m = re.search(r"(?:^|/b/)(\d{1,9})-(\d{1,2})-(\d{1,2})\s*$", (texto or "").strip())
+    if not m:
+        return None
+    pid, b, t = (int(x) for x in m.groups())
+    return (pid, b, t) if 1 <= b <= t else None
+
+
+def lista_rotulos(ped: dict | None, cli: dict, rem: dict, bultos: int, url_ficha: str, fecha: str = "",
+                  url_base: str = "") -> list[dict]:
+    """Un rótulo por bulto ("1/3", "2/3"…). Con pedido y url_base, el QR de cada rótulo identifica ese bulto
+    (url_base/b/<pedido>-<bulto>-<total>); escaneado con la cámara común abre la ficha del cliente."""
     bultos = max(1, min(99, int(bultos or 1)))
     base = {"rem": rem, "cli": cli, "url": url_ficha, "fecha": fecha or ahora().strftime("%d/%m/%Y"),
             "pedido": (ped or {}).get("origen", ""), "picking": (ped or {}).get("nombre", ""),
             "tipo": (ped or {}).get("tipo", ""), "total": bultos, "peso": (ped or {}).get("peso", 0),
             "obs": (ped or {}).get("obs", ""), "tracking": (ped or {}).get("tracking", "")}
+    pid = (ped or {}).get("id")
+    if pid and url_base:
+        return [{**base, "bulto": i, "url": f"{url_base}/b/{codigo_bulto(pid, i, bultos)}"} for i in range(1, bultos + 1)]
     return [{**base, "bulto": i} for i in range(1, bultos + 1)]
 
 

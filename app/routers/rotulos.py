@@ -1,6 +1,6 @@
 """Rótulos de entrega (pedidos de Magontex en Odoo) y Códigos de clientes (código de barras + QR por cliente)."""
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
 
 from ..actividad import registrar
@@ -53,7 +53,7 @@ def _rotulos_pedido(request: Request, db: Session, pid: int, bultos: int) -> tup
         raise HTTPException(400, f"{p['nombre']} no tiene cliente en Odoo")
     cli = p["cliente"]
     lista = svc.lista_rotulos(p, cli, svc.remitente(db), bultos or p["bultos"],
-                              f"{url_base(request)}/clientes/{cli['id']}", svc.fecha_de(p))
+                              f"{url_base(request)}/clientes/{cli['id']}", svc.fecha_de(p), url_base(request))
     return p, lista
 
 
@@ -77,6 +77,18 @@ def rotulo_zpl(pid: int, request: Request, bultos: int = 0, u: Usuario = Depends
     nombre = p["nombre"].replace("/", "-")
     return Response(svc.build_zpl(lista, svc.config(db)).encode("utf-8"), media_type="text/plain; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="rotulo_{nombre}.zpl"'})
+
+
+@router.get("/b/{codigo}")
+def abrir_bulto(codigo: str, u: Usuario = Depends(acceso_cli), db: Session = Depends(get_db)):
+    """QR de un bulto escaneado con la cámara común del celular → ficha del cliente de ese pedido."""
+    b = svc.leer_codigo_bulto(codigo)
+    if not b:
+        raise HTTPException(404, "Código de bulto inválido")
+    p = _odoo(svc.pedido, db, b[0])
+    if not p or not p["cliente"]:
+        raise HTTPException(404, "No se encontró el pedido en Odoo")
+    return RedirectResponse(f"/clientes/{p['cliente']['id']}", status_code=303)
 
 
 # ───────────────────────── Códigos de clientes ─────────────────────────

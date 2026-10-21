@@ -15,7 +15,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from . import config
 from .auth import NoAutenticado, SinPermiso
 from .db import Base, engine, SessionLocal, migrar
-from .routers import auth as r_auth, inicio, despacho, tareas, supervision, admin, articulos, smartpost, devoluciones, conteo, asistente, mercadolibre, mapeo, recoleccion, control, catalogo, ecommerce, etiquetas, tiendanube, cambios, recolecciones_odoo, importar, rotulos
+from .routers import auth as r_auth, inicio, despacho, tareas, supervision, admin, articulos, smartpost, devoluciones, conteo, asistente, mercadolibre, mapeo, recoleccion, control, catalogo, ecommerce, etiquetas, tiendanube, cambios, recolecciones_odoo, importar, rotulos, hojas_ruta
 from .seed import sembrar
 from .templating import render
 
@@ -252,7 +252,7 @@ app.mount("/etiquetas-fonts", StaticFiles(directory=str(Path(__file__).parent / 
 for r in (r_auth.router, inicio.router, despacho.router, tareas.router, supervision.router, admin.router,
           articulos.router, smartpost.router, devoluciones.router, conteo.router,
           asistente.router, mercadolibre.router, mapeo.router, recoleccion.router, control.router,
-          catalogo.router, ecommerce.router, etiquetas.router, tiendanube.router, cambios.router, recolecciones_odoo.router, importar.router, rotulos.router):
+          catalogo.router, ecommerce.router, etiquetas.router, tiendanube.router, cambios.router, recolecciones_odoo.router, importar.router, rotulos.router, hojas_ruta.router):
     app.include_router(r)
 
 

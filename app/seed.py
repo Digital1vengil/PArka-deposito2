@@ -44,6 +44,9 @@ SECCIONES_BASE = [
     dict(slug="clientes", nombre="Códigos de clientes", icono="🏷️", orden=11, activa=True,
          roles="admin,deposito",   # el rol Recolector se suma solo (como a Depósito)
          descripcion="Clientes de Odoo con su código de barras y QR, ficha del cliente y rótulo de envío"),
+    dict(slug="hojas_ruta", nombre="Hojas de ruta", icono="🚚", orden=12, activa=True,
+         roles="admin,despacho,deposito",
+         descripcion="Armá la hoja de ruta del chofer con los pedidos de Odoo y seguí la entrega bulto por bulto (app PARKA Reparto)"),
 ]
 
 

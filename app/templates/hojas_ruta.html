@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block titulo %}Hojas de ruta · {{ APP_NOMBRE }}{% endblock %}
+{% block contenido %}
+<a href="/" class="text-sm text-zinc-500 hover:text-violeta">← Inicio</a>
+<h1 class="text-2xl font-bold mb-1">🚚 Hojas de ruta</h1>
+<p class="text-sm text-zinc-500 mb-5">Elegí los pedidos de Odoo, el chofer y tocá <b>Armar hoja</b>: las paradas se arman solas
+  (depósito de cada expreso con todos sus clientes, o la dirección del cliente si el expreso es <b>PROPIO</b>).
+  El chofer la ve en la app <b>PARKA Reparto</b> y entrega escaneando el QR de cada rótulo; acá se ve el avance al momento.</p>
+
+{% if not conectado %}<section class="card p-4 mb-4" style="background:#fef3c7;color:#92400e">Falta conectar Odoo
+  ({% if u.es_admin %}<a class="underline" href="/admin/conexiones">Conexiones → Odoo</a>{% else %}pedíselo al admin{% endif %}).</section>{% endif %}
+{% if not reparto %}<section class="card p-4 mb-4" style="background:#fef3c7;color:#92400e">La app del chofer todavía no está habilitada
+  ({% if u.es_admin %}<a class="underline" href="/admin/conexiones">Conexiones → App del chofer</a>{% else %}pedíselo al admin{% endif %}).
+  Podés armar hojas igual.</section>{% endif %}
+{% if not choferes %}<section class="card p-4 mb-4" style="background:#fef3c7;color:#92400e">No hay choferes: creá un usuario con rol
+  <b>Chofer</b> en {% if u.es_admin %}<a class="underline" href="/admin/usuarios">Usuarios</a>{% else %}Usuarios (admin){% endif %}.</section>{% endif %}
+
+<div class="grid lg:grid-cols-2 gap-4">
+<section class="card p-4">
+  <div class="flex flex-wrap items-center gap-2 mb-3">
+    <h2 class="font-bold flex-1">Nueva hoja de ruta</h2>
+    <button class="btn btn-gris btn-chico" onclick="cargarPedidos(true)">↻ Pedidos</button>
+  </div>
+  <div class="grid sm:grid-cols-3 gap-2 mb-3 text-sm">
+    <label>Chofer<select id="chofer" class="input !py-1">{% for c in choferes %}<option value="{{ c.id }}">{{ c.nombre }}</option>{% endfor %}</select></label>
+    <label>Fecha<input id="fecha" type="date" class="input !py-1"></label>
+    <label>Nota<input id="nota" class="input !py-1" placeholder="opcional"></label>
+  </div>
+  <input id="q" class="input !py-1 text-sm mb-2" placeholder="Buscar pedido, cliente o expreso" oninput="pintarPedidos()">
+  <div id="pedidos" class="flex flex-col text-sm max-h-[28rem] overflow-y-auto"><p class="text-zinc-500">Cargando…</p></div>
+  <div class="flex flex-wrap items-center gap-2 mt-3">
+    <span id="sel" class="text-sm text-zinc-500 flex-1"></span>
+    <button id="btn-armar" class="btn btn-chico" style="background:#7c3aed;color:#fff" onclick="armar(this)" disabled>Armar hoja</button>
+  </div>
+</section>
+
+<section class="card p-4">
+  <div class="flex flex-wrap items-center gap-2 mb-3">
+    <h2 class="font-bold flex-1">Hojas <span id="nh" class="chip"></span></h2>
+    <label class="text-sm"><input type="checkbox" id="ver-cerradas" onchange="cargarHojas()"> Ver cerradas</label>
+  </div>
+  <div id="hojas" class="flex flex-col gap-2 text-sm"><p class="text-zinc-500">Cargando…</p></div>
+</section>
+</div>
+
+<section id="detalle" class="card p-4 mt-4 hidden"></section>
+{% endblock %}
+{% block scripts %}
+<script>
+let _peds = [], _abierta = null;
+const _sel = new Set(), _bul = {};
+document.getElementById('fecha').value = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+
+function filaPedido(p) {
+  const tomado = p.hoja ? `<span class="chip text-xs">en hoja ${p.hoja}</span>` : '';
+  const dis = p.hoja || p.sin_cliente ? 'disabled' : '';
+  return `<label class="flex items-center gap-2 py-2 border-b ${dis ? 'opacity-50' : ''}" style="border-color:var(--line)">
+    <input type="checkbox" ${dis} ${_sel.has(p.id) ? 'checked' : ''} onchange="marcar(${p.id}, this.checked)">
+    <span class="flex-1 min-w-0"><b>${esc(p.cliente || 'Sin cliente')}</b> <span class="text-xs text-zinc-500">${esc(p.origen)} · ${esc(p.nombre)}</span>
+      <br><span class="text-xs">🚚 ${esc(p.destino)}${p.localidad ? ' · ' + esc(p.localidad) : ''}</span></span>
+    ${tomado}
+    <input type="number" min="1" max="99" value="${_bul[p.id] || p.bultos}" class="input !w-14 !py-0.5 text-sm" title="Bultos" ${dis}
+      onchange="_bul[${p.id}] = Math.max(1, +this.value || 1); contar()">
+  </label>`;
+}
+function pintarPedidos() {
+  const q = document.getElementById('q').value.trim().toLowerCase();
+  const ps = q ? _peds.filter(p => [p.cliente, p.origen, p.nombre, p.expreso, p.codigo].join(' ').toLowerCase().includes(q)) : _peds;
+  document.getElementById('pedidos').innerHTML = ps.map(filaPedido).join('') || '<p class="text-zinc-500">No hay pedidos abiertos.</p>';
+  contar();
+}
+function contar() {
+  const b = [..._sel].reduce((t, id) => t + (_bul[id] || (_peds.find(p => p.id === id) || {}).bultos || 1), 0);
+  document.getElementById('sel').textContent = _sel.size ? `${_sel.size} pedido${_sel.size === 1 ? '' : 's'} · ${b} bultos` : '';
+  document.getElementById('btn-armar').disabled = !_sel.size || !document.getElementById('chofer').value;
+}
+function marcar(id, si) { si ? _sel.add(id) : _sel.delete(id); contar(); }
+
+async function cargarPedidos(refrescar) {
+  try { _peds = (await api('/hojas-ruta/api/pedidos' + (refrescar ? '?refrescar=1' : ''))).pedidos; pintarPedidos(); }
+  catch (e) { document.getElementById('pedidos').innerHTML = `<p style="color:#b91c1c">No se pudo leer Odoo: ${esc(e.message)}</p>`; }
+}
+
+async function armar(btn) {
+  const pedidos = [..._sel], bultos = {};
+  pedidos.forEach(id => { if (_bul[id]) bultos[id] = _bul[id]; });
+  btn.disabled = true;
+  try {
+    const h = await api('/hojas-ruta/api/crear', { json: { chofer_id: +document.getElementById('chofer').value, pedidos, bultos,
+      fecha: document.getElementById('fecha').value || null, nota: document.getElementById('nota').value } });
+    toast(`Hoja ${h.id} armada: ${h.paradas.length} paradas · ${h.bultos} bultos`, 'ok');
+    _sel.clear(); document.getElementById('nota').value = '';
+    await Promise.all([cargarPedidos(true), cargarHojas()]);
+    abrir(h.id);
+  } catch (e) { toast(e.message, 'error', 7000); contar(); }
+}
+
+function barra(a, t) {
+  const pc = t ? Math.round(100 * a / t) : 0;
+  return `<div class="h-2 rounded bg-zinc-800 overflow-hidden"><div class="h-2" style="width:${pc}%;background:#16a34a"></div></div>`;
+}
+async function cargarHojas() {
+  try {
+    const d = await api('/hojas-ruta/api/lista' + (document.getElementById('ver-cerradas').checked ? '?abiertas=0' : ''));
+    document.getElementById('nh').textContent = d.hojas.length;
+    document.getElementById('hojas').innerHTML = d.hojas.map(h => `
+      <button class="text-left rounded-xl p-3 border hover:bg-zinc-800" style="border-color:${_abierta === h.id ? '#7c3aed' : 'var(--line)'}" onclick="abrir(${h.id})">
+        <div class="flex flex-wrap gap-2 items-center"><b>Hoja ${h.id}</b><span>${esc(h.fecha)}</span><span>· ${esc(h.chofer)}</span>
+          <span class="flex-1"></span><span class="chip ${h.estado === 'abierta' ? 'chip-pendiente' : 'chip-hecha'}">${h.estado}</span></div>
+        <div class="text-xs text-zinc-500 my-1">${h.paradas_hechas}/${h.paradas} paradas · ${h.entregados}/${h.bultos} bultos${h.nota ? ' · ' + esc(h.nota) : ''}</div>
+        ${barra(h.entregados, h.bultos)}</button>`).join('') || '<p class="text-zinc-500">No hay hojas.</p>';
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+const ESTADO_PARADA = { pendiente: ['Pendiente', 'chip-pendiente'], entregada: ['Entregada', 'chip-hecha'], incompleta: ['Incompleta', 'chip-alta'] };
+function pintarDetalle(h) {
+  const el = document.getElementById('detalle'), abierta = h.estado === 'abierta';
+  el.classList.remove('hidden');
+  el.innerHTML = `<div class="flex flex-wrap items-center gap-2 mb-3">
+      <h2 class="font-bold text-lg flex-1">Hoja ${h.id} · ${esc(h.fecha)} · ${esc(h.chofer)} <span class="chip">${h.entregados}/${h.bultos} bultos</span></h2>
+      <button class="btn btn-gris btn-chico" onclick="imprimirHTML('/hojas-ruta/${h.id}/imprimir.html', this)">🖨 Imprimir</button>
+      ${abierta ? `<button class="btn btn-gris btn-chico" onclick="accion(${h.id}, 'cerrar')">Cerrar hoja</button>
+      <button class="btn btn-gris btn-chico" onclick="accion(${h.id}, 'borrar')">Borrar</button>` : ''}
+    </div>
+    <div class="flex flex-col gap-2 text-sm">${h.paradas.map((p, i) => `
+      <div class="rounded-xl p-3 border" style="border-color:var(--line)">
+        <div class="flex flex-wrap items-center gap-2"><b class="text-base">${p.orden}. ${esc(p.nombre)}</b>
+          <span class="chip text-xs">${p.tipo === 'expreso' ? 'Expreso' : 'Cliente'}</span>
+          <span class="chip ${ESTADO_PARADA[p.estado][1]}">${ESTADO_PARADA[p.estado][0]}${p.cerrada ? ' ' + p.cerrada : ''}</span>
+          <span class="flex-1"></span><span>${p.entregados}/${p.bultos} bultos</span>
+          ${abierta ? `<button class="btn btn-gris btn-chico" ${i ? '' : 'disabled'} onclick="mover(${h.id}, ${i}, -1)">↑</button>
+          <button class="btn btn-gris btn-chico" ${i < h.paradas.length - 1 ? '' : 'disabled'} onclick="mover(${h.id}, ${i}, 1)">↓</button>` : ''}</div>
+        <div class="text-zinc-500">${esc(p.direccion || 'sin dirección en Odoo')}${p.localidad ? ' · ' + esc(p.localidad) : ''}${p.telefono ? ' · ' + esc(p.telefono) : ''}</div>
+        ${p.nota ? `<div class="text-xs mt-1">📝 ${esc(p.nota)}</div>` : ''}
+        <div class="mt-2 flex flex-col gap-1">${p.clientes.map(c => `<div><b>${esc(c.nombre)}</b> <span class="text-xs text-zinc-500">${esc(c.codigo)}</span>
+          ${c.pedidos.map(x => `<span class="text-xs ml-2">${esc(x.origen || x.nombre)}: ${x.bultos.map(b =>
+            `<span title="${b.entregado ? 'entregado ' + b.at : 'pendiente'}" style="color:${b.entregado ? '#16a34a' : '#b91c1c'}">${b.entregado ? '✔' : '○'}${b.bulto}</span>`).join(' ')}</span>`).join('')}</div>`).join('')}</div>
+      </div>`).join('')}</div>`;
+  window._hoja = h;
+}
+async function abrir(id) {
+  _abierta = id;
+  try { pintarDetalle(await api('/hojas-ruta/api/' + id)); cargarHojas(); } catch (e) { toast(e.message, 'error'); }
+}
+async function mover(id, i, d) {
+  const ids = window._hoja.paradas.map(p => p.id);
+  [ids[i], ids[i + d]] = [ids[i + d], ids[i]];
+  try { pintarDetalle(await api(`/hojas-ruta/api/${id}/orden`, { json: { paradas: ids } })); } catch (e) { toast(e.message, 'error'); }
+}
+async function accion(id, que) {
+  if (!confirm(que === 'borrar' ? '¿Borrar la hoja de ruta?' : '¿Cerrar la hoja de ruta? El chofer ya no la va a ver.')) return;
+  try {
+    const r = await api(`/hojas-ruta/api/${id}/${que}`, { json: {} });
+    if (que === 'borrar') { document.getElementById('detalle').classList.add('hidden'); _abierta = null; } else pintarDetalle(r);
+    cargarHojas(); cargarPedidos(false);
+  } catch (e) { toast(e.message, 'error', 7000); }
+}
+
+cargarPedidos(false); cargarHojas();
+setInterval(() => { if (!document.hidden) { cargarHojas(); if (_abierta) api('/hojas-ruta/api/' + _abierta).then(pintarDetalle).catch(() => {}); } }, 30000);
+</script>
+{% endblock %}

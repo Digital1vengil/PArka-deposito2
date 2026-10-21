@@ -8,6 +8,7 @@
 {% elif sl == 'pick_odoo' %}<a href="/recolecciones-odoo" class="nav-link" title="Recolecciones Odoo"><span class="nav-ico">{{ ico('pick_odoo') }}</span><span class="nav-txt">Recolecciones Odoo</span></a>
 {% elif sl == 'rotulos' %}<a href="/rotulos" class="nav-link" title="Rótulos de entrega"><span class="nav-ico">{{ ico('rotulos') }}</span><span class="nav-txt">Rótulos de entrega</span></a>
 {% elif sl == 'clientes' %}<a href="/clientes" class="nav-link" title="Códigos de clientes"><span class="nav-ico">{{ ico('clientes') }}</span><span class="nav-txt">Códigos de clientes</span></a>
+{% elif sl == 'hojas_ruta' %}<a href="/hojas-ruta" class="nav-link" title="Hojas de ruta"><span class="nav-ico">{{ ico('hojas_ruta') }}</span><span class="nav-txt">Hojas de ruta</span></a>
 {% elif sl == 'mapeo' %}<a href="/mapeo" class="nav-link" title="Mapeo"><span class="nav-ico">{{ ico('mapeo') }}</span><span class="nav-txt">Mapeo</span></a>
 {% elif sl == 'tareas' %}<a href="/tareas" class="nav-link" title="Tareas"><span class="nav-ico">{{ ico('tareas') }}</span><span class="nav-txt">Tareas</span></a>
 {% elif sl == 'articulos' %}<a href="/articulos" class="nav-link" title="Artículos"><span class="nav-ico">{{ ico('articulos') }}</span><span class="nav-txt">Artículos</span></a>
@@ -15,7 +16,7 @@
 {% endif %}{% endmacro %}
 <a href="/" class="nav-link" title="Inicio"><span class="nav-ico">{{ ico('inicio') }}</span><span class="nav-txt">Inicio</span></a>
 {# Secciones en el orden que eligió el admin (Secciones → arrastrar) #}
-{% set _menu = ['despacho', 'devoluciones', 'conteo', 'ecommerce', 'cambios', 'pick_odoo', 'rotulos', 'clientes', 'mapeo', 'tareas', 'articulos', 'ml'] %}
+{% set _menu = ['despacho', 'devoluciones', 'conteo', 'ecommerce', 'cambios', 'pick_odoo', 'rotulos', 'clientes', 'hojas_ruta', 'mapeo', 'tareas', 'articulos', 'ml'] %}
 {% for sl in orden_menu if sl in _menu and sl in acc %}{{ _item(sl) }}{% endfor %}
 {% for sl in _menu if sl in acc and sl not in orden_menu %}{{ _item(sl) }}{% endfor %}
 {% if 'supervision' in acc %}<a href="/supervision" class="nav-link" title="Supervisión"><span class="nav-ico">{{ ico('supervision') }}</span><span class="nav-txt">Supervisión</span></a>{% endif %}

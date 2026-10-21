@@ -43,7 +43,8 @@ class FakeCliente:
             dom = args[0]
             ps = PICKS
             if dom and dom[0][0] == "id":
-                ps = [p for p in ps if p["id"] == dom[0][2]]
+                ids = dom[0][2] if dom[0][1] == "in" else [dom[0][2]]
+                ps = [p for p in ps if p["id"] in ids]
             return ps
         if modelo == "res.partner" and metodo == "read":
             return [PARTNERS[i] for i in args[0] if i in PARTNERS]
@@ -52,6 +53,12 @@ class FakeCliente:
             if dom[0][0] == "parent_id":
                 return [p for p in PARTNERS.values() if p["parent_id"] and p["parent_id"][0] == dom[0][2]]
             return [PARTNERS[11387], PARTNERS[11661]]
+        if modelo == "delivery.carrier":
+            dirs = {553: {"id": 553, "street": "Rabanal 3321, CABA", "street2": False, "city": "Capital Federal",
+                          "zip": False, "state_id": [553, "Ciudad Autónoma de Buenos Aires (AR)"]},
+                    699: {"id": 699, "street": "av int. francisco rabanal 2756", "street2": False, "city": "Capital Federal",
+                          "zip": False, "state_id": [553, "Ciudad Autónoma de Buenos Aires (AR)"]}}
+            return [dirs[i] for i in args[0] if i in dirs]
         if modelo == "res.company":
             return [{"name": "MAGONTEX S.A.", "street": "PARAGUAY 577", "street2": "Piso:10 Dpto:B", "city": "Retiro",
                      "zip": "1057", "state_id": [553, "Ciudad Autónoma de Buenos Aires (AR)"], "vat": "30714710474"}]
@@ -115,8 +122,13 @@ def test_pedidos_rotulos(monkeypatch):
         # bultos corregidos a mano y ZPL 300 dpi
         z = c.get("/rotulos/412/rotulo.zpl?bultos=2")
         assert z.status_code == 200 and z.text.count("^XA") == 2 and "^PW1181^LL1772" in z.text
-        assert "^FDCLI-011387^FS" in z.text and "QA,http://testserver/clientes/11387" in z.text and "2 de 2" in z.text
+        assert "^FDCLI-011387^FS" in z.text and "QA,http://testserver/b/412-1-2" in z.text and "QA,http://testserver/b/412-2-2" in z.text and "2 de 2" in z.text
         assert c.get("/rotulos/999/rotulo.html").status_code == 404
+        # el QR del bulto, escaneado con la cámara común, abre la ficha del cliente
+        r = c.get("/b/412-2-3", follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"] == "/clientes/11387"
+        assert c.get("/b/412-4-3").status_code == 404
+        assert out["cliente"]["expreso_dir"]["calle"] == "av int. francisco rabanal 2756"
 
 
 def test_clientes_ficha_y_planilla(monkeypatch):
