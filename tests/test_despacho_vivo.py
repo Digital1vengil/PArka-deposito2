@@ -128,8 +128,11 @@ def test_whatsapp_resumen_totales_del_dia(monkeypatch):
         c.post("/despacho/api/vivo/escaneado", json={"tipo": "flex", "tracking": "102", "venta": "2"})
         c.post("/despacho/api/vivo/escaneado", json={"tipo": "colecta", "tracking": "103", "venta": "999"})
         c.post("/despacho/api/vivo/escaneado", json={"tipo": "tiendanube", "tracking": "7004"})
+        c.post("/despacho/api/vivo/escaneado", json={"tipo": "flex", "tracking": "44000000102"})
+        c.post("/despacho/api/vivo/escaneado", json={"tipo": "flex", "tracking": "SP-1234567"})
         d = c.get("/despacho/api/whatsapp/resumen").json()
-        assert d["totales"] == {"flex": 1, "colecta": 1, "tiendanube": 1, "cambios": 0} and d["total"] == 3
+        # Flex: lo de Tienda Nube (nº de orden corto / SP-guía) se cuenta aparte de lo de Mercado Libre
+        assert d["totales"] == {"flex": 1, "flex_tn": 2, "colecta": 1, "tiendanube": 1, "cambios": 0} and d["total"] == 5
         assert c.post("/despacho/api/whatsapp/destino", json={"numero": "12"}).status_code == 400
         assert c.post("/despacho/api/whatsapp/destino", json={"numero": "+54 9 11 5605-3000"}).json()["numero"] == "5491156053000"
         assert "whatsapp-despacho.js" in c.get("/despacho/scanner/index.html").text

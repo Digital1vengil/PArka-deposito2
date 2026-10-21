@@ -19,7 +19,7 @@ def _login(c, nombre="Vengil", pin="1234"):
 def _cargar_dia():
     with SessionLocal() as db:
         u = db.query(Usuario).first()
-        for tipo, tr in [("flex", "4001"), ("flex", "4002"), ("colecta", "5001"), ("tiendanube", "TN-9")]:
+        for tipo, tr in [("flex", "44000000001"), ("flex", "4002"), ("colecta", "5001"), ("tiendanube", "TN-9")]:
             db.add(DespachoEscaneo(fecha=hoy(), tipo=tipo, tracking=tr, venta="V" + tr, comprador="Ana", usuario_id=u.id))
         d = Devolucion(fecha=hoy(), usuario_id=u.id, total=3, plataforma="ML")
         d.items = [DevolucionItem(codigo_barras="200", articulo="ABBA", color="BLACK", talle="M", estado="OPTIMO",
@@ -68,8 +68,12 @@ def test_excels_y_subida(monkeypatch):
     assert fecha == hoy().isoformat()
 
     desp = _hojas(archivos["despachos"])
-    assert {"Resumen", "Flex", "Colecta", "Tienda Nube"} <= set(desp)
-    assert len(desp["Flex"]) == 3 and len(desp["Colecta"]) == 2 and len(desp["Tienda Nube"]) == 2
+    assert {"Resumen", "Flex Mercado Libre", "Flex Tienda Nube", "Colecta", "Tienda Nube"} <= set(desp)
+    # en Flex, lo de Mercado Libre (envío de 11 dígitos) y lo de Tienda Nube (nº de orden) van en hojas separadas
+    assert len(desp["Flex Mercado Libre"]) == 2 and desp["Flex Mercado Libre"][1][1] == "44000000001"
+    assert len(desp["Flex Tienda Nube"]) == 2 and desp["Flex Tienda Nube"][1][1] == "4002"
+    assert len(desp["Colecta"]) == 2 and len(desp["Tienda Nube"]) == 2
+    assert ["Flex Mercado Libre", 1] in desp["Resumen"] and ["Flex Tienda Nube", 1] in desp["Resumen"]
     assert ["TOTAL", 4] in desp["Resumen"]
 
     dev = _hojas(archivos["devoluciones"])
@@ -162,9 +166,9 @@ def test_caracteres_invisibles_no_rompen_el_excel(monkeypatch):
     from app.services.deposito_drive import excel_despachos, excel_cierre_dia
     with SessionLocal() as db:
         u = db.query(Usuario).first()
-        db.add(DespachoEscaneo(fecha=hoy(), tipo="flex", tracking="9001", venta="V9001",
+        db.add(DespachoEscaneo(fecha=hoy(), tipo="flex", tracking="44000009001", venta="V9001",
                                comprador="Juan\x0b Pérez\x01", usuario_id=u.id))
         db.commit()
         hojas = _hojas(excel_despachos(db, hoy()))
-        assert any(r and r[3] == "Juan Pérez" for r in hojas["Flex"])
+        assert any(r and r[3] == "Juan Pérez" for r in hojas["Flex Mercado Libre"])
         assert "Resumen" in _hojas(excel_cierre_dia(db, hoy()))

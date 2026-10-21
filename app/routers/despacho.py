@@ -597,10 +597,13 @@ class WhatsappDespacho(BaseModel):
 @router.get("/api/whatsapp/resumen")
 def whatsapp_resumen(u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
     """Totales de lo que salió hoy (registro compartido del despacho en vivo) + a quién se avisa."""
+    from ..services.deposito_drive import es_tn_flex
     totales = {t: 0 for t in TIPOS_VIVO}
+    totales["flex_tn"] = 0  # lo de Tienda Nube que salió en Flex se cuenta aparte
     for r in db.scalars(select(DespachoEscaneo).where(DespachoEscaneo.fecha == hoy())).all():
-        if r.tipo in totales:
-            totales[r.tipo] += 1
+        t = "flex_tn" if r.tipo == "flex" and es_tn_flex(r.tracking) else r.tipo
+        if t in totales:
+            totales[t] += 1
     return {"ok": True, "fecha": hoy().isoformat(), "totales": totales, "total": sum(totales.values()),
             "numero": ajustes.leer("wa_despacho_numero", db), "nombre": ajustes.leer("wa_despacho_nombre", db),
             "puede_editar": u.es_admin}

@@ -36,7 +36,15 @@ from .cierre import datos_cierre
 log = logging.getLogger("parka.deposito_drive")
 
 SECCIONES = ("despachos", "devoluciones", "conteos", "cierre")
-TIPOS_DESPACHO = {"flex": "Flex", "colecta": "Colecta", "tiendanube": "Tienda Nube", "cambios": "Cambios"}
+TIPOS_DESPACHO = {"flex": "Flex Mercado Libre", "flex_tn": "Flex Tienda Nube", "colecta": "Colecta",
+                  "tiendanube": "Tienda Nube", "cambios": "Cambios"}
+
+
+def es_tn_flex(tracking: str) -> bool:
+    """En Flex también salen órdenes de Tienda Nube (SmartPost): su nº es el de la orden (corto) o "SP-<guía>".
+    Los envíos de Mercado Libre son números largos (11 dígitos)."""
+    t = str(tracking or "").strip()
+    return t.upper().startswith("SP-") or (t.isdigit() and len(t) <= 9)
 
 # huella de lo último subido por (fecha, sección): si no cambió nada, no se vuelve a subir
 _subido: dict[tuple[str, str], str] = {}
@@ -72,7 +80,8 @@ def despachos_del_dia(db: Session, fecha: date) -> list[dict]:
     filas: dict[tuple[str, str], dict] = {}
     for r in db.scalars(select(DespachoEscaneo).where(DespachoEscaneo.fecha == fecha)
                         .order_by(DespachoEscaneo.at)).all():
-        filas[(r.tipo, r.tracking)] = dict(tipo=r.tipo, hora=_hhmm(r.at), tracking=r.tracking, venta=r.venta,
+        tipo = "flex_tn" if r.tipo == "flex" and es_tn_flex(r.tracking) else r.tipo
+        filas[(tipo, r.tracking)] = dict(tipo=tipo, hora=_hhmm(r.at), tracking=r.tracking, venta=r.venta,
                                            comprador=r.comprador, producto="", sku="", cantidad=None,
                                            operario=nombres.get(r.usuario_id, ""), origen="Scanner en vivo", _ts=r.at)
     paquetes = db.scalars(select(Paquete).join(Lote).where(Paquete.estado == "despachado",
@@ -220,7 +229,7 @@ def _filas_con(conteos: list[Conteo]) -> list[list]:
 
 def _totales_desp(desp: list[dict], sp: list[EnvioManual]) -> list[list]:
     cnt = Counter(f["tipo"] for f in desp)
-    filas = [[TIPOS_DESPACHO[t], cnt.get(t, 0)] for t in ("flex", "colecta", "tiendanube")]
+    filas = [[TIPOS_DESPACHO[t], cnt.get(t, 0)] for t in ("flex", "flex_tn", "colecta", "tiendanube")]
     if cnt.get("cambios"):
         filas.append(["Cambios", cnt["cambios"]])
     if sp:
@@ -253,7 +262,7 @@ def excel_despachos(db: Session, fecha: date) -> bytes:
     _resumen(wb, "Despachos", fecha, [(["Tipo", "Despachados"], _totales_desp(desp, sp))])
     for t, nombre in TIPOS_DESPACHO.items():
         lista = [f for f in desp if f["tipo"] == t]
-        if t != "cambios" or lista:  # Flex / Colecta / Tienda Nube siempre (aunque estén vacías)
+        if t != "cambios" or lista:  # Flex ML / Flex TN / Colecta / Tienda Nube siempre (aunque estén vacías)
             _hoja(wb, nombre, ENC_DESP, _filas_desp(lista), ANCHO_DESP)
     if sp:
         _hoja(wb, "SmartPost", ENC_SP, _filas_sp(sp), ANCHO_SP)
@@ -305,7 +314,7 @@ def excel_cierre_dia(db: Session, fecha: date) -> bytes:
         (["Operario", "Paquetes despachados", "Tareas completadas", "Acciones totales"], ops),
     ])
     _hoja(wb, "Despachados", ["Tipo"] + ENC_DESP,
-          [[TIPOS_DESPACHO.get(f["tipo"], f["tipo"])] + r for f, r in zip(desp, _filas_desp(desp))], [12] + ANCHO_DESP)
+          [[TIPOS_DESPACHO.get(f["tipo"], f["tipo"])] + r for f, r in zip(desp, _filas_desp(desp))], [18] + ANCHO_DESP)
     if sp:
         _hoja(wb, "SmartPost", ENC_SP, _filas_sp(sp), ANCHO_SP)
     _hoja(wb, "Sin despachar", ["Tipo", "Lote", "Nº de envío", "Venta", "Comprador", "Producto", "SKU", "Cant."],
