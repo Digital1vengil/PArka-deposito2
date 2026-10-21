@@ -110,7 +110,7 @@
     </div>
     <div id="r-plat" class="flex flex-wrap gap-2 mb-4 text-sm"></div>
     <div id="r-detalle" class="text-sm mb-4"></div>
-    <p class="text-xs text-zinc-500 mb-3">Se abren las etiquetas para imprimir y la app arma la ruta para guardar cada prenda en su rack. Drive (Crédito y Reingreso) se carga al marcar <b>devuelto</b>.</p>
+    <p class="text-xs text-zinc-500 mb-3"><b>Paso 1</b> (ahora): se abren las etiquetas y se genera todo en Drive (Excel del día, Crédito y Reingreso). <b>Paso 2</b> (la ruta): en cada rack escaneás el rack —se verifica que coincida con la ubicación de Odoo— y cada prenda; el Excel del día completa "Devuelto a …".</p>
     <div class="flex flex-col gap-2">
       <button id="btn-subir" class="btn btn-primario w-full !py-3" onclick="confirmar('ruta')">🗺 Confirmar y armar la ruta</button>
       <div class="flex gap-2">
@@ -142,7 +142,7 @@
         <div><h3 class="text-xs font-bold uppercase tracking-wider text-zinc-500 mb-1">Paradas</h3><div id="ruta-lista" class="flex flex-col text-sm"></div></div>
         <button id="btn-devuelto" class="btn btn-primario w-full !py-3" onclick="marcarDevuelto()">✔ Marcar como devuelto</button>
         <button class="btn btn-gris w-full" onclick="sinDevolver()">☁ Guardar en Drive sin devolver</button>
-        <p class="text-xs text-zinc-500">Cada prenda que escaneás en su rack queda confirmada al instante en el Excel del día (Drive). Al confirmar la última, la devolución se marca devuelta y se carga sola (Crédito y Reingreso). "Sin devolver": no hay lugar o no hay información. Se sube igual a Drive (Crédito y Reingreso) y las prendas quedan sin rack.</p>
+        <p class="text-xs text-zinc-500">Crédito y Reingreso ya se generaron al confirmar. Primero escaneá el rack (tiene que coincidir con la ubicación del producto en Odoo) y después cada prenda: queda al instante en el Excel del día como "Devuelto a …". "Sin devolver": no hay lugar o no hay información; las prendas quedan sin rack.</p>
       </div>
     </div>
   </div>
@@ -772,7 +772,8 @@ async function confirmar(modo = 'ruta') {
     cerrarResumen();
     const desde = +document.getElementById('desde').value || 1;
     if (r.devolucion.items.some(i => i.estado !== 'AJENO')) imprimirEtiquetas('devoluciones', r.devolucion.id, { desde });
-    if (r.ruta) toast(`PD-${r.devolucion.id} guardada en la app. Seguí la ruta para devolver las prendas a los racks.`, 'ok', 5000);
+    if (r.ruta) toast(r.devolucion.drive_ok ? `PD-${r.devolucion.id} generada en Drive. Seguí la ruta para devolver las prendas a los racks.`
+      : `PD-${r.devolucion.id} guardada, pero Drive falló: reintentalo desde "Últimas devoluciones". Igual podés seguir la ruta.`, r.devolucion.drive_ok ? 'ok' : 'warn', 7000);
     else toast(r.devolucion.drive_ok ? `Devolución PD-${r.devolucion.id} guardada en Drive`
       : `PD-${r.devolucion.id} guardada en la app, pero Drive falló: reintentalo desde "Últimas devoluciones"`,
       r.devolucion.drive_ok ? 'ok' : 'warn', r.devolucion.drive_ok ? 5000 : 10000);
@@ -809,7 +810,7 @@ async function historial() {
     <div class="flex flex-wrap items-center gap-3 py-2 border-b border-zinc-700 last:border-0">
       <b>PD-${x.id}</b>${(x.plataforma || '').split('+').map(chipPlat).join('')}${_chipNuevo(x)}<span class="text-zinc-500">${x.hora} · ${esc(x.usuario)}</span>
       <span class="flex-1 min-w-[200px] truncate">${(x.ventas || []).length ? `<b>${x.ventas.map(esc).join(', ')}</b> · ` : ''}${x.items.map(i => `${i.plataforma ? esc(i.plataforma) + ' ' : ''}${esc(i.articulo)} ${esc(i.color)} ${esc(i.talle)} x${i.cantidad}`).join(' · ')}</span>
-      ${x.ruta_estado === 'PENDIENTE' ? `<button class="btn btn-amarillo btn-chico" onclick="seguirRuta(${x.id}, this)">🗺 Seguir la ruta</button>`
+      ${x.ruta_estado === 'PENDIENTE' ? `${x.drive_ok ? '<span class="chip chip-hecha">☁ Drive</span>' : `<button class="btn btn-gris btn-chico" onclick="reintentar(${x.id}, this)">⚠ Reintentar Drive</button>`}<button class="btn btn-amarillo btn-chico" onclick="seguirRuta(${x.id}, this)">🗺 Seguir la ruta</button>`
         : x.drive_ok ? '<span class="chip chip-hecha">☁ Drive</span>' : `<button class="btn btn-gris btn-chico" onclick="reintentar(${x.id}, this)">⚠ Reintentar Drive</button>`}
       ${x.ruta_estado === 'DEVUELTO' ? '<span class="chip chip-hecha">✔ En racks</span>' : x.ruta_estado === 'SIN_DEVOLVER' ? '<span class="chip chip-pendiente">Sin devolver</span>' : ''}
       <button class="btn btn-primario btn-chico" onclick="marcarVisto(${x.id}); imprimirEtiquetas('devoluciones', ${x.id}, { btn: this })">🖨 Imprimir etiquetas</button>
@@ -897,7 +898,7 @@ function pintarRuta() {
   else {
     const rack = p.libre ? (r.rackOk ? `Rack elegido: <b>${esc(r.rackOk)}</b>` : 'Escaneá el rack donde las vas a dejar') : `<span class="text-3xl font-black tracking-wide">${esc(p.codigo)}</span>`;
     el.style.borderColor = r.rackOk ? '#15803d' : '#ea580c';
-    el.innerHTML = `<div class="flex flex-wrap items-center gap-2 mb-1"><span class="chip ${p.libre ? 'chip-pendiente' : 'chip-en_curso'}">PARADA ${p.n} DE ${ps.length}</span>${p.es_fallas ? '<span class="chip" style="background:#fee2e2;color:#b91c1c">RACK DE FALLAS</span>' : ''}${r.rackOk ? '<span class="chip chip-hecha">RACK OK</span>' : ''}</div>
+    el.innerHTML = `<div class="flex flex-wrap items-center gap-2 mb-1"><span class="chip ${p.libre ? 'chip-pendiente' : 'chip-en_curso'}">PARADA ${p.n} DE ${ps.length}</span>${p.es_fallas ? '<span class="chip" style="background:#fee2e2;color:#b91c1c">RACK DE FALLAS</span>' : ''}${(p.items || []).some(x => x.odoo && x.odoo === p.codigo) ? '<span class="chip" style="background:#ede9fe;color:#5b21b6">UBICACIÓN DE ODOO</span>' : ''}${r.rackOk ? '<span class="chip chip-hecha">RACK OK</span>' : ''}</div>
       <div class="mb-1">${rack}</div><div class="text-sm text-zinc-500 mb-3">${esc(p.descripcion || '')}</div>
       <div class="text-xs font-bold uppercase tracking-wider text-zinc-500 mb-1">${r.rackOk ? 'Ahora escaneá cada prenda que dejás acá' : 'Primero escaneá el código de barras del rack'}</div>
       ${p.items.map(it => { const f = _faltan(it); return `<div class="flex items-center gap-2 py-1.5 border-b border-zinc-200 last:border-0 ${f ? '' : 'opacity-50'}">
@@ -941,7 +942,12 @@ async function escanearRuta(raw) {
     // se confirma en el servidor al instante: queda en la devolución y en el Excel del día de Drive
     let x;
     try { x = await api(`/devoluciones/api/${r.did}/guardar`, { json: { item_id: it.item_id, codigo: r.rackOk, cantidad: 1 } }); }
-    catch (e) { beepError(); _estadoRuta(false, 'No se pudo confirmar', esc(e.message)); return; }
+    catch (e) {
+      beepError();
+      if (/^No coincide con Odoo/.test(e.message)) _estadoRuta(false, '✖ El rack no coincide con Odoo', esc(e.message.replace(/^No coincide con Odoo: /, '')) + '. Llevala al rack que dice Odoo.');
+      else _estadoRuta(false, 'No se pudo confirmar', esc(e.message));
+      return;
+    }
     r.puestos[it.item_id] = x.guardados;
     beepOk(); _guardarProg();
     if (x.aprendidas) toast('Mapeo aprendió esta ubicación para la próxima', 'info', 4000);
