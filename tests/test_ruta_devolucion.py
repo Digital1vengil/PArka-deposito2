@@ -50,13 +50,11 @@ def test_flujo_ruta_devolucion(monkeypatch):
             {"articulo_id": v1["id"], "cantidad": 1, "estado": "FALLA", "plataforma": "ML", "venta": "2000012345678901"},
             {"articulo_id": v2["id"], "cantidad": 1, "estado": "OPTIMO", "plataforma": "ML", "venta": "2000012345678901"}]}).json()
         d, ruta = res["devolucion"], res["ruta"]
-        assert d["ruta_estado"] == "PENDIENTE" and not d["drive_ok"] and not enviados   # Drive recién al devolver
+        assert d["ruta_estado"] == "PENDIENTE" and d["drive_ok"] and len(enviados) == 1   # paso 1: Drive al confirmar
         cods = [p["codigo"] for p in ruta["paradas"]]
         assert "C05" in cods and ruta["rack_fallas"] == "C05" and ruta["inicio"]["nombre"] == "Persiana 1"
         assert len([x for x in cods if x in ("A03", "B01-C07-N0")]) == 1   # elige uno solo de los dos racks
         assert [i["articulo"] for i in ruta["sin_ubicacion"]] == ["ABBA 02003"]   # v2 no tiene rack
-        # sin terminar la ruta no se reintenta Drive
-        assert c.post(f"/devoluciones/api/{d['id']}/reintentar").status_code == 409
         assert c.get("/devoluciones/api/rack?c=b01-c07-n0").json() == {"ok": True, "codigo": "B01-C07-N0",
                                                                       "descripcion": croquis.describir("B01-C07-N0")}
         assert not c.get("/devoluciones/api/rack?c=Z99").json()["ok"]
@@ -67,7 +65,7 @@ def test_flujo_ruta_devolucion(monkeypatch):
             {"item_id": p_opt["items"][0]["item_id"], "codigo": p_opt["codigo"], "cantidad": 2},
             {"item_id": p_fal["items"][0]["item_id"], "codigo": "C05", "cantidad": 1},
             {"item_id": sin["item_id"], "codigo": "B02", "cantidad": 1}]}).json()
-        assert r["devolucion"]["ruta_estado"] == "DEVUELTO" and r["devolucion"]["drive_ok"] and len(enviados) == 1
+        assert r["devolucion"]["ruta_estado"] == "DEVUELTO" and r["devolucion"]["drive_ok"] and len(enviados) == 1   # no se repite
         assert r["aprendidas"] == 1   # v2 quedó en B02: la próxima vez la ruta la manda ahí
         assert sorted(i["ubicacion"] for i in r["devolucion"]["items"]) == sorted([p_opt["codigo"], "C05", "B02"])
         assert c.post(f"/devoluciones/api/{d['id']}/devuelto", json={"guardados": []}).status_code == 409
@@ -77,7 +75,7 @@ def test_flujo_ruta_devolucion(monkeypatch):
         assert [p["codigo"] for p in res2["ruta"]["paradas"]] == ["B02"] and not res2["ruta"]["sin_ubicacion"]
         # "Guardar en Drive sin devolver"
         s = c.post(f"/devoluciones/api/{res2['devolucion']['id']}/sin-devolver").json()["devolucion"]
-        assert s["ruta_estado"] == "SIN_DEVOLVER" and s["drive_ok"] and len(enviados) == 2
+        assert s["ruta_estado"] == "SIN_DEVOLVER" and s["drive_ok"] and len(enviados) == 2   # ya subida al confirmar
         # sin ruta (el botón del resumen) se sube directo, como antes
         res3 = c.post("/devoluciones/api/confirmar", json={"items": [
             {"articulo_id": v2["id"], "cantidad": 1, "estado": "OPTIMO", "plataforma": "TN", "venta": "1235"}]}).json()
@@ -103,7 +101,8 @@ def test_cada_prenda_se_confirma_al_instante(monkeypatch):
         did, it = res["devolucion"]["id"], res["ruta"]["paradas"][0]["items"][0]
         assert excel   # el Excel del día ya la muestra pendiente
         r1 = c.post(f"/devoluciones/api/{did}/guardar", json={"item_id": it["item_id"], "codigo": "a01"}).json()
-        assert r1["guardados"] == {"A01": 1} and not r1["completa"] and not enviados and len(excel) == 2
+        assert enviados == [did]   # paso 1: Crédito y Reingreso al confirmar
+        assert r1["guardados"] == {"A01": 1} and not r1["completa"] and len(excel) == 2
         # el Excel del día muestra la prenda pendiente (1 de 2) con su rack
         from app.db import SessionLocal
         from app.models import Devolucion
@@ -114,9 +113,35 @@ def test_cada_prenda_se_confirma_al_instante(monkeypatch):
         # retomar la ruta trae lo confirmado desde el servidor
         assert c.get(f"/devoluciones/api/{did}/ruta").json()["paradas"][0]["items"][0]["guardados"] == {"A01": 1}
         r2 = c.post(f"/devoluciones/api/{did}/guardar", json={"item_id": it["item_id"], "codigo": "A01"}).json()
-        assert r2["completa"] and r2["devolucion"]["ruta_estado"] == "DEVUELTO" and enviados == [did]   # se sube sola
+        assert r2["completa"] and r2["devolucion"]["ruta_estado"] == "DEVUELTO" and enviados == [did]   # no se sube dos veces
         assert c.post(f"/devoluciones/api/{did}/guardar", json={"item_id": it["item_id"], "codigo": "A01"}).status_code == 409
         with SessionLocal() as db:
             fila = deposito_drive._filas_dev([db.get(Devolucion, did)])[0]
-            assert fila[-2] == "A01" and fila[-1].startswith("Sí · ")
+            assert fila[-2] == "A01" and fila[-1].startswith("Devuelto a A01 · ")
         assert deposito_drive.ENC_DEV[-2:] == ["Ubicación", "Devuelto al rack"]
+
+
+def test_ubicacion_de_odoo_se_verifica(monkeypatch):
+    """Paso 2: el rack escaneado tiene que coincidir con la ubicación del producto en Odoo."""
+    from app.services import ruta_devolucion as ruta_svc
+    monkeypatch.setattr(svc, "enviar", lambda d: {"ok": True, "id": "D-8"})
+    monkeypatch.setattr(ruta_svc, "actualizar_excel_dia", lambda fecha: None)
+    monkeypatch.setattr(ruta_svc, "ubicaciones_odoo", lambda db: {"B01-C07-N0": 67, "C01-C01-N0": 66})
+    monkeypatch.setattr(ruta_svc, "ubicacion_de_producto", lambda db, a: "C01-C01-N0")
+    with TestClient(app) as c:
+        _login(c)
+        c.post("/mapeo/api/croquis/cargar")
+        m = next(x for x in c.get("/devoluciones/api/buscar?q=abba 02003").json()["modelos"] if x["articulo"] == "ABBA 02003")
+        v = m["variantes"][0]
+        res = c.post("/devoluciones/api/confirmar", json={"ruta": True, "items": [
+            {"articulo_id": v["id"], "cantidad": 1, "estado": "OPTIMO", "plataforma": "TN", "venta": "1262"}]}).json()
+        p = res["ruta"]["paradas"]
+        assert [x["codigo"] for x in p] == ["C01-C01-N0"] and p[0]["items"][0]["odoo"] == "C01-C01-N0"
+        assert res["devolucion"]["drive_ok"]
+        # C01-C01-N0 no estaba en Mapeo pero es de Odoo: se acepta como rack
+        assert c.get("/devoluciones/api/rack?c=c01-c01-n0").json()["ok"]
+        did, it = res["devolucion"]["id"], p[0]["items"][0]["item_id"]
+        mal = c.post(f"/devoluciones/api/{did}/guardar", json={"item_id": it, "codigo": "B01-C07-N0"})
+        assert mal.status_code == 409 and "No coincide con Odoo" in mal.json()["detail"] and "C01-C01-N0" in mal.json()["detail"]
+        ok = c.post(f"/devoluciones/api/{did}/guardar", json={"item_id": it, "codigo": "C01-C01-N0"}).json()
+        assert ok["completa"] and ok["devolucion"]["items"][0]["ubicacion"] == "C01-C01-N0"
