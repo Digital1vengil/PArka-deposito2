@@ -16,7 +16,6 @@ from ..auth import requiere_seccion, SinPermiso, puede
 from ..db import get_db, hoy, ahora
 from ..models import DespachoEscaneo, Lote, Paquete, Tanda, Usuario, TIPOS_LOTE
 from ..parsers import leer_archivo
-from ..services import ajustes
 from ..services import despacho as svc, drive, parkahub, ventas_api, meli
 from ..services import tiendanube as tn
 from ..services.tareas import tareas_de_seccion, tarea_json
@@ -43,7 +42,7 @@ async def _leer(files: list[UploadFile]) -> list[tuple[str, bytes]]:
 # Hasta conectar la API de Mercado Libre, Despacho funciona exactamente como el scanner:
 # se sirve la misma app (app/scanner/index.html) y habla directo con el Apps Script de Drive.
 SCANNER_DIR = Path(__file__).resolve().parent.parent / "scanner"
-SCANNER_ARCHIVOS = {"despacho-vivo.js", "styles.css", "manifest.json", "icon-192.png", "icon-512.png", "tema-parka.css", "ml-semaforo.js", "control-despacho.js", "tiendanube-despacho.js", "whatsapp-despacho.js"}
+SCANNER_ARCHIVOS = {"despacho-vivo.js", "styles.css", "manifest.json", "icon-192.png", "icon-512.png", "tema-parka.css", "ml-semaforo.js", "control-despacho.js", "tiendanube-despacho.js"}
 # Colores del scanner original (verde oscuro) → verde de la marca PARKA Supply Co.
 _COLORES = {"#2f5d3a": "#1A7F4B", "#43592d": "#1A7F4B", "#547038": "#38B475", "#6a8c47": "#38B475",
             "#374a25": "#146a3e", "#263524": "#146a3e", "#f4f7f0": "#f5f5f4"}
@@ -53,7 +52,7 @@ def _scanner_html() -> str:
     html = (SCANNER_DIR / "index.html").read_text(encoding="utf-8")
     for viejo, nuevo in _COLORES.items():
         html = html.replace(viejo, nuevo).replace(viejo.upper(), nuevo)
-    tema = '<link rel="stylesheet" href="tema-parka.css">\n<script src="ml-semaforo.js"></script>\n<script src="control-despacho.js"></script>\n<script src="tiendanube-despacho.js"></script>\n<script src="despacho-vivo.js"></script>\n<script src="whatsapp-despacho.js"></script>'
+    tema = '<link rel="stylesheet" href="tema-parka.css">\n<script src="ml-semaforo.js"></script>\n<script src="control-despacho.js"></script>\n<script src="tiendanube-despacho.js"></script>\n<script src="despacho-vivo.js"></script>'
     html = html.replace("</body>", tema + "\n</body>", 1) if "</body>" in html else html + tema
     # cada versión con su propia dirección: el celular no puede quedarse con un script o estilo viejo
     from ..templating import VERSION
@@ -586,37 +585,3 @@ def cierre_mail(u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
         return drive.cerrar_dia(db, u)
     except drive.DriveError as e:
         raise HTTPException(502, str(e))
-
-
-# ─────────────── Aviso por WhatsApp: totales despachados hoy ───────────────
-class WhatsappDespacho(BaseModel):
-    numero: str
-    nombre: str = ""
-
-
-@router.get("/api/whatsapp/resumen")
-def whatsapp_resumen(u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
-    """Totales de lo que salió hoy (registro compartido del despacho en vivo) + a quién se avisa."""
-    from ..services.deposito_drive import es_tn_flex
-    totales = {t: 0 for t in TIPOS_VIVO}
-    totales["flex_tn"] = 0  # lo de Tienda Nube que salió en Flex se cuenta aparte
-    for r in db.scalars(select(DespachoEscaneo).where(DespachoEscaneo.fecha == hoy())).all():
-        t = "flex_tn" if r.tipo == "flex" and es_tn_flex(r.tracking) else r.tipo
-        if t in totales:
-            totales[t] += 1
-    return {"ok": True, "fecha": hoy().isoformat(), "totales": totales, "total": sum(totales.values()),
-            "numero": ajustes.leer("wa_despacho_numero", db), "nombre": ajustes.leer("wa_despacho_nombre", db),
-            "puede_editar": u.es_admin}
-
-
-@router.post("/api/whatsapp/destino")
-def whatsapp_destino(body: WhatsappDespacho, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
-    if not u.es_admin:
-        raise HTTPException(403, "Solo un admin puede cambiar el número")
-    num = "".join(ch for ch in body.numero if ch.isdigit())
-    if len(num) < 10 or len(num) > 15:
-        raise HTTPException(400, "Número inválido: con código de país, ej. 5491156053000")
-    ajustes.guardar(db, "wa_despacho_numero", num)
-    if body.nombre.strip():
-        ajustes.guardar(db, "wa_despacho_nombre", body.nombre.strip()[:60])
-    return {"ok": True, "numero": num}

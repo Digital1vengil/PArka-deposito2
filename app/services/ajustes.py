@@ -74,9 +74,6 @@ CLAVES = {
     "sp_panel_usuario": ("SP_PANEL_USUARIO", "", False),
     "sp_panel_clave": ("SP_PANEL_CLAVE", "", True),   # contraseña del panel web (Mis Pedidos / Búsqueda de Guía)
     "sp_despacho": ("SP_DESPACHO", "1", False),   # 1 = verificar guías de SmartPost en Despacho (Tienda Nube)
-    # Despacho: botón "Avisar por WhatsApp" con los totales del día (abre WhatsApp con el texto escrito)
-    "wa_despacho_numero": ("WA_DESPACHO_NUMERO", "5491156053000", False),
-    "wa_despacho_nombre": ("WA_DESPACHO_NOMBRE", "Sr. Gabriel", False),
     # Etiquetas en rollo: Honeywell PC42t Plus (ZPL), rollo 87 mm, 2 x 40x25 mm (calibración validada)
     "rollo_impresora": ("ROLLO_IMPRESORA", "", False),     # nombre en Windows, o IP[:9100]
     "rollo_desplaz_x": ("ROLLO_DESPLAZ_X", "10", False),   # mm, ambas etiquetas (^LH)
