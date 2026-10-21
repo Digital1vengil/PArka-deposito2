@@ -178,10 +178,14 @@ def confirmar(body: ConfirmarIn, u: Usuario = Depends(acceso), db: Session = Dep
     ventas = ", ".join(dict.fromkeys(f"{i.plataforma} {i.venta}" for i in d.items))
     registrar(db, u, "devolucion", f"PD-{d.id} · {ventas} · {d.total} unidades", "devoluciones")
     if body.ruta and any(i.estado != "AJENO" for i in d.items):
-        d.ruta_estado = "PENDIENTE"   # Drive recién al marcar como devuelto (o "Guardar en Drive sin devolver")
+        # Paso 1 (al confirmar): se genera todo en Drive — Excel del día ("Pendiente") + Crédito y Reingreso.
+        # Paso 2 (en la ruta): cada prenda guardada completa "Ubicación" y "Devuelto al rack" en el Excel del día.
+        d.ruta_estado = "PENDIENTE"
         db.commit()
-        ruta_svc.actualizar_excel_dia(d.fecha)   # el Excel del día ya la muestra "Pendiente"
-        return {"ok": True, "devolucion": dev_json(d), "ruta": ruta_svc.armar(db, d)}
+        ruta = ruta_svc.armar(db, d)
+        ruta_svc.actualizar_excel_dia(d.fecha)
+        _enviar(db, d)
+        return {"ok": True, "devolucion": dev_json(d), "ruta": ruta}
     ruta_svc.actualizar_excel_dia(d.fecha)   # el Excel del día se sube ya (en paralelo con Crédito y Reingreso)
     _enviar(db, d)
     return {"ok": True, "devolucion": dev_json(d)}
@@ -202,10 +206,11 @@ def ver_ruta(did: int, u: Usuario = Depends(acceso), db: Session = Depends(get_d
 
 @router.get("/api/rack")
 def rack(c: str = "", u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
-    """Código de barras del rack escaneado → la ubicación (tiene que estar cargada en Mapeo)."""
+    """Código de barras del rack escaneado → la ubicación (de Mapeo o de Odoo)."""
     x = ruta_svc.ubicacion(db, c)
+    db.commit()
     if not x:
-        return {"ok": False, "motivo": f"{(c or '').strip() or 'Ese código'} no es un rack cargado en Mapeo"}
+        return {"ok": False, "motivo": f"{(c or '').strip() or 'Ese código'} no es un rack de Mapeo ni una ubicación de Odoo"}
     from ..services import croquis
     return {"ok": True, "codigo": x.codigo, "descripcion": croquis.describir(x.codigo) or x.descripcion}
 
@@ -224,7 +229,8 @@ def _cerrar_devuelta(db: Session, d: Devolucion, u: Usuario) -> None:
     d.ruta_estado = "DEVUELTO"
     db.commit()
     registrar(db, u, "devolucion", f"PD-{d.id} devuelta a los racks", "devoluciones")
-    _enviar(db, d)
+    if not d.drive_ok:   # normalmente ya se subió al confirmar
+        _enviar(db, d)
 
 
 @router.post("/api/{did}/guardar")
@@ -239,7 +245,10 @@ def guardar_en_rack(did: int, body: GuardadoIn, u: Usuario = Depends(acceso), db
         raise HTTPException(400, "Esa prenda no es de esta devolución")
     x = ruta_svc.ubicacion(db, body.codigo)
     if not x:
-        raise HTTPException(400, f"{body.codigo} no es un rack cargado en Mapeo")
+        raise HTTPException(400, f"{body.codigo} no es un rack cargado en Mapeo ni una ubicación de Odoo")
+    if it.estado == "OPTIMO" and it.ubic_odoo and x.codigo != it.ubic_odoo:
+        raise HTTPException(409, f"No coincide con Odoo: {it.articulo} {it.color} {it.talle} va en {it.ubic_odoo} "
+                                 f"y escaneaste {x.codigo}")
     try:
         aprendidas = ruta_svc.guardar_prenda(db, d, it, x.codigo, body.cantidad, u.id)
     except ValueError as e:
@@ -267,6 +276,8 @@ def devuelto(did: int, body: DevueltoIn = DevueltoIn(), u: Usuario = Depends(acc
             raise HTTPException(400, "Hay una prenda que no es de esta devolución")
         if not x:
             raise HTTPException(400, f"{g.codigo} no es un rack cargado en Mapeo")
+        if it.estado == "OPTIMO" and it.ubic_odoo and x.codigo != it.ubic_odoo:
+            raise HTTPException(409, f"No coincide con Odoo: {it.articulo} va en {it.ubic_odoo} y se marcó {x.codigo}")
         ya = ruta_svc.guardados(it).get(x.codigo, 0)
         if g.cantidad > ya and (it.devuelto_cant or 0) < it.cantidad:
             aprendidas += ruta_svc.guardar_prenda(db, d, it, x.codigo, g.cantidad - ya, u.id)
@@ -298,8 +309,6 @@ def reintentar(did: int, u: Usuario = Depends(acceso), db: Session = Depends(get
         raise HTTPException(404)
     if d.drive_ok:
         return {"ok": True, "devolucion": dev_json(d)}
-    if d.ruta_estado == "PENDIENTE":
-        raise HTTPException(409, "Primero terminá la ruta (o tocá \"Guardar en Drive sin devolver\")")
     _enviar(db, d)
     if not d.drive_ok:
         raise HTTPException(502, d.drive_resp)
