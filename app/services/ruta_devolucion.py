@@ -4,7 +4,7 @@
   ninguna, la asignada en Mapeo (variante > color > modelo).
   Al guardar se verifica que el rack escaneado coincida con la ubicación de Odoo. Si el modelo está en varios racks se
   elige el que ya es parada de la ruta o, si no, el más cerca de la persiana de salida.
-- Falla → el rack de fallas (Mapeo → Croquis). Sin rack de fallas configurado, queda "sin ubicación".
+- Falla → el rack de fallas (Mapeo → Ajustes). Sin rack de fallas configurado, queda "sin ubicación".
 - Sin ubicación conocida → parada final: se escanea el rack donde se deja y la app lo aprende para la próxima.
 """
 from __future__ import annotations
@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from ..db import SessionLocal, ahora
 from ..models import Articulo, Devolucion, Ubicacion, UbicacionArticulo
-from . import ajustes, croquis, odoo
+from . import ajustes, odoo, plano
 from .mapeo import normalizar_codigo, ubicaciones_de
 
 log = logging.getLogger(__name__)
@@ -41,9 +41,9 @@ def ubicacion(db: Session, codigo: str) -> Ubicacion | None:
 def asegurar_ubicacion(db: Session, cod: str) -> Ubicacion:
     u = db.scalar(select(Ubicacion).where(Ubicacion.codigo == cod))
     if not u:
-        p = croquis.partes(cod)
+        p = plano.partes(cod)
         u = Ubicacion(codigo=cod, zona=p[0][:1] if p else "", pasillo=p[0] if p else "",
-                      descripcion=(croquis.describir(cod) or "Ubicación de Odoo")[:200])
+                      descripcion=(plano.describir(cod) or "Ubicación de Odoo")[:200])
         db.add(u)
         db.flush()
     return u
@@ -118,7 +118,7 @@ def ubicacion_de_producto(db: Session, a: Articulo | None) -> str:
 
 
 def _cerca(codigo: str, desde: str) -> int:
-    a, s = croquis.acceso(codigo), croquis.inicio(desde)
+    a, s = plano.acceso(codigo), plano.inicio(desde)
     return abs(a[0] - s[0]) + abs(a[1] - s[1]) if a else 10 ** 6
 
 
@@ -210,7 +210,7 @@ def _subir_pendientes() -> None:
 
 def armar(db: Session, d: Devolucion) -> dict:
     desde = ajustes.leer("mapa_inicio", db) or "P1"
-    if desde not in croquis.PUERTAS:
+    if desde not in plano.PUERTAS:
         desde = "P1"
     fallas = ubicacion(db, ajustes.leer("mapa_rack_fallas", db))
     candidatos: list[tuple[object, list[str]]] = []
@@ -240,16 +240,16 @@ def armar(db: Session, d: Devolucion) -> dict:
         elegido = ya[0] if ya else min(cods, key=lambda c: (_cerca(c, desde), cods.index(c)))
         paradas.setdefault(elegido, []).append((i, cods))
     db.commit()   # guarda la ubicación de Odoo de cada prenda (para verificarla al guardar)
-    r = croquis.ordenar(list(paradas), desde)
+    r = plano.ordenar(list(paradas), desde)
     salida = []
     for n, (cod, tramo) in enumerate(zip(r["orden"], r["tramos"]), start=1):
         u = ubicacion(db, cod)
-        salida.append({"n": n, "codigo": cod, "descripcion": croquis.describir(cod) or (u.descripcion if u else ""),
+        salida.append({"n": n, "codigo": cod, "descripcion": plano.describir(cod) or (u.descripcion if u else ""),
                        "es_fallas": bool(fallas and cod == fallas.codigo), "tramo": tramo,
-                       "punto": list(croquis.acceso(cod) or []),
+                       "punto": list(plano.acceso(cod) or []),
                        "items": [dict(item_json(i), alternativas=[c for c in cods if c != cod])
                                  for i, cods in paradas[cod]]})
-    return {"devolucion_id": d.id, "estado": d.ruta_estado or "", "plano": croquis.plano(),
-            "inicio": {"clave": desde, "nombre": croquis.PUERTAS[desde][0], "punto": list(croquis.inicio(desde))},
+    return {"devolucion_id": d.id, "estado": d.ruta_estado or "", "plano": plano.plano(),
+            "inicio": {"clave": desde, "nombre": plano.PUERTAS[desde][0], "punto": list(plano.inicio(desde))},
             "rack_fallas": fallas.codigo if fallas else "", "paradas": salida,
             "sin_ubicacion": [item_json(i) for i in sin], "metros_aprox": r["metros_aprox"]}

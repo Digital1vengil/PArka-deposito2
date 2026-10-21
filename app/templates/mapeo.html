@@ -1,117 +1,119 @@
 {% extends "base.html" %}
 {% block titulo %}Mapeo del depósito · {{ APP_NOMBRE }}{% endblock %}
 {% block main_class %}max-w-[1440px] mx-auto px-4 py-6{% endblock %}
+{% block head %}<script src="/static/vendor/html5-qrcode-2.3.8.min.js?v=2.3.8"></script>
+<style>
+/* Visor 3D del depósito: racks azules con larguero naranja, mismos colores de zona que el plano. */
+.m3d { --zA:#2f7f8a; --zB:#a8445f; --zC:#b06a2a; --acento:#0a7ea4; }
+.m3d-visor { position:relative; height:clamp(420px,68vh,760px); border-radius:14px; overflow:hidden; border:1px solid #d7dbe0; background:#dfe5ec; }
+.m3d-visor canvas { display:block; width:100%; height:100%; touch-action:none; cursor:grab; }
+.m3d-visor.mover canvas { cursor:crosshair; }
+.m3d-ayuda { position:absolute; left:10px; bottom:10px; font-size:11.5px; color:#4b5563; background:#fff; border:1px solid #d7dbe0; border-radius:8px; padding:5px 9px; pointer-events:none; max-width:calc(100% - 20px); }
+.m3d-ley { position:absolute; right:10px; top:10px; display:flex; flex-direction:column; gap:3px; font-size:11px; background:#fff; border:1px solid #d7dbe0; border-radius:8px; padding:6px 9px; color:#4b5563; }
+.m3d-ley span { display:flex; align-items:center; gap:6px; }
+.m3d-sw { width:11px; height:11px; border-radius:2px; display:inline-block; flex:none; }
+.m3d-cargando { position:absolute; inset:0; display:grid; place-items:center; color:#6b7280; font-size:13px; }
+.m3d-donde { position:absolute; left:10px; top:10px; background:#fff; border:1px solid #d7dbe0; border-radius:10px; padding:6px 10px; font-size:12px; color:#374151; max-width:calc(100% - 180px); }
+.m3d-donde b { font-size:14px; color:#ea580c; }
+.m3d-seg { display:flex; gap:3px; background:#fff; border:1px solid #d7dbe0; border-radius:10px; padding:3px; }
+.m3d-seg button { font:600 13px/1 inherit; padding:8px 11px; border-radius:7px; border:0; background:transparent; color:#1b1f24; cursor:pointer; white-space:nowrap; }
+.m3d-seg button[aria-pressed="true"] { background:#1b1f24; color:#fff; }
+.m3d-seg button.za[aria-pressed="true"] { background:var(--zA); } .m3d-seg button.zb[aria-pressed="true"] { background:var(--zB); } .m3d-seg button.zc[aria-pressed="true"] { background:var(--zC); }
+.m3d-seg button.mov[aria-pressed="true"] { background:#ea580c; }
+.m3d-fila { display:grid; grid-template-columns:46px minmax(0,1fr) auto; gap:8px; align-items:center; text-align:left; width:100%; padding:7px 6px; border-radius:7px; cursor:pointer; font-size:13px; }
+.m3d-fila:hover { background:rgba(127,127,127,.12); }
+.m3d-cols { display:grid; grid-template-columns:repeat(auto-fill,minmax(52px,1fr)); gap:5px; }
+.m3d-colb { font:600 12px/1 ui-monospace,Menlo,monospace; padding:9px 0; border-radius:7px; border:1px solid rgba(127,127,127,.35); cursor:pointer; position:relative; }
+.m3d-colb[aria-pressed="true"] { background:var(--acento); border-color:var(--acento); color:#fff; }
+.m3d-colb i { position:absolute; top:3px; right:4px; width:6px; height:6px; border-radius:50%; background:#7c3aed; }
+.m3d-modb { display:flex; justify-content:space-between; align-items:center; gap:8px; text-align:left; width:100%; padding:10px; border-radius:9px; border:1px solid rgba(127,127,127,.35); cursor:pointer; }
+.m3d-modb[aria-pressed="true"] { border-color:var(--acento); box-shadow:0 0 0 2px var(--acento) inset; }
+.m3d-cod { font:700 13px/1 ui-monospace,Menlo,monospace; letter-spacing:.02em; }
+</style>{% endblock %}
 {% block contenido %}
+<div class="m3d">
 <a href="/" class="text-sm text-zinc-500 hover:text-violeta">← Inicio</a>
 <h1 class="text-2xl font-bold mb-1">🗺️ Mapeo del depósito</h1>
-<p class="text-sm text-zinc-500 mb-4">Cada ubicación es <b>pasillo · módulo · nivel</b> (ej. <b>A-03-2</b>). Asignale qué artículo hay y la Recolección arma la ruta sola.</p>
+<p class="text-sm text-zinc-500 mb-4">Cada módulo es <b>rack · columna · nivel</b> (ej. <b>A01-C03-N1</b>; N0 = planta baja). Buscá un artículo y el monigote te marca el camino por los pasillos.</p>
 
 <div class="tabs">
-  <button class="tab activo" data-t="mapa" onclick="tab('mapa')">Mapa</button>
-  <button class="tab" data-t="croquis" onclick="tab('croquis')">Croquis</button>
-  <button class="tab" data-t="asignar" onclick="tab('asignar')">Asignar escaneando</button>
-  <button class="tab" data-t="ubicaciones" onclick="tab('ubicaciones')">Ubicaciones</button>
+  <button class="tab activo" data-t="mapa" onclick="tab('mapa')">Depósito</button>
+  <button class="tab" data-t="ajustes" onclick="tab('ajustes')">Módulos y ajustes</button>
   <button class="tab" data-t="vinculos" onclick="tab('vinculos')">SKU vinculados</button>
 </div>
 
-<!-- MAPA -->
-<div id="t-mapa" class="grid lg:grid-cols-3 gap-5">
-  <div class="lg:col-span-2 flex flex-col gap-4">
-    <section class="card p-4">
-      <label class="lbl">¿Dónde está? Buscá un artículo o una ubicación</label>
-      <input id="q" class="input" placeholder="Ej: THOR 00114, A-03, o escaneá el código" autocomplete="off">
-      <div id="res-q" class="mt-2 flex flex-col gap-2 max-h-60 overflow-y-auto"></div>
-    </section>
-    <section class="card p-4">
-      <div class="flex items-center gap-3 mb-3 text-xs text-zinc-500">
-        <span class="celda-ub llena !inline-block !min-w-0 !px-2">con artículos</span>
-        <span class="celda-ub !inline-block !min-w-0 !px-2">vacía</span>
-        <span class="celda-ub marcada !inline-block !min-w-0 !px-2">resultado</span>
-        <span class="ml-auto">Nivel 1 abajo</span>
+<!-- DEPÓSITO -->
+<div id="t-mapa" class="flex flex-col gap-3">
+  <section class="card p-3 flex flex-col gap-2">
+    <div class="flex flex-wrap gap-2 items-center">
+      <input id="q" class="input flex-1 min-w-[220px]" placeholder="¿Dónde está? Artículo, código de barras o módulo (B02-C05-N1)" autocomplete="off">
+      <button class="btn btn-gris" onclick="toggleCam()" title="Escaneá la etiqueta de la columna (te ubica) o una prenda (la busca)">📷 Escanear</button>
+    </div>
+    <div id="res-q" class="flex flex-col gap-1 max-h-52 overflow-y-auto"></div>
+    <div id="cam-box" class="hidden"><div id="qr-reader" class="rounded-xl overflow-hidden max-w-md"></div>
+      <p class="text-xs text-zinc-500 mt-1">Etiqueta de columna o módulo → te ubica ahí · prenda → la busca<span id="cam-asignar"></span>. <button class="underline" onclick="pararCam()">Cerrar cámara</button></p></div>
+  </section>
+
+  <div class="flex flex-wrap gap-2 items-center">
+    <div class="m3d-seg" role="group" aria-label="Zona">
+      <button data-z="T" aria-pressed="true">Todo</button><button class="za" data-z="A" aria-pressed="false">Zona A</button>
+      <button class="zb" data-z="B" aria-pressed="false">Zona B</button><button class="zc" data-z="C" aria-pressed="false">Zona C</button>
+    </div>
+    <div class="m3d-seg" role="group" aria-label="Vista">
+      <button data-v="iso" aria-pressed="true">3D</button><button data-v="planta" aria-pressed="false">Planta</button>
+    </div>
+    <div class="m3d-seg" role="group" aria-label="Mostrar">
+      <button id="tNom" aria-pressed="true">Nombres</button><button id="tCaj" aria-pressed="true">Cajas</button>
+    </div>
+    <div class="m3d-seg" role="group" aria-label="Dónde estoy">
+      <button id="tMover" class="mov" aria-pressed="false" title="Tocá el piso donde estás parado">📍 Estoy acá</button>
+      <button onclick="aPersiana('P1')">Persiana 1</button><button onclick="aPersiana('P2')">Persiana 2</button>
+    </div>
+  </div>
+
+  <div class="grid lg:grid-cols-[minmax(0,1fr)_340px] gap-3 items-start">
+    <div class="m3d-visor" id="visor">
+      <div class="m3d-cargando" id="cargando">Cargando el depósito…</div>
+      <div class="m3d-donde" id="donde">Estás en <b>—</b></div>
+      <div class="m3d-ley" aria-hidden="true">
+        <span><i class="m3d-sw" style="background:var(--zA)"></i>Zona A · norte</span>
+        <span><i class="m3d-sw" style="background:var(--zB)"></i>Zona B · centro</span>
+        <span><i class="m3d-sw" style="background:var(--zC)"></i>Zona C · sur</span>
+        <span><i class="m3d-sw" style="background:#ea580c;border-radius:50%"></i>Vos y el camino</span>
+        <span><i class="m3d-sw" style="background:#c8a27a"></i>Módulo con artículos</span>
       </div>
-      <div id="mapa" class="flex flex-wrap gap-6"></div>
-    </section>
+      <div class="m3d-ayuda" id="ayuda">Arrastrá para girar · dos dedos o clic derecho para mover · tocá un rack para ver sus módulos</div>
+    </div>
+    <aside class="card p-4 flex flex-col gap-3 lg:max-h-[clamp(420px,68vh,760px)] overflow-auto" id="ficha" aria-live="polite"></aside>
   </div>
-  <section id="panel-ub" class="card p-4 self-start lg:sticky lg:top-20">
-    <p class="text-sm text-zinc-500">Tocá una ubicación del mapa para ver qué tiene y asignarle artículos.</p>
-  </section>
 </div>
 
-<!-- ASIGNAR ESCANEANDO -->
-<div id="t-asignar" class="hidden max-w-2xl">
-  <section class="card p-4 flex flex-col gap-3">
-    <p class="text-sm text-zinc-500">1) Escaneá la <b>etiqueta de la ubicación</b> · 2) escaneá los artículos que están ahí. Cada artículo queda asignado a esa ubicación.</p>
-    <div><label class="lbl">Escanear</label>
-      <input id="esc" class="input !text-lg !py-3" placeholder="Código de ubicación o de artículo" autocomplete="off"></div>
-    <div><label class="lbl">Cada escaneo asigna</label>
-      <select id="nivel-asig" class="input">
-        <option value="color" selected>El color de ese artículo (todos los talles)</option>
-        <option value="modelo">El modelo entero (todos los colores y talles)</option>
-        <option value="variante">Solo esa variante (color + talle)</option>
-      </select></div>
-    <div id="esc-actual" class="rounded-xl p-4 bg-zinc-900 text-center text-zinc-500">Sin ubicación elegida</div>
-    <div id="esc-log" class="flex flex-col gap-1 text-sm"></div>
-  </section>
-</div>
-
-<!-- UBICACIONES -->
-<div id="t-ubicaciones" class="hidden flex flex-col gap-5">
+<!-- MÓDULOS Y AJUSTES -->
+<div id="t-ajustes" class="hidden grid md:grid-cols-2 gap-4">
   <section class="card p-4">
-    <h2 class="font-bold mb-3">Crear ubicaciones</h2>
-    <div class="grid grid-cols-2 sm:grid-cols-6 gap-3 items-end">
-      <div class="col-span-2"><label class="lbl">Zona (opcional)</label><input id="n-zona" class="input" placeholder="Ej: Planta baja"></div>
-      <div><label class="lbl">Pasillo</label><input id="n-pasillo" class="input" placeholder="A" maxlength="10"></div>
-      <div><label class="lbl">Módulo desde</label><input id="n-desde" type="number" min="0" value="1" class="input"></div>
-      <div><label class="lbl">hasta</label><input id="n-hasta" type="number" min="0" value="10" class="input"></div>
-      <div><label class="lbl">Niveles</label><input id="n-niveles" type="number" min="0" max="20" value="4" class="input"></div>
+    <h2 class="font-bold mb-2">Módulos del plano</h2>
+    <p id="aj-faltan" class="text-sm text-zinc-500 mb-3"></p>
+    <div class="flex flex-wrap gap-2">
+      <button id="aj-cargar" class="btn btn-primario" onclick="cargarModulos(this)">⬇ Cargar módulos del plano</button>
+      <label class="text-xs text-zinc-500 self-center">Empezar en etiqueta Nº <input id="et-desde" type="number" min="1" max="40" value="1" class="input !w-16 !py-1 inline"></label>
+      <button class="btn btn-gris" onclick="imprimirTodas(false)">🖨 Etiquetas de todos los módulos</button>
+      <button class="btn btn-gris" onclick="imprimirTodas(true)">Prueba de alineación</button>
     </div>
-    <div class="flex flex-wrap items-center gap-3 mt-3">
-      <button class="btn btn-primario" onclick="crearLote()">＋ Crear</button>
-      <span id="n-ejemplo" class="text-xs text-zinc-500"></span>
-    </div>
-    <p class="text-xs text-zinc-500 mt-2">Módulo = estantería / rack dentro del pasillo. Nivel = estante (1 = abajo). Con 0 niveles se crea una sola ubicación por módulo.</p>
+    <p class="text-xs text-zinc-500 mt-2">Pegá la etiqueta de cada módulo en su larguero. Escaneándola, el monigote te ubica ahí.</p>
   </section>
   <section class="card p-4">
-    <div class="flex flex-wrap items-center gap-2 mb-3">
-      <h2 class="font-bold flex-1">Ubicaciones <span id="u-total" class="text-zinc-500 font-normal text-sm"></span></h2>
-      <button class="btn btn-gris btn-chico" onclick="reordenar()" title="Ida por un pasillo y vuelta por el siguiente">↯ Ordenar ruta en zigzag</button>
-      <label class="text-xs text-zinc-500">Empezar en etiqueta Nº <input id="et-desde" type="number" min="1" max="40" value="1" class="input !w-16 !py-1 inline"></label>
-      <button class="btn btn-gris btn-chico" onclick="imprimir(false)">🖨 Etiquetas (marcadas o todas)</button>
-      <button class="btn btn-gris btn-chico" onclick="imprimir(true)">Prueba de alineación</button>
-    </div>
-    <div class="overflow-x-auto"><table class="w-full text-sm">
-      <thead class="text-left text-xs text-zinc-500"><tr>
-        <th class="py-1"><input type="checkbox" onchange="document.querySelectorAll('.u-chk').forEach(c => c.checked = this.checked)"></th>
-        <th>Código</th><th>Zona</th><th>Descripción</th><th title="Orden en la ruta de recolección">Ruta</th><th>Artículos</th><th>Activa</th><th></th></tr></thead>
-      <tbody id="u-tabla"></tbody></table></div>
+    <h2 class="font-bold mb-2">Ruta de devolución</h2>
+    <label class="lbl">La ruta sale de</label>
+    <select id="aj-inicio" class="input mb-3"><option value="P1">Persiana 1</option><option value="P2">Persiana 2</option></select>
+    <label class="lbl">Lugar de fallas (ahí van las prendas marcadas Falla)</label>
+    <select id="aj-fallas" class="input mb-3"></select>
+    <button class="btn btn-primario" onclick="guardarAjustes(this)">Guardar</button>
   </section>
-</div>
-
-<!-- CROQUIS -->
-<div id="t-croquis" class="hidden flex flex-col gap-4">
-  <section class="card p-4">
-    <div class="flex flex-wrap items-center gap-3 mb-2">
-      <h2 class="font-bold flex-1">Croquis del depósito</h2>
-      <span class="text-xs text-zinc-500">● violeta = rack con artículos asignados · tocá un rack para ver qué tiene</span>
-    </div>
-    <div id="cq-svg" class="overflow-x-auto"><div class="min-w-[720px]"></div></div>
-    <p class="text-xs text-zinc-500 mt-2">B01 está dividido en 8 columnas (C01 a C08, de izquierda a derecha) y 3 plantas (N0 = planta baja, N1, N2): su código es <b>B01-C07-N0</b>. Los demás racks tienen un solo código (A01, B02, C05…).</p>
+  <section class="card p-4 md:col-span-2">
+    <h2 class="font-bold mb-1">Pasar los códigos al formato A01-C03-N1</h2>
+    <p class="text-sm text-zinc-500 mb-3">Revisá qué cambia antes de aplicar. Los artículos asignados se mueven con su ubicación.</p>
+    <div id="mg-res" class="text-sm flex flex-col gap-3"></div>
   </section>
-  <div class="grid md:grid-cols-2 gap-4">
-    <section class="card p-4">
-      <h2 class="font-bold mb-2">Ruta de devolución</h2>
-      <label class="lbl">La ruta sale de</label>
-      <select id="cq-inicio" class="input mb-3"><option value="P1">Persiana 1</option><option value="P2">Persiana 2</option></select>
-      <label class="lbl">Rack de fallas (ahí van las prendas marcadas Falla)</label>
-      <select id="cq-fallas" class="input mb-3"></select>
-      <button class="btn btn-primario" onclick="guardarCroquis(this)">Guardar</button>
-    </section>
-    <section class="card p-4">
-      <h2 class="font-bold mb-2">Ubicaciones del croquis</h2>
-      <p id="cq-faltan" class="text-sm text-zinc-500 mb-3"></p>
-      <button id="cq-cargar" class="btn btn-gris" onclick="cargarCroquis(this)">⬇ Cargar racks del croquis</button>
-    </section>
-  </div>
 </div>
 
 <!-- VINCULOS -->
@@ -121,182 +123,553 @@
     <div id="v-lista" class="flex flex-col text-sm"></div>
   </section>
 </div>
+</div>
 {% endblock %}
 {% block scripts %}
-<script src="/static/croquis.js?v={{ static_v("croquis.js") }}"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 <script>
-let ubs = [], sel = null, marcadas = new Set(), escUb = null, tq = null;
-const ORDEN_TALLE = ['XXXS','XXS','XS','S','M','L','XL','XXL','XXXL','XXXXL','U','UNICO','ÚNICO'];
-const ordTalle = t => { const i = ORDEN_TALLE.indexOf(String(t).toUpperCase()); return i >= 0 ? i : (parseInt(t) || 100); };
+/* ===== Datos ===== */
+let PL = null, DEP = null, RACKS = [], UBS = [], CONTEO = {}, AJ = {};
+const NIV = ['Planta baja', '1er nivel', '2do nivel'];
+const ZNOM = { A: 'Zona A · norte', B: 'Zona B · centro', C: 'Zona C · sur' };
+const ZCOL = { A: '#2f7f8a', B: '#a8445f', C: '#b06a2a' };
+const VISTA = { T: [-1.2, 61.2], A: [-1.2, 23.5], B: [20.0, 46.5], C: [43.5, 61.2] };
+const SEP = 0.6;
+const pad2 = i => (i < 10 ? '0' : '') + i;
+const rk = c => RACKS.find(r => r.c === c) || null;
+const antes = r => r.v.indexOf('s/n') === 0 ? 'sin número (' + r.v.slice(4) + ')' : 'antes ' + r.v;
+const codMod = (r, i, n) => r.c + (i ? '-C' + pad2(i) : '') + (i && n != null ? '-N' + n : '');
+function partes(cod) {
+  const m = String(cod || '').toUpperCase().replace(/\s+/g, '').match(/^([A-Z])(\d{1,2})(?:-?C(\d{1,2}))?(?:-?N(\d))?$/);
+  if (!m) return null;
+  const r = rk(m[1] + pad2(+m[2])); if (!r) return null;
+  const i = m[3] ? +m[3] : null, n = m[4] != null ? +m[4] : null;
+  if ((i != null && (i < 1 || i > r.n)) || (n != null && (n > 2 || !i))) return null;
+  return { r, i, n };
+}
+function altos(r, i) { const o = DEP.distintas[r.c] || {}, k = 'C' + pad2(i) + '-N'; return [0, 1, 2].map(n => o[k + n + '_a'] ?? r.al[n]); }
+function fondo(r, i, n) { return (DEP.distintas[r.c] || {})['C' + pad2(i) + '-N' + n + '_p'] ?? Math.round(r.prof * 100); }
+/* planta → mundo: x de norte(0) a sur(60), z de oeste(0) a este(10,40). Oeste queda adelante. */
+const W = (px, pz) => [px - DEP.nave.L / 2, DEP.nave.W / 2 - pz];
+const deMundo = (wx, wz) => [wx + DEP.nave.L / 2, DEP.nave.W / 2 - wz];
+const rect = (r, s, e, c0, c1) => r.d === 'x' ? { x0: s, x1: e, z0: c0, z1: c1 } : { x0: c0, x1: c1, z0: s, z1: e };
+function colRect(r, i) { const p = r.len / r.n, s = r.a0 + p * (i - 1); return rect(r, s, s + p, r.c0, r.c0 + r.prof); }
+function rackAlto(r) { let m = 0; for (let i = 1; i <= r.n; i++) { const h = altos(r, i); m = Math.max(m, h[0] + h[1] + h[2]); } return m / 100; }
+// punto del pasillo desde donde se carga (igual que el servidor)
+function accesoM(r, i) {
+  const paso = r.len / r.n, medio = r.a0 + (i ? (i - 0.5) * paso : r.len / 2), f = rect(r, r.a0, r.a0 + r.len, r.c0, r.c0 + r.prof);
+  return r.d === 'x' ? [medio, r.acc === 'este' ? f.z1 + SEP : f.z0 - SEP] : [r.acc === 'sur' ? f.x1 + SEP : f.x0 - SEP, medio];
+}
+// cuántos artículos hay en el módulo (cuenta también lo asignado a la columna o al rack entero)
+const cuenta = (r, i, n) => (CONTEO[codMod(r, i, n)] || 0) + (CONTEO[codMod(r, i)] || 0) + (CONTEO[r.c] || 0);
+const ubPorCod = c => UBS.find(u => u.codigo === c);
 
-function tab(t) {
-  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('activo', b.dataset.t === t));
-  ['mapa', 'croquis', 'asignar', 'ubicaciones', 'vinculos'].forEach(x => document.getElementById('t-' + x).classList.toggle('hidden', x !== t));
-  if (t === 'asignar') document.getElementById('esc').focus();
-  if (t === 'vinculos') vinculos();
-  if (t === 'croquis') croquis();
-  try { localStorage.setItem('mapeo_tab', t); } catch {}
+/* ===== Escena ===== */
+const visor = document.getElementById('visor');
+let renderer, scene, camera, controls, piso, hitMeshes = [], grupoCajas = null, grupoNombres, selRackLines, selColMesh, selModMesh;
+let moni, moniAnillo, grupoCamino = null, destino = null;
+const estado = { zona: 'T', vista: 'iso', r: null, i: null, n: null, yo: null, yoTxt: '', mover: false, camino: null };
+
+function init() {
+  if (!window.THREE || !THREE.OrbitControls) { document.getElementById('cargando').textContent = 'No se pudo cargar el visor 3D. Recargá la página.'; return; }
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  visor.insertBefore(renderer.domElement, visor.firstChild);
+  scene = new THREE.Scene(); scene.background = new THREE.Color('#dfe5ec');
+  camera = new THREE.PerspectiveCamera(38, 1, 0.1, 500);
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true; controls.dampingFactor = 0.09;
+  controls.maxPolarAngle = Math.PI / 2 - 0.04; controls.minDistance = 3; controls.maxDistance = 140;
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x9aa0a8, 0.75));
+  const sol = new THREE.DirectionalLight(0xffffff, 0.75);
+  sol.position.set(-18, 30, 22); sol.castShadow = true; sol.shadow.mapSize.set(2048, 2048);
+  Object.assign(sol.shadow.camera, { left: -34, right: 34, top: 20, bottom: -20, near: 1, far: 90 });
+  sol.shadow.bias = -0.0005; scene.add(sol);
+  construirNave(); construirRacks(); construirCajas(); construirSeleccion(); construirMonigote();
+  ajustar(); new ResizeObserver(ajustar).observe(visor);
+  irZona('T', true);
+  document.getElementById('cargando').remove();
+  construirNombres();
+  conectarPuntero();
+  (function loop(t) { requestAnimationFrame(loop); tween(); latir(t || 0); controls.update(); renderer.render(scene, camera); })();
+}
+function ajustar() { const w = visor.clientWidth, h = visor.clientHeight; if (!w || !h) return; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); }
+function caja(x0, x1, y0, y1, z0, z1, mat) {
+  const a = W((x0 + x1) / 2, (z0 + z1) / 2);
+  const m = new THREE.Mesh(new THREE.BoxGeometry(Math.abs(x1 - x0), y1 - y0, Math.abs(z1 - z0)), mat);
+  m.position.set(a[0], (y0 + y1) / 2, a[1]); return m;
 }
 
-async function cargar() {
-  ubs = (await api('/mapeo/api/ubicaciones')).ubicaciones;
-  pintarMapa(); pintarTabla();
+function construirNave() {
+  const g = new THREE.Group(), L = DEP.nave.L, WW = DEP.nave.W, HP = 6.2;
+  const losa = caja(-0.5, L + 0.5, -0.25, -0.01, -0.5, WW + 0.5, new THREE.MeshStandardMaterial({ color: 0x9aa1aa, roughness: 1 }));
+  losa.receiveShadow = true; g.add(losa);
+  piso = new THREE.Mesh(new THREE.PlaneGeometry(L, WW), new THREE.MeshStandardMaterial({ color: 0xe9e7e1, roughness: 0.95 }));
+  piso.rotation.x = -Math.PI / 2; piso.receiveShadow = true; g.add(piso);
+  const vidrio = new THREE.MeshStandardMaterial({ color: 0x5b8fd6, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false });
+  const borde = new THREE.MeshStandardMaterial({ color: 0x3d6fb8, transparent: true, opacity: 0.55, depthWrite: false });
+  const pared = (x0, x1, z0, z1) => { const p = caja(x0, x1, 0, HP, z0, z1, vidrio); p.renderOrder = 2; g.add(p); const b = caja(x0, x1, HP - 0.08, HP, z0, z1, borde); b.renderOrder = 3; g.add(b); };
+  const PERS = [...DEP.persianas].sort((a, b) => a.x0 - b.x0);
+  const cortes = [0].concat(PERS.reduce((a, p) => a.concat([p.x0, p.x1]), [])).concat([L]);
+  for (let k = 0; k < cortes.length; k += 2) pared(cortes[k], cortes[k + 1], -0.12, 0);
+  pared(0, L, WW, WW + 0.12); pared(-0.12, 0, -0.12, WW + 0.12); pared(L, L + 0.12, -0.12, WW + 0.12);
+  PERS.forEach(p => {
+    const d = caja(p.x0, p.x1, 3.9, HP, -0.12, 0, vidrio); d.renderOrder = 2; g.add(d);
+    const cv = document.createElement('canvas'); cv.width = cv.height = 256; const c = cv.getContext('2d');
+    c.fillStyle = '#8a929b'; c.fillRect(0, 0, 256, 256); for (let y = 0; y < 256; y += 12) { c.fillStyle = '#6f7780'; c.fillRect(0, y, 256, 3); }
+    const tx = new THREE.CanvasTexture(cv); tx.encoding = THREE.sRGBEncoding;
+    g.add(caja(p.x0, p.x1, 0, 3.9, -0.1, -0.04, new THREE.MeshStandardMaterial({ map: tx, roughness: 0.6, metalness: 0.3 })));
+    const marco = new THREE.MeshStandardMaterial({ color: 0x2b2f35 });
+    g.add(caja(p.x0 - 0.12, p.x0, 0, 4.0, -0.16, 0.02, marco)); g.add(caja(p.x1, p.x1 + 0.12, 0, 4.0, -0.16, 0.02, marco));
+    g.add(caja(p.x0 - 0.12, p.x1 + 0.12, 3.9, 4.05, -0.16, 0.02, marco));
+    g.add(caja(p.x0, p.x1, 0.003, 0.012, 0.15, 0.55, new THREE.MeshBasicMaterial({ color: 0xf2b705 })));
+  });
+  DEP.sin_confirmar.forEach(d => {
+    const pts = [[d.x0, d.z0], [d.x1, d.z0], [d.x1, d.z1], [d.x0, d.z1], [d.x0, d.z0]].map(p => { const a = W(p[0], p[1]); return new THREE.Vector3(a[0], 0.03, a[1]); });
+    const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineDashedMaterial({ color: 0xd23030, dashSize: 0.25, gapSize: 0.18 }));
+    l.computeLineDistances(); g.add(l);
+  });
+  scene.add(g);
 }
 
-function pintarMapa() {
-  const el = document.getElementById('mapa');
-  if (!ubs.length) { el.innerHTML = '<p class="text-zinc-500 text-sm">Todavía no hay ubicaciones. Creálas en la pestaña <b>Ubicaciones</b>.</p>'; return; }
-  const grupos = {};
-  ubs.forEach(u => { const k = (u.zona || '') + '|' + (u.pasillo || '—'); (grupos[k] = grupos[k] || { zona: u.zona, pasillo: u.pasillo || '—', us: [] }).us.push(u); });
-  el.innerHTML = Object.values(grupos).sort((a, b) => (a.zona || '').localeCompare(b.zona || '') || a.pasillo.localeCompare(b.pasillo, 'es', { numeric: true })).map(g => {
-    const mods = [...new Set(g.us.map(u => u.modulo))].sort((a, b) => a - b);
-    const nivs = [...new Set(g.us.map(u => u.nivel))].sort((a, b) => b - a);
-    const idx = {}; g.us.forEach(u => idx[u.modulo + '|' + u.nivel] = u);
-    const celdas = nivs.map(n => mods.map(m => {
-      const u = idx[m + '|' + n];
-      if (!u) return '<div></div>';
-      const cls = ['celda-ub', u.articulos ? 'llena' : '', marcadas.has(u.id) ? 'marcada' : '', sel === u.id ? 'sel' : '', u.activa ? '' : 'inactiva'].join(' ');
-      return `<div class="${cls}" title="${esc(u.codigo)}${u.descripcion ? ' · ' + esc(u.descripcion) : ''}" onclick="abrir(${u.id})">${esc(u.codigo.split('-').slice(-2).join('-'))}${u.articulos ? `<div class="font-normal">${u.articulos} art.</div>` : ''}</div>`;
-    }).join('')).join('');
-    return `<div class="pasillo"><div class="font-bold mb-2 text-violeta">${g.zona ? esc(g.zona) + ' · ' : ''}Pasillo ${esc(g.pasillo)}</div>
-      <div class="mapa-grilla" style="grid-template-columns: repeat(${mods.length}, minmax(44px, 1fr))">${celdas}</div>
-      <div class="mapa-grilla text-[10px] text-zinc-500 text-center mt-1" style="grid-template-columns: repeat(${mods.length}, minmax(44px, 1fr))">${mods.map(m => `<div>M${m}</div>`).join('')}</div></div>`;
-  }).join('');
+function instancias(lista, mat, sombra) {
+  const m = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), mat, Math.max(lista.length, 1)), o = new THREE.Object3D();
+  m.count = lista.length;
+  lista.forEach((b, i) => {
+    const a = W((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2);
+    o.position.set(a[0], (b.y0 + b.y1) / 2, a[1]); o.scale.set(Math.abs(b.x1 - b.x0), b.y1 - b.y0, Math.abs(b.z1 - b.z0));
+    o.updateMatrix(); m.setMatrixAt(i, o.matrix); if (b.col) m.setColorAt(i, b.col);
+  });
+  if (m.instanceColor) m.instanceColor.needsUpdate = true;
+  m.castShadow = sombra; m.receiveShadow = true; return m;
+}
+function semilla(str) { let s = 2166136261; for (let i = 0; i < str.length; i++) { s ^= str.charCodeAt(i); s = Math.imul(s, 16777619) >>> 0; }
+  return () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; }; }
+const niveles = (r, i) => { const h = altos(r, i); return [h[0] / 100, (h[0] + h[1]) / 100, (h[0] + h[1] + h[2]) / 100]; };
+
+function construirRacks() {
+  const post = [], larg = [], band = [], franja = [];
+  const hitMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
+  RACKS.forEach(r => {
+    const paso = r.len / r.n, c0 = r.c0, c1 = r.c0 + r.prof, hs = [];
+    for (let i = 1; i <= r.n; i++) hs.push(altos(r, i));
+    for (let k = 0; k <= r.n; k++) {
+      const a = r.a0 + paso * k, s = k === 0 ? a : (k === r.n ? a - 0.08 : a - 0.04);
+      const hI = k > 0 ? hs[k - 1] : null, hD = k < r.n ? hs[k] : null;
+      const hk = Math.max(hI ? hI[0] + hI[1] + hI[2] : 0, hD ? hD[0] + hD[1] + hD[2] : 0) / 100 + 0.06;
+      [c0, c1 - 0.08].forEach(cf => { const q = rect(r, s, s + 0.08, cf, cf + 0.08); q.y0 = 0; q.y1 = hk; post.push(q); });
+      [0.12, hk - 0.06].forEach(y => { const q = rect(r, s + 0.02, s + 0.06, c0 + 0.08, c1 - 0.08); q.y0 = y - 0.03; q.y1 = y + 0.03; post.push(q); });
+    }
+    for (let i = 1; i <= r.n; i++) {
+      const s = r.a0 + paso * (i - 1), e = s + paso, ys = niveles(r, i);
+      ys.forEach(y => [c0, c1 - 0.05].forEach(cf => { const q = rect(r, s, e, cf, cf + 0.05); q.y0 = y - 0.12; q.y1 = y; larg.push(q); }));
+      [ys[0], ys[1]].forEach(y => { const q = rect(r, s + 0.04, e - 0.04, c0 + 0.05, c1 - 0.05); q.y0 = y - 0.03; q.y1 = y - 0.01; band.push(q); });
+      const cr = colRect(r, i), hm = caja(cr.x0, cr.x1, 0, ys[2] + 0.08, cr.z0, cr.z1, hitMat);
+      hm.userData = { r, i, ys }; hitMeshes.push(hm); scene.add(hm);
+    }
+    const f = rect(r, r.a0, r.a0 + r.len, c0, c1), o = 0.12, t = 0.06, Y0 = 0.004, Y1 = 0.01;
+    franja.push({ x0: f.x0 - o, x1: f.x1 + o, z0: f.z0 - o, z1: f.z0 - o + t, y0: Y0, y1: Y1 }, { x0: f.x0 - o, x1: f.x1 + o, z0: f.z1 + o - t, z1: f.z1 + o, y0: Y0, y1: Y1 },
+      { x0: f.x0 - o, x1: f.x0 - o + t, z0: f.z0 - o, z1: f.z1 + o, y0: Y0, y1: Y1 }, { x0: f.x1 + o - t, x1: f.x1 + o, z0: f.z0 - o, z1: f.z1 + o, y0: Y0, y1: Y1 });
+  });
+  scene.add(instancias(post, new THREE.MeshStandardMaterial({ color: 0x2a5ea8, roughness: 0.5, metalness: 0.35 }), true));
+  scene.add(instancias(larg, new THREE.MeshStandardMaterial({ color: 0xe8742a, roughness: 0.5, metalness: 0.25 }), true));
+  scene.add(instancias(band, new THREE.MeshStandardMaterial({ color: 0xb8bec6, roughness: 0.7, metalness: 0.4 }), true));
+  scene.add(instancias(franja, new THREE.MeshBasicMaterial({ color: 0xf2b705 }), false));
 }
 
-async function abrir(id) {
-  sel = id; pintarMapa();
-  const d = await api('/mapeo/api/ubicaciones/' + id);
-  pintarPanel(d);
+/* cajas solo en los módulos que tienen artículos asignados (el volumen es ilustrativo) */
+function construirCajas() {
+  if (grupoCajas) { scene.remove(grupoCajas); grupoCajas.geometry.dispose(); }
+  const cajas = [];
+  RACKS.forEach(r => {
+    const paso = r.len / r.n;
+    for (let i = 1; i <= r.n; i++) {
+      const s = r.a0 + paso * (i - 1), ys = niveles(r, i), base = [0.02, ys[0], ys[1]], libre = [ys[0] - 0.16, ys[1] - ys[0] - 0.16, ys[2] - ys[1] - 0.16];
+      for (let n = 0; n < 3; n++) {
+        if (!cuenta(r, i, n)) continue;
+        const rnd = semilla(r.c + '-' + i + '-' + n), lleno = 0.45 + rnd() * 0.55;
+        const largoU = paso - 0.14, fondoU = r.prof - 0.12;
+        const nx = Math.max(1, Math.floor(largoU / 0.6)), nz = Math.max(1, Math.floor(fondoU / 0.5));
+        const bw = largoU / nx, bd = fondoU / nz, bh = 0.36 + rnd() * 0.1, ns = Math.max(1, Math.floor(libre[n] / (bh + 0.015)));
+        for (let ix = 0; ix < nx; ix++) for (let iz = 0; iz < nz; iz++) {
+          if (rnd() > lleno) continue;
+          const pila = Math.min(ns, 1 + Math.floor(rnd() * ns));
+          for (let p = 0; p < pila; p++) {
+            const sa = s + 0.07 + ix * bw, sc = r.c0 + 0.06 + iz * bd, q = rect(r, sa + 0.02, sa + bw - 0.02, sc + 0.02, sc + bd - 0.02);
+            q.y0 = base[n] + p * (bh + 0.012); q.y1 = q.y0 + bh;
+            const col = new THREE.Color(); col.setHSL(0.085 + rnd() * 0.02, 0.42 + rnd() * 0.12, 0.56 + rnd() * 0.1); q.col = col; cajas.push(q);
+          }
+        }
+      }
+    }
+  });
+  grupoCajas = instancias(cajas, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 }), true);
+  grupoCajas.visible = document.getElementById('tCaj').getAttribute('aria-pressed') === 'true';
+  scene.add(grupoCajas);
 }
-function pintarPanel(d) {
-  const u = d.ubicacion, p = document.getElementById('panel-ub');
-  p.innerHTML = `<div class="flex items-start gap-2"><div class="flex-1"><div class="ub-grande">${esc(u.codigo)}</div>
-      <div class="text-xs text-zinc-500">${[u.zona, u.pasillo && 'Pasillo ' + u.pasillo, u.modulo && 'Módulo ' + u.modulo, u.nivel && 'Nivel ' + u.nivel].filter(Boolean).map(esc).join(' · ')} · ruta ${u.orden}</div></div>
-      <button class="btn btn-gris btn-chico" onclick="imprimirPDF('/mapeo/etiquetas.pdf?ids=${u.id}', this)">🖨</button></div>
-    <input class="input mt-3" placeholder="Descripción (ej: camperas de invierno)" value="${esc(u.descripcion)}" onchange="editar(${u.id}, {descripcion: this.value})">
-    <h3 class="font-bold mt-4 mb-2 text-sm">Qué hay acá</h3>
-    <div class="flex flex-col gap-1 mb-4">${d.asignaciones.length ? d.asignaciones.map(a => `<div class="flex items-center gap-2 text-sm border-b border-zinc-700 py-1">
+
+function cartel(lineas, fondoCol, ancho) {
+  const cv = document.createElement('canvas'), c = cv.getContext('2d'), W2 = ancho || 512, H = lineas.length > 1 ? 210 : 130;
+  cv.width = W2; cv.height = H; c.fillStyle = fondoCol;
+  const rr = 26; c.beginPath(); c.moveTo(rr, 0); c.lineTo(W2 - rr, 0); c.quadraticCurveTo(W2, 0, W2, rr); c.lineTo(W2, H - rr); c.quadraticCurveTo(W2, H, W2 - rr, H);
+  c.lineTo(rr, H); c.quadraticCurveTo(0, H, 0, H - rr); c.lineTo(0, rr); c.quadraticCurveTo(0, 0, rr, 0); c.fill();
+  c.fillStyle = '#fff'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.font = '700 104px Inter, "Arial Narrow", sans-serif'; c.fillText(lineas[0], W2 / 2, lineas.length > 1 ? 78 : H / 2 + 4);
+  if (lineas[1]) { c.font = '600 40px Inter, system-ui, sans-serif'; c.globalAlpha = 0.92; c.fillText(lineas[1], W2 / 2, 166); }
+  const tx = new THREE.CanvasTexture(cv); tx.encoding = THREE.sRGBEncoding; tx.anisotropy = 4;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tx, depthTest: false, transparent: true }));
+  sp.renderOrder = 20; sp.userData.ratio = W2 / H; return sp;
+}
+function construirNombres() {
+  grupoNombres = new THREE.Group();
+  RACKS.forEach(r => {
+    const f = rect(r, r.a0, r.a0 + r.len, r.c0, r.c0 + r.prof), a = W((f.x0 + f.x1) / 2, (f.z0 + f.z1) / 2);
+    const sp = cartel([r.c, antes(r)], ZCOL[r.z]);
+    sp.position.set(a[0], rackAlto(r) + 0.9 + (r.lug.indexOf('cara este') >= 0 ? 1.25 : 0), a[1]); sp.scale.set(2.8, 2.8 / sp.userData.ratio, 1);
+    grupoNombres.add(sp);
+  });
+  DEP.persianas.forEach(p => { const a = W((p.x0 + p.x1) / 2, -0.3), sp = cartel([p.n], '#4b525b'); sp.position.set(a[0], 4.7, a[1]); sp.scale.set(1.9, 1.9 / sp.userData.ratio, 1); grupoNombres.add(sp); });
+  DEP.sin_confirmar.forEach(d => { const a = W((d.x0 + d.x1) / 2, (d.z0 + d.z1) / 2), sp = cartel([d.t], '#c22d2d', 900); sp.position.set(a[0], 0.6, a[1]); sp.scale.set(2.6, 2.6 / sp.userData.ratio, 1); grupoNombres.add(sp); });
+  [['NORTE', -1.6], ['SUR', DEP.nave.L + 1.6]].forEach(t => { const a = W(t[1], DEP.nave.W / 2), sp = cartel([t[0]], '#39414b'); sp.position.set(a[0], 0.7, a[1]); sp.scale.set(1.8, 1.8 / sp.userData.ratio, 1); grupoNombres.add(sp); });
+  [['OESTE', -1.4], ['ESTE', DEP.nave.W + 1.4]].forEach(t => { const a = W(DEP.nave.L / 2, t[1]), sp = cartel([t[0]], '#39414b', 440); sp.position.set(a[0], 0.5, a[1]); sp.scale.set(1.7, 1.7 / sp.userData.ratio, 1); grupoNombres.add(sp); });
+  grupoNombres.visible = document.getElementById('tNom').getAttribute('aria-pressed') === 'true';
+  scene.add(grupoNombres);
+}
+
+/* ===== Selección ===== */
+function construirSeleccion() {
+  selRackLines = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)), new THREE.LineBasicMaterial({ color: 0x14b8e6 }));
+  selRackLines.visible = false; scene.add(selRackLines);
+  selColMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: 0x14b8e6, transparent: true, opacity: 0.22, depthWrite: false }));
+  selColMesh.visible = false; selColMesh.renderOrder = 5; scene.add(selColMesh);
+  selModMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: 0x14b8e6, transparent: true, opacity: 0.5, depthWrite: false }));
+  selModMesh.visible = false; selModMesh.renderOrder = 6; scene.add(selModMesh);
+}
+function ubicar(m, x0, x1, y0, y1, z0, z1) { const a = W((x0 + x1) / 2, (z0 + z1) / 2); m.position.set(a[0], (y0 + y1) / 2, a[1]); m.scale.set(Math.abs(x1 - x0), y1 - y0, Math.abs(z1 - z0)); m.visible = true; }
+function resaltar() {
+  const r = estado.r;
+  if (!r) { selRackLines.visible = selColMesh.visible = selModMesh.visible = false; return; }
+  const f = rect(r, r.a0, r.a0 + r.len, r.c0, r.c0 + r.prof), pad = 0.08;
+  ubicar(selRackLines, f.x0 - pad, f.x1 + pad, 0, rackAlto(r) + 0.12, f.z0 - pad, f.z1 + pad);
+  if (estado.i) {
+    const c = colRect(r, estado.i), ys = [0].concat(niveles(r, estado.i));
+    ubicar(selColMesh, c.x0 + 0.02, c.x1 - 0.02, 0.01, ys[3] + 0.05, c.z0 - 0.03, c.z1 + 0.03);
+    if (estado.n != null) ubicar(selModMesh, c.x0 + 0.03, c.x1 - 0.03, ys[estado.n] + 0.01, ys[estado.n + 1] - 0.01, c.z0 - 0.05, c.z1 + 0.05);
+    else selModMesh.visible = false;
+  } else { selColMesh.visible = false; selModMesh.visible = false; }
+}
+
+/* ===== Monigote: dónde estás vos ===== */
+function construirMonigote() {
+  moni = new THREE.Group();
+  const piel = new THREE.MeshStandardMaterial({ color: 0xf1c27d, roughness: 0.7 });
+  const ropa = new THREE.MeshStandardMaterial({ color: 0xea580c, roughness: 0.6 });
+  const pant = new THREE.MeshStandardMaterial({ color: 0x1f2937, roughness: 0.8 });
+  const parte = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; moni.add(m); return m; };
+  parte(new THREE.CylinderGeometry(0.09, 0.08, 0.8, 12), pant, 0, 0.4, -0.11); parte(new THREE.CylinderGeometry(0.09, 0.08, 0.8, 12), pant, 0, 0.4, 0.11);
+  parte(new THREE.CylinderGeometry(0.24, 0.2, 0.7, 16), ropa, 0, 1.15, 0);
+  parte(new THREE.CylinderGeometry(0.06, 0.06, 0.62, 10), ropa, 0, 1.12, -0.31); parte(new THREE.CylinderGeometry(0.06, 0.06, 0.62, 10), ropa, 0, 1.12, 0.31);
+  parte(new THREE.SphereGeometry(0.19, 20, 16), piel, 0, 1.72, 0);
+  const pin = parte(new THREE.ConeGeometry(0.22, 0.45, 18), ropa, 0, 2.45, 0); pin.rotation.x = Math.PI;   // flecha arriba: se ve de lejos
+  moniAnillo = new THREE.Mesh(new THREE.RingGeometry(0.45, 0.62, 40), new THREE.MeshBasicMaterial({ color: 0xea580c, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false }));
+  moniAnillo.rotation.x = -Math.PI / 2; moniAnillo.position.y = 0.02; moni.add(moniAnillo);
+  moni.visible = false; scene.add(moni);
+}
+function latir(t) {
+  if (!moni || !moni.visible) return;
+  const k = (t / 1000) % 1.4 / 1.4; moniAnillo.scale.setScalar(1 + k * 1.2); moniAnillo.material.opacity = 0.6 * (1 - k);
+  if (destino) destino.position.y = destino.userData.y + Math.sin(t / 260) * 0.12;
+}
+// pone el monigote en un punto del depósito (metros) y recalcula el camino si hay un destino
+function ponerYo(x, z, txt, guardar = true) {
+  estado.yo = [Math.min(Math.max(x, 0.2), DEP.nave.L - 0.2), Math.min(Math.max(z, 0.2), DEP.nave.W - 0.2)]; estado.yoTxt = txt;
+  const a = W(estado.yo[0], estado.yo[1]); moni.position.set(a[0], 0, a[1]); moni.visible = true;
+  document.getElementById('donde').innerHTML = `Estás en <b>${esc(txt)}</b>${estado.camino ? ` · <span id="metros"></span>` : ''}`;
+  if (guardar) try { localStorage.setItem('mapeo_yo', JSON.stringify({ x: estado.yo[0], z: estado.yo[1], txt })); } catch {}
+  if (estado.camino) trazarCamino(estado.camino);
+}
+function aPersiana(k) { const p = DEP.persianas.find(x => x.clave === k); if (p) ponerYo((p.x0 + p.x1) / 2, SEP, p.n); }
+function yoEnCodigo(cod) {
+  const p = partes(cod); if (!p) return false;
+  const a = accesoM(p.r, p.i); ponerYo(a[0], a[1], codMod(p.r, p.i, p.n)); return true;
+}
+
+/* ===== Camino hasta el módulo ===== */
+async function trazarCamino(cod) {
+  estado.camino = cod;
+  if (!estado.yo) aPersiana(AJ.inicio || 'P1');
+  const S = PL.escala, x = estado.yo[0] * S, y = (DEP.nave.W - estado.yo[1]) * S;
+  let d;
+  try { d = await api(`/mapeo/api/camino?hasta=${encodeURIComponent(cod)}&x=${x.toFixed(1)}&y=${y.toFixed(1)}`); }
+  catch (e) { toast(e.message, 'error'); return; }
+  if (estado.camino !== cod) return;
+  if (grupoCamino) scene.remove(grupoCamino);
+  grupoCamino = new THREE.Group();
+  const mat = new THREE.MeshBasicMaterial({ color: 0xea580c, transparent: true, opacity: 0.85, depthWrite: false });
+  const pts = d.tramo.map(p => [p[0] / S, DEP.nave.W - p[1] / S]);
+  if (pts.length) pts.unshift(estado.yo);
+  for (let k = 1; k < pts.length; k++) {   // tramos rectos: una franja en el piso por tramo
+    const [ax, az] = pts[k - 1], [bx, bz] = pts[k], t = 0.11;
+    const f = caja(Math.min(ax, bx) - t, Math.max(ax, bx) + t, 0.015, 0.03, Math.min(az, bz) - t, Math.max(az, bz) + t, mat);
+    f.renderOrder = 4; grupoCamino.add(f);
+  }
+  const p = partes(cod), r = p.r, i = p.i || Math.ceil(r.n / 2), c = colRect(r, i), alto = (p.n != null ? niveles(r, i)[p.n] : rackAlto(r)) + 0.55;
+  destino = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.6, 18), new THREE.MeshStandardMaterial({ color: 0xea580c, emissive: 0x7a2a00 }));
+  destino.rotation.x = Math.PI; const a = W((c.x0 + c.x1) / 2, (c.z0 + c.z1) / 2); destino.position.set(a[0], alto, a[1]); destino.userData.y = alto;
+  grupoCamino.add(destino); scene.add(grupoCamino);
+  document.getElementById('donde').innerHTML = `Estás en <b>${esc(estado.yoTxt)}</b> · hasta <b>${esc(cod)}</b>: ~${d.metros} m`;
+}
+function borrarCamino() { estado.camino = null; destino = null; if (grupoCamino) scene.remove(grupoCamino); grupoCamino = null; if (estado.yo) ponerYo(estado.yo[0], estado.yo[1], estado.yoTxt, false); }
+
+/* ===== Cámara ===== */
+let anim = null;
+const reducido = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+function volarA(obj, pos) { if (reducido) { controls.target.copy(obj); camera.position.copy(pos); return; } anim = { t0: performance.now(), dur: 750, fT: controls.target.clone(), fP: camera.position.clone(), tT: obj, tP: pos }; }
+function tween() { if (!anim) return; const k = Math.min(1, (performance.now() - anim.t0) / anim.dur), e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+  controls.target.lerpVectors(anim.fT, anim.tT, e); camera.position.lerpVectors(anim.fP, anim.tP, e); if (k >= 1) anim = null; }
+const direccion = () => estado.vista === 'planta' ? new THREE.Vector3(0, 1, 0.02).normalize() : new THREE.Vector3(-0.32, 0.78, 0.62).normalize();
+function encuadre(x0, x1, alto, inmediato) {
+  const span = x1 - x0, cx = (x0 + x1) / 2 - DEP.nave.L / 2, asp = camera.aspect || 1.6;
+  const dist = Math.max(9, span * (estado.vista === 'planta' ? 1.0 : 0.82) / Math.min(1, asp / 1.7));
+  const t = new THREE.Vector3(cx, alto || 0.8, 0), p = t.clone().add(direccion().multiplyScalar(dist));
+  if (inmediato) { controls.target.copy(t); camera.position.copy(p); } else volarA(t, p);
+}
+function irZona(z, inmediato) { estado.zona = z; document.querySelectorAll('[data-z]').forEach(b => b.setAttribute('aria-pressed', b.dataset.z === z)); const v = VISTA[z]; encuadre(v[0], v[1], 0.8, inmediato); }
+function irRack(r) {
+  const f = rect(r, r.a0, r.a0 + r.len, r.c0, r.c0 + r.prof), a = W((f.x0 + f.x1) / 2, (f.z0 + f.z1) / 2);
+  const dist = Math.max(10, Math.max(f.x1 - f.x0, f.z1 - f.z0) * 1.25 + 6), t = new THREE.Vector3(a[0], 1.6, a[1]);
+  volarA(t, t.clone().add(direccion().multiplyScalar(dist)));
+}
+
+/* ===== Puntero: tocar rack o, con "Estoy acá", el piso ===== */
+function conectarPuntero() {
+  const el = renderer.domElement, ray = new THREE.Raycaster(), v = new THREE.Vector2(); let ini = null;
+  el.addEventListener('pointerdown', e => { ini = { x: e.clientX, y: e.clientY }; });
+  el.addEventListener('pointerup', e => {
+    if (!ini) return; const dx = e.clientX - ini.x, dy = e.clientY - ini.y; ini = null;
+    if (dx * dx + dy * dy > 36) return;
+    const b = el.getBoundingClientRect(); v.set(((e.clientX - b.left) / b.width) * 2 - 1, -((e.clientY - b.top) / b.height) * 2 + 1);
+    ray.setFromCamera(v, camera);
+    if (estado.mover) {
+      const h = ray.intersectObject(piso, false)[0]; if (!h) return;
+      const m = deMundo(h.point.x, h.point.z); ponerYo(m[0], m[1], 'el punto que marcaste'); modoMover(false); return;
+    }
+    const hit = ray.intersectObjects(hitMeshes, false)[0];
+    if (!hit) { seleccionar(null); return; }
+    const d = hit.object.userData, y = hit.point.y; seleccionar(d.r, d.i, y < d.ys[0] ? 0 : (y < d.ys[1] ? 1 : 2));
+  });
+}
+function modoMover(on) {
+  estado.mover = on; document.getElementById('tMover').setAttribute('aria-pressed', on); visor.classList.toggle('mover', on);
+  document.getElementById('ayuda').textContent = on ? 'Tocá el piso donde estás parado' : 'Arrastrá para girar · dos dedos o clic derecho para mover · tocá un rack para ver sus módulos';
+}
+
+/* ===== Ficha ===== */
+const ficha = document.getElementById('ficha');
+let fichaDatos = null, pm = [];
+function seleccionar(r, i, n, volar) {
+  estado.r = r || null; estado.i = r ? (i || null) : null; estado.n = (r && i && n != null) ? n : null;
+  resaltar(); pintarFicha(); if (r && volar) irRack(r);
+}
+async function pintarFicha() {
+  const r = estado.r; fichaDatos = null;
+  if (!r) {
+    let h = '<h2 class="text-xs font-bold uppercase tracking-wider text-zinc-500">Racks por zona</h2>';
+    ['A', 'B', 'C'].forEach(z => {
+      h += `<div><div class="font-bold text-sm mt-1 mb-1 flex items-center gap-2"><i class="m3d-sw" style="background:${ZCOL[z]}"></i>${ZNOM[z]}</div>`;
+      RACKS.filter(x => x.z === z).forEach(x => {
+        let k = 0; for (let i = 1; i <= x.n; i++) for (let n = 0; n < 3; n++) if (cuenta(x, i, n)) k++;
+        h += `<button class="m3d-fila" data-rack="${x.c}"><span class="m3d-cod" style="color:${ZCOL[x.z]}">${x.c}</span>
+          <span class="text-zinc-500 truncate">${esc(x.lug)} · ${esc(antes(x))}</span><span class="text-xs text-zinc-500">${k ? k + ' con art.' : x.n + ' col.'}</span></button>`;
+      });
+      h += '</div>';
+    });
+    ficha.innerHTML = h; return;
+  }
+  let h = `<div class="flex justify-between items-start gap-2"><div><div class="text-4xl font-extrabold leading-none" style="color:${ZCOL[r.z]}">${r.c}</div>
+      <p class="text-xs text-zinc-500 mt-1">${esc(antes(r))} · ${esc(r.lug)}</p></div>
+      <button class="btn btn-gris btn-chico" data-volver="1">Ver todos</button></div>
+    <p class="text-xs text-zinc-500">${r.n} columnas de ${Math.round(r.len / r.n * 100)} cm · fondo ${Math.round(r.prof * 100)} cm · alto ${rackAlto(r).toFixed(2).replace('.', ',')} m</p>
+    <h2 class="text-xs font-bold uppercase tracking-wider text-zinc-500">Columnas</h2><div class="m3d-cols">`;
+  for (let i = 1; i <= r.n; i++) h += `<button class="m3d-colb" data-col="${i}" aria-pressed="${estado.i === i}">C${pad2(i)}${[0, 1, 2].some(n => cuenta(r, i, n)) ? '<i></i>' : ''}</button>`;
+  h += '</div>';
+  if (!estado.i) { ficha.innerHTML = h + '<p class="text-xs text-zinc-500">Elegí una columna para ver sus tres módulos.</p>'; return; }
+  const al = altos(r, estado.i);
+  h += `<h2 class="text-xs font-bold uppercase tracking-wider text-zinc-500">Módulos de ${r.c}-C${pad2(estado.i)}</h2><div class="flex flex-col gap-1.5">`;
+  for (let n = 2; n >= 0; n--) {
+    const cod = codMod(r, estado.i, n), k = CONTEO[cod] || 0;
+    h += `<button class="m3d-modb" data-mod="${n}" aria-pressed="${estado.n === n}"><span class="m3d-cod">${cod}</span>
+      <small class="text-xs text-zinc-500 text-right">${NIV[n]}${k ? ` · <b class="text-violeta">${k} art.</b>` : ''}<br>${al[n]} alto · ${fondo(r, estado.i, n)} fondo</small></button>`;
+  }
+  h += '</div>';
+  if (estado.n == null) { ficha.innerHTML = h + '<p class="text-xs text-zinc-500">Elegí un nivel para ver y asignar artículos.</p>'; return; }
+  const cod = codMod(r, estado.i, estado.n), u = ubPorCod(cod);
+  h += `<div class="flex gap-2"><button class="btn btn-primario btn-chico flex-1" data-ir="${cod}">🚶 Llevame a ${cod}</button>
+    ${u ? `<button class="btn btn-gris btn-chico" data-etq="${u.id}" title="Imprimir la etiqueta de este módulo">🖨</button>` : ''}</div>`;
+  if (!u) { ficha.innerHTML = h + `<p class="text-sm text-zinc-500">${cod} todavía no está cargado. Cargalo en <b>Módulos y ajustes</b>.</p>`; return; }
+  ficha.innerHTML = h + '<div id="f-mod" class="text-sm text-zinc-500">Cargando…</div>';
+  const d = await api('/mapeo/api/ubicacion?codigo=' + encodeURIComponent(cod));
+  if (estado.r !== r || codMod(r, estado.i, estado.n) !== cod) return;
+  fichaDatos = d;
+  // lo asignado a la columna o al rack entero también se ve acá
+  const extra = UBS.filter(x => x.articulos && (x.codigo === codMod(r, estado.i) || x.codigo === r.c)).map(x => x.codigo);
+  document.getElementById('f-mod').outerHTML = `<div class="flex flex-col gap-2">
+    <h3 class="font-bold text-sm">Qué hay en ${cod}</h3>
+    <div class="flex flex-col">${d.asignaciones.length ? d.asignaciones.map(a => `<div class="flex items-center gap-2 text-sm border-b border-zinc-700 py-1">
       <b class="flex-1">${esc(a.modelo)}</b><span class="text-xs text-zinc-500">${esc(a.detalle)}</span>
-      <button class="text-red-600" title="Quitar" onclick="quitar(${a.id}, ${u.id})">✕</button></div>`).join('') : '<p class="text-sm text-zinc-500">Vacía.</p>'}</div>
+      <button class="text-red-600" title="Quitar" data-quitar="${a.id}">✕</button></div>`).join('') : '<p class="text-sm text-zinc-500">Vacío.</p>'}</div>
+    ${extra.length ? `<p class="text-xs text-zinc-500">También hay artículos cargados a ${extra.map(esc).join(' y ')} (sin nivel): pasalos a su módulo.</p>` : ''}
     <label class="lbl">Agregar artículo</label>
-    <input id="p-q" class="input" placeholder="Buscar modelo o escanear" autocomplete="off">
-    <div id="p-res" class="mt-2 flex flex-col gap-2 max-h-80 overflow-y-auto"></div>`;
-  const pq = document.getElementById('p-q'); let t = null;
+    <input id="p-q" class="input" placeholder="Buscar modelo o código" autocomplete="off">
+    <label class="text-xs text-zinc-500 flex items-center gap-2"><input type="checkbox" id="p-esc" ${escAsignar ? 'checked' : ''}> Al escanear prendas, asignarlas a ${cod} (por color)</label>
+    <div id="p-res" class="flex flex-col gap-2 max-h-72 overflow-y-auto"></div></div>`;
+  let t = null; const pq = document.getElementById('p-q');
   pq.oninput = () => { clearTimeout(t); t = setTimeout(() => buscarParaAsignar(pq.value, u.id), 250); };
+  document.getElementById('p-esc').onchange = e => { escAsignar = e.target.checked; textoCam(); };
 }
 async function buscarParaAsignar(v, uid) {
   const el = document.getElementById('p-res');
   if (v.trim().length < 2) { el.innerHTML = ''; return; }
-  const d = await api('/mapeo/api/buscar?q=' + encodeURIComponent(v));
-  window._pm = d.modelos;
-  el.innerHTML = d.modelos.map((m, i) => {
+  pm = (await api('/mapeo/api/buscar?q=' + encodeURIComponent(v))).modelos;
+  el.innerHTML = pm.map((m, i) => {
     const colores = [...new Set(m.variantes.map(x => x.color))].sort();
     return `<div class="rounded-xl border border-zinc-700 p-2"><div class="flex items-center gap-2"><b class="flex-1 text-sm">${esc(m.articulo)}</b>
-      <button class="btn btn-primario btn-chico" onclick="asignar(${uid}, {modelo: _pm[${i}].articulo})">Todo el modelo</button></div>
-      <div class="flex flex-wrap gap-1 mt-2">${colores.map(c => `<button class="btn btn-gris btn-chico" onclick="asignar(${uid}, {modelo: _pm[${i}].articulo, color: ${esc(JSON.stringify(c))}})">${esc(c)}</button>`).join('')}</div></div>`;
+      <button class="btn btn-primario btn-chico" data-asig="${uid}" data-m="${i}">Todo el modelo</button></div>
+      <div class="flex flex-wrap gap-1 mt-2">${colores.map(c => `<button class="btn btn-gris btn-chico" data-asig="${uid}" data-m="${i}" data-color="${esc(c)}">${esc(c)}</button>`).join('')}</div></div>`;
   }).join('') || '<p class="text-sm text-zinc-500">Sin resultados.</p>';
 }
 async function asignar(uid, datos) {
   try {
     const r = await api('/mapeo/api/asignar', { json: { ubicacion_id: uid, ...datos } });
     toast(r.repetido ? 'Ya estaba asignado' : 'Asignado', r.repetido ? 'warn' : 'ok');
-    await cargar(); abrir(uid);
+    await recargar(); pintarFicha(); return r;
   } catch (e) { toast(e.message, 'error', 5000); }
 }
-async function quitar(aid, uid) { await api('/mapeo/api/asignacion/' + aid, { method: 'DELETE' }); await cargar(); abrir(uid); }
-async function editar(id, datos) {
-  try { await api('/mapeo/api/ubicaciones/' + id, { method: 'PUT', json: datos }); toast('Guardado'); cargar(); }
-  catch (e) { toast(e.message, 'error'); }
-}
-
-// Búsqueda "¿dónde está?"
-const q = document.getElementById('q');
-q.addEventListener('input', () => { clearTimeout(tq); tq = setTimeout(dondeEsta, 250); });
-q.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); clearTimeout(tq); dondeEsta(); } });
-async function dondeEsta() {
-  const v = q.value.trim(), el = document.getElementById('res-q');
-  marcadas = new Set();
-  if (v.length < 2) { el.innerHTML = ''; pintarMapa(); return; }
-  const V = v.toUpperCase();
-  ubs.filter(u => u.codigo.startsWith(V)).forEach(u => marcadas.add(u.id));
-  const d = await api('/mapeo/api/buscar?q=' + encodeURIComponent(v));
-  const porCodigo = Object.fromEntries(ubs.map(u => [u.codigo, u]));
-  el.innerHTML = d.modelos.map(m => {
-    m.ubicaciones.forEach(a => porCodigo[a.codigo] && marcadas.add(porCodigo[a.codigo].id));
-    return `<div class="flex flex-wrap items-center gap-2 text-sm border-b border-zinc-700 py-1"><b class="flex-1">${esc(m.articulo)}</b>
-      ${m.ubicaciones.length ? m.ubicaciones.map(a => `<button class="chip chip-hecha" onclick="abrir(${a.ubicacion_id})" title="${esc(a.detalle)}">${esc(a.codigo)}${a.color ? ' · ' + esc(a.color) : ''}</button>`).join('') : '<span class="chip chip-pendiente">SIN UBICACIÓN</span>'}</div>`;
-  }).join('');
-  pintarMapa();
-}
-
-// Asignar escaneando
-const escIn = document.getElementById('esc');
-escIn.addEventListener('keydown', async e => {
-  if (e.key !== 'Enter') return;
-  e.preventDefault();
-  const v = escIn.value.trim(); escIn.value = '';
-  if (!v) return;
-  const ub = ubs.find(u => u.codigo === v.toUpperCase().replace(/\s+/g, ''));
-  if (ub) {
-    escUb = ub; beepOk();
-    document.getElementById('esc-actual').innerHTML = `<div class="text-xs">Asignando a</div><div class="ub-grande">${esc(ub.codigo)}</div>`;
-    return;
-  }
-  if (!escUb) { beepError(); toast('Primero escaneá la etiqueta de la ubicación', 'warn'); return; }
-  const d = await api('/mapeo/api/buscar?q=' + encodeURIComponent(v));
-  const m = d.modelos[0], vid = m && m.preseleccion;
-  if (!vid) { beepError(); toast('No encontré ese código en el catálogo', 'error'); return; }
-  const va = m.variantes.find(x => x.id === vid), nivel = document.getElementById('nivel-asig').value;
-  const datos = nivel === 'variante' ? { articulo_id: vid } : nivel === 'modelo' ? { modelo: m.articulo } : { modelo: m.articulo, color: va.color };
-  try {
-    const r = await api('/mapeo/api/asignar', { json: { ubicacion_id: escUb.id, ...datos } });
-    r.repetido ? beepWarn() : beepOk();
-    const txt = `${m.articulo}${nivel !== 'modelo' ? ' · ' + va.color : ''}${nivel === 'variante' ? ' · ' + va.talle : ''}`;
-    document.getElementById('esc-log').insertAdjacentHTML('afterbegin', `<div class="py-1 border-b border-zinc-700">${r.repetido ? '↺' : '✔'} ${esc(txt)} → <b>${esc(escUb.codigo)}</b></div>`);
-    cargar();
-  } catch (err) { beepError(); toast(err.message, 'error'); }
+ficha.addEventListener('click', async e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.volver) { seleccionar(null); irZona(estado.zona); return; }
+  if (b.dataset.rack) { seleccionar(rk(b.dataset.rack), null, null, true); return; }
+  if (b.dataset.col) { seleccionar(estado.r, +b.dataset.col, null); return; }
+  if (b.dataset.mod != null) { seleccionar(estado.r, estado.i, +b.dataset.mod); return; }
+  if (b.dataset.ir) { trazarCamino(b.dataset.ir); return; }
+  if (b.dataset.etq) { imprimirPDF('/mapeo/etiquetas.pdf?ids=' + b.dataset.etq, b); return; }
+  if (b.dataset.quitar) { await api('/mapeo/api/asignacion/' + b.dataset.quitar, { method: 'DELETE' }); await recargar(); pintarFicha(); return; }
+  if (b.dataset.asig) { const m = pm[+b.dataset.m]; asignar(+b.dataset.asig, b.dataset.color ? { modelo: m.articulo, color: b.dataset.color } : { modelo: m.articulo }); }
 });
 
-// Ubicaciones
-['n-zona', 'n-pasillo', 'n-desde', 'n-hasta', 'n-niveles'].forEach(id => document.getElementById(id).oninput = ejemplo);
-function ejemplo() {
-  const p = document.getElementById('n-pasillo').value.trim().toUpperCase(), d = +document.getElementById('n-desde').value || 0,
-        h = +document.getElementById('n-hasta').value || 0, n = +document.getElementById('n-niveles').value || 0;
-  const cant = (Math.abs(h - d) + 1) * Math.max(1, n);
-  document.getElementById('n-ejemplo').textContent = p ? `Se crean ${cant}: ${p}-${String(Math.min(d, h)).padStart(2, '0')}${n ? '-1' : ''} … ${p}-${String(Math.max(d, h)).padStart(2, '0')}${n ? '-' + n : ''}` : '';
+/* ===== ¿Dónde está? ===== */
+const q = document.getElementById('q'); let tq = null, rq = [];
+q.addEventListener('input', () => { clearTimeout(tq); tq = setTimeout(dondeEsta, 250); });
+q.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); clearTimeout(tq); dondeEsta(true); } });
+function irA(cod) {
+  const p = partes(cod); if (!p) return;
+  seleccionar(p.r, p.i, p.i ? (p.n ?? null) : null, true); trazarCamino(cod);
 }
-async function crearLote() {
+async function dondeEsta(enter) {
+  const v = q.value.trim(), el = document.getElementById('res-q');
+  if (v.length < 2) { el.innerHTML = ''; return; }
+  const p = partes(v);
+  if (p) { el.innerHTML = `<p class="text-sm">Módulo <b>${esc(codMod(p.r, p.i, p.n))}</b> · ${esc(p.r.lug)}</p>`; if (enter) irA(codMod(p.r, p.i, p.n)); return; }
+  rq = (await api('/mapeo/api/buscar?q=' + encodeURIComponent(v))).modelos;
+  el.innerHTML = rq.map(m => `<div class="flex flex-wrap items-center gap-2 text-sm border-b border-zinc-700 py-1"><b class="flex-1">${esc(m.articulo)}</b>
+    ${m.ubicaciones.length ? m.ubicaciones.map(a => `<button class="chip chip-hecha" data-ir="${esc(a.codigo)}" title="${esc(a.detalle)}">${esc(a.codigo)}${a.color ? ' · ' + esc(a.color) : ''}</button>`).join('') : '<span class="chip chip-pendiente">SIN UBICACIÓN</span>'}</div>`).join('')
+    || '<p class="text-sm text-zinc-500">Sin resultados.</p>';
+  if (enter) { const a = rq.find(m => m.ubicaciones.length); if (a) irA(a.ubicaciones[0].codigo); }
+}
+document.getElementById('res-q').addEventListener('click', e => { const b = e.target.closest('[data-ir]'); if (b) irA(b.dataset.ir); });
+
+/* ===== Cámara: la etiqueta del módulo te ubica; una prenda se busca (o se asigna) ===== */
+let camScanner = null, _camUlt = '', _camT = 0, escAsignar = false;
+function textoCam() { const u = escAsignar && estado.n != null ? codMod(estado.r, estado.i, estado.n) : ''; document.getElementById('cam-asignar').textContent = u ? ` y se asigna a ${u}` : ''; }
+async function toggleCam() {
+  if (camScanner) { pararCam(); return; }
+  if (typeof Html5Qrcode === 'undefined') { toast('No se pudo cargar el lector de la cámara (¿sin internet?)', 'error'); return; }
+  document.getElementById('cam-box').classList.remove('hidden'); textoCam();
   try {
-    const r = await api('/mapeo/api/ubicaciones/lote', { json: { zona: document.getElementById('n-zona').value,
-      pasillo: document.getElementById('n-pasillo').value, modulo_desde: +document.getElementById('n-desde').value,
-      modulo_hasta: +document.getElementById('n-hasta').value, niveles: +document.getElementById('n-niveles').value } });
-    toast(`${r.creadas} ubicaciones creadas`); cargar();
-  } catch (e) { toast(e.message, 'error', 5000); }
+    camScanner = new Html5Qrcode('qr-reader', { verbose: false, experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
+    await camScanner.start({ facingMode: 'environment' }, { fps: 12, qrbox: (w, h) => ({ width: Math.round(w * .85), height: Math.max(120, Math.round(h * .7)) }) },
+      t => { const n = Date.now(); if (t === _camUlt && n - _camT < 2500) return; _camUlt = t; _camT = n; escaneado(t); }, () => {});
+  } catch (e) { toast('No se pudo abrir la cámara: ' + e, 'error', 6000); pararCam(); }
 }
-async function reordenar() {
-  if (!confirm('¿Ordenar la ruta de recolección en zigzag (ida por un pasillo, vuelta por el siguiente)?')) return;
-  await api('/mapeo/api/ubicaciones/reordenar', { json: { modo: 'zigzag' } }); toast('Ruta ordenada'); cargar();
+async function pararCam() { if (camScanner) { try { await camScanner.stop(); } catch {} camScanner = null; } document.getElementById('cam-box').classList.add('hidden'); }
+async function escaneado(t) {
+  if (yoEnCodigo(t)) { beepOk(); toast('Te ubiqué en ' + estado.yoTxt); return; }
+  const u = escAsignar && estado.n != null ? ubPorCod(codMod(estado.r, estado.i, estado.n)) : null;
+  if (u) {
+    const d = await api('/mapeo/api/buscar?q=' + encodeURIComponent(t)), m = d.modelos[0], vid = m && m.preseleccion;
+    if (!vid) { beepError(); toast('No encontré ese código en el catálogo', 'error'); return; }
+    const r = await asignar(u.id, { modelo: m.articulo, color: m.variantes.find(x => x.id === vid).color });
+    r && (r.repetido ? beepWarn() : beepOk()); return;
+  }
+  q.value = t; beepOk(); dondeEsta(true);
 }
-function pintarTabla() {
-  document.getElementById('u-total').textContent = `(${ubs.length})`;
-  document.getElementById('u-tabla').innerHTML = ubs.map(u => `<tr class="border-t border-zinc-700">
-    <td class="py-1"><input type="checkbox" class="u-chk" value="${u.id}"></td>
-    <td><b>${esc(u.codigo)}</b></td>
-    <td><input class="input !py-1 !text-xs" value="${esc(u.zona)}" onchange="editar(${u.id}, {zona: this.value})"></td>
-    <td><input class="input !py-1 !text-xs" value="${esc(u.descripcion)}" onchange="editar(${u.id}, {descripcion: this.value})"></td>
-    <td><input class="input !py-1 !text-xs !w-20" type="number" value="${u.orden}" onchange="editar(${u.id}, {orden: +this.value})"></td>
-    <td>${u.articulos || ''}</td>
-    <td><input type="checkbox" ${u.activa ? 'checked' : ''} onchange="editar(${u.id}, {activa: this.checked})"></td>
-    <td><button class="text-red-600 text-xs" onclick="borrar(${u.id}, '${esc(u.codigo)}', ${u.articulos})">Borrar</button></td></tr>`).join('');
+
+/* ===== Barra ===== */
+document.querySelectorAll('[data-z]').forEach(b => b.addEventListener('click', () => irZona(b.dataset.z)));
+document.querySelectorAll('[data-v]').forEach(b => b.addEventListener('click', () => {
+  estado.vista = b.dataset.v; document.querySelectorAll('[data-v]').forEach(x => x.setAttribute('aria-pressed', x === b));
+  if (estado.r) irRack(estado.r); else irZona(estado.zona);
+}));
+function alternar(id, fn) { const b = document.getElementById(id); b.addEventListener('click', () => { const on = b.getAttribute('aria-pressed') !== 'true'; b.setAttribute('aria-pressed', on); fn(on); }); }
+alternar('tNom', on => { if (grupoNombres) grupoNombres.visible = on; });
+alternar('tCaj', on => { if (grupoCajas) grupoCajas.visible = on; });
+document.getElementById('tMover').addEventListener('click', () => modoMover(!estado.mover));
+
+/* ===== Pestañas, módulos y ajustes ===== */
+function tab(t) {
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('activo', b.dataset.t === t));
+  ['mapa', 'ajustes', 'vinculos'].forEach(x => document.getElementById('t-' + x).classList.toggle('hidden', x !== t));
+  if (t === 'vinculos') vinculos();
+  if (t === 'ajustes') { pintarAjustes(); migracion(); }
+  if (t === 'mapa' && renderer) ajustar();
+  try { localStorage.setItem('mapeo_tab', t); } catch {}
 }
-async function borrar(id, cod, n) {
-  if (!confirm(`¿Borrar ${cod}?${n ? ` Tiene ${n} artículo(s) asignado(s).` : ''}`)) return;
-  await api('/mapeo/api/ubicaciones/' + id, { method: 'DELETE' }); cargar();
+async function recargar() {
+  const d = await api('/mapeo/api/plano');
+  UBS = d.ubicaciones; AJ = { inicio: d.inicio, fallas: d.rack_fallas, faltan: d.faltan };
+  CONTEO = {}; UBS.forEach(u => { if (u.articulos) CONTEO[u.codigo] = u.articulos; });
+  if (renderer) construirCajas();
+  return d;
 }
-function imprimir(guias) {
-  const ids = [...document.querySelectorAll('.u-chk:checked')].map(c => c.value).join(',');
+function pintarAjustes() {
+  document.getElementById('aj-faltan').innerHTML = AJ.faltan ? `Faltan cargar <b>${AJ.faltan}</b> de los ${RACKS.reduce((a, r) => a + r.n * 3, 0)} módulos.` : '✔ Están cargados todos los módulos del plano.';
+  document.getElementById('aj-cargar').classList.toggle('hidden', !AJ.faltan);
+  document.getElementById('aj-inicio').value = AJ.inicio;
+  document.getElementById('aj-fallas').innerHTML = '<option value="">— Sin lugar de fallas (las Falla quedan sin ubicación) —</option>'
+    + UBS.filter(u => u.activa).map(u => `<option value="${esc(u.codigo)}" ${u.codigo === AJ.fallas ? 'selected' : ''}>${esc(u.codigo)}${u.descripcion ? ' · ' + esc(u.descripcion) : ''}</option>`).join('');
+}
+async function cargarModulos(b) {
+  b.disabled = true;
+  try { const r = await api('/mapeo/api/modulos/cargar', { method: 'POST' }); toast(`${r.creadas} módulos cargados`); await recargar(); pintarAjustes(); migracion(); pintarFicha(); }
+  catch (e) { toast(e.message, 'error'); }
+  b.disabled = false;
+}
+function imprimirTodas(guias) {
+  const ids = UBS.filter(u => partes(u.codigo) && /-N\d$/.test(u.codigo)).map(u => u.id).join(',');
+  if (!ids) { toast('Primero cargá los módulos del plano', 'warn'); return; }
   imprimirPDF(`/mapeo/etiquetas.pdf?ids=${ids}&desde=${+document.getElementById('et-desde').value || 1}${guias ? '&guias=true' : ''}`, event?.currentTarget);
+}
+async function guardarAjustes(b) {
+  b.disabled = true;
+  try { await api('/mapeo/api/ajustes', { json: { inicio: document.getElementById('aj-inicio').value, rack_fallas: document.getElementById('aj-fallas').value } }); toast('Guardado'); await recargar(); pintarAjustes(); }
+  catch (e) { toast(e.message, 'error'); }
+  b.disabled = false;
+}
+async function migracion(aplicar = false) {
+  const el = document.getElementById('mg-res');
+  let d;
+  try { d = await api('/mapeo/api/migrar', aplicar ? { method: 'POST' } : {}); } catch (e) { el.textContent = e.message; return; }
+  if (aplicar) { toast(`${d.renombrar.length} ubicaciones pasadas al formato nuevo`); await recargar(); pintarAjustes(); return migracion(); }
+  const lista = (xs, f) => `<div class="flex flex-wrap gap-1">${xs.slice(0, 80).map(f).join('')}${xs.length > 80 ? ` <span class="text-xs text-zinc-500">y ${xs.length - 80} más</span>` : ''}</div>`;
+  const art = x => x.articulos ? ` · ${x.articulos} art.` : '';
+  el.innerHTML = `<p>✔ <b>${d.ok}</b> ya están en el formato nuevo.</p>
+    ${d.renombrar.length ? `<div><p class="mb-1"><b>${d.renombrar.length}</b> se pueden pasar solas:</p>${lista(d.renombrar, x => `<span class="chip chip-auto">${esc(x.codigo)} → ${esc(x.nuevo)}${x.junta ? ' (se junta)' : ''}${art(x)}</span>`)}
+      <button class="btn btn-primario mt-2" onclick="if (confirm('¿Pasar ${d.renombrar.length} ubicaciones al formato nuevo? Se cambia en la base.')) migracion(true)">Aplicar</button></div>` : ''}
+    ${d.incompletas.length ? `<div><p class="mb-1"><b>${d.incompletas.length}</b> son un rack o una columna sin nivel. Siguen andando en la ruta, pero pasá sus artículos al módulo donde están de verdad:</p>${lista(d.incompletas, x => `<button class="chip chip-pendiente" onclick="tab('mapa'); irA('${esc(x.nuevo)}')">${esc(x.codigo)}${art(x)}</button>`)}</div>` : ''}
+    ${d.fuera.length ? `<div><p class="mb-1"><b>${d.fuera.length}</b> no son del plano (formato viejo pasillo-módulo-nivel). Reasigná sus artículos a un módulo y borralas:</p>${lista(d.fuera, x => `<span class="chip chip-pendiente">${esc(x.codigo)}${art(x)}</span>`)}</div>` : ''}`;
 }
 async function vinculos() {
   const d = await api('/mapeo/api/vinculos'), el = document.getElementById('v-lista');
@@ -305,36 +678,14 @@ async function vinculos() {
     <button class="text-red-600 text-xs" onclick="api('/mapeo/api/vinculos/${v.id}', {method:'DELETE'}).then(vinculos)">Quitar</button></div>`).join('')
     : '<p class="text-zinc-500">Todavía no hay vínculos.</p>';
 }
-// ── Croquis ──
-async function croquis() {
-  const d = await api('/mapeo/api/croquis');
-  const conteo = {};
-  d.ubicaciones.forEach(u => { if (u.rack && u.articulos) conteo[u.rack] = (conteo[u.rack] || 0) + u.articulos; });
-  const marcar = {}; if (d.rack_fallas) marcar[(d.rack_fallas.match(/^[A-Z]\d{2}/) || [''])[0]] = '#fca5a5';
-  document.querySelector('#cq-svg > div').innerHTML = dibujarCroquis(d.plano, { conteo, marcar, onRack: 'verRack',
-    inicio: { punto: [(p => p.x + p.w / 2)(d.plano.puertas.find(p => p.clave === d.inicio)), d.plano.alto - 14], nombre: '' } });
-  document.getElementById('cq-inicio').value = d.inicio;
-  document.getElementById('cq-fallas').innerHTML = '<option value="">— Sin rack de fallas (las Falla quedan sin ubicación) —</option>'
-    + d.ubicaciones.filter(u => u.activa).map(u => `<option value="${esc(u.codigo)}" ${u.codigo === d.rack_fallas ? 'selected' : ''}>${esc(u.codigo)}${u.descripcion ? ' · ' + esc(u.descripcion) : ''}</option>`).join('');
-  document.getElementById('cq-faltan').innerHTML = d.faltan.length
-    ? `Faltan cargar <b>${d.faltan.length}</b> ubicaciones del croquis (${esc(d.faltan.slice(0, 6).join(', '))}${d.faltan.length > 6 ? '…' : ''}).`
-    : '✔ Todas las ubicaciones del croquis están cargadas.';
-  document.getElementById('cq-cargar').classList.toggle('hidden', !d.faltan.length);
-}
-function verRack(rack) { tab('mapa'); q.value = rack; dondeEsta(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
-async function guardarCroquis(b) {
-  b.disabled = true;
-  try { await api('/mapeo/api/croquis/ajustes', { json: { inicio: document.getElementById('cq-inicio').value, rack_fallas: document.getElementById('cq-fallas').value } }); toast('Guardado'); croquis(); }
-  catch (e) { toast(e.message, 'error'); }
-  b.disabled = false;
-}
-async function cargarCroquis(b) {
-  b.disabled = true;
-  try { const r = await api('/mapeo/api/croquis/cargar', { method: 'POST' }); toast(`${r.creadas} ubicaciones cargadas`); await cargar(); croquis(); }
-  catch (e) { toast(e.message, 'error'); }
-  b.disabled = false;
-}
-cargar();
-try { const t = localStorage.getItem('mapeo_tab'); if (t) tab(t); } catch {}
+
+(async () => {
+  const d = await recargar();
+  PL = d.plano; DEP = PL.deposito; RACKS = DEP.racks;
+  pintarFicha(); init();
+  let yo = null; try { yo = JSON.parse(localStorage.getItem('mapeo_yo') || 'null'); } catch {}
+  if (renderer) { if (yo && isFinite(yo.x)) ponerYo(yo.x, yo.z, yo.txt || 'tu última ubicación', false); else aPersiana(AJ.inicio || 'P1'); }
+  try { const t = localStorage.getItem('mapeo_tab'); if (t && t !== 'mapa') tab(t); } catch {}
+})();
 </script>
 {% endblock %}

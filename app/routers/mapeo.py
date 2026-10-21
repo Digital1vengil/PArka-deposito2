@@ -1,4 +1,4 @@
-"""Sección Mapeo del depósito: ubicaciones, qué artículo hay en cada una, mapa y etiquetas de ubicación."""
+"""Sección Mapeo del depósito: plano 3D, qué artículo hay en cada módulo, camino hasta él y etiquetas."""
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -10,7 +10,9 @@ from ..auth import requiere
 from ..db import get_db
 from ..models import Articulo, SkuVinculo, Ubicacion, UbicacionArticulo, Usuario
 from ..services import devoluciones as dsvc
+from ..services import ajustes
 from ..services import mapeo as svc
+from ..services import plano
 from ..services.etiquetas import pdf_etiquetas
 from ..services.etiquetas_html import html_etiquetas
 from ..templating import render
@@ -35,40 +37,6 @@ def listar(u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
     cs = _conteos(db)
     us = db.scalars(select(Ubicacion).order_by(Ubicacion.orden, Ubicacion.codigo)).all()
     return {"ubicaciones": [svc.ubicacion_json(x, cs.get(x.id, 0)) for x in us]}
-
-
-class LoteIn(BaseModel):
-    zona: str = ""
-    pasillo: str
-    modulo_desde: int = 1
-    modulo_hasta: int = 1
-    niveles: int = 1
-
-
-@router.post("/api/ubicaciones/lote")
-def crear_lote(body: LoteIn, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
-    pasillo = svc.normalizar_codigo(body.pasillo)[:10]
-    if not pasillo:
-        raise HTTPException(400, "Poné el pasillo (ej: A)")
-    d, h = sorted((max(0, body.modulo_desde), max(0, body.modulo_hasta)))
-    niveles = max(0, min(body.niveles, 20))
-    if (h - d + 1) * max(1, niveles) > 500:
-        raise HTTPException(400, "Son demasiadas ubicaciones de una vez (máximo 500)")
-    orden = (db.scalar(select(func.max(Ubicacion.orden))) or 0)
-    existentes = set(db.scalars(select(Ubicacion.codigo)).all())
-    creadas = 0
-    for m in range(d, h + 1):
-        for n in (range(1, niveles + 1) if niveles else [0]):
-            cod = svc.armar_codigo(pasillo, m, n, body.zona)
-            if cod in existentes:
-                continue
-            orden += 1
-            db.add(Ubicacion(codigo=cod, zona=body.zona.strip()[:40], pasillo=pasillo, modulo=m, nivel=n, orden=orden))
-            existentes.add(cod)
-            creadas += 1
-    db.commit()
-    registrar(db, u, "ubicaciones_creadas", f"Pasillo {pasillo}: {creadas} ubicaciones", "mapeo")
-    return {"ok": True, "creadas": creadas}
 
 
 class UbicacionIn(BaseModel):
@@ -100,26 +68,6 @@ def borrar(uid: int, u: Usuario = Depends(acceso), db: Session = Depends(get_db)
     db.delete(x)
     db.commit()
     registrar(db, u, "ubicacion_borrada", cod, "mapeo")
-    return {"ok": True}
-
-
-class ReordenarIn(BaseModel):
-    modo: str = "zigzag"  # zigzag: ida por un pasillo y vuelta por el siguiente | codigo: orden alfabético
-
-
-@router.post("/api/ubicaciones/reordenar")
-def reordenar(body: ReordenarIn, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
-    us = db.scalars(select(Ubicacion)).all()
-    pasillos = sorted({(x.zona, x.pasillo) for x in us})
-    pos = {p: i for i, p in enumerate(pasillos)}
-
-    def clave(x: Ubicacion):
-        i = pos[(x.zona, x.pasillo)]
-        mod = -x.modulo if (body.modo == "zigzag" and i % 2) else x.modulo
-        return (i, mod, x.nivel, x.codigo)
-    for n, x in enumerate(sorted(us, key=clave), start=1):
-        x.orden = n * 10
-    db.commit()
     return {"ok": True}
 
 
@@ -213,9 +161,7 @@ def _lista_ubicaciones(db: Session, ids: str) -> list[dict]:
         raise HTTPException(400, "No hay ubicaciones para imprimir")
     lista = []
     for x in us:
-        partes = [f"Pasillo {x.pasillo}" if x.pasillo else "", f"Módulo {x.modulo}" if x.modulo else "",
-                  f"Nivel {x.nivel}" if x.nivel else ""]
-        lista.append({"nombre": f"UBICACIÓN {x.codigo}", "sku": " · ".join(p for p in [x.zona] + partes if p),
+        lista.append({"nombre": f"UBICACIÓN {x.codigo}", "sku": plano.describir(x.codigo) or x.descripcion,
                       "codigo_barras": x.codigo})
     return lista
 
@@ -240,28 +186,27 @@ def _404():
     raise HTTPException(404, "No encontrado")
 
 
-# ─────────── Croquis del depósito (racks A/B/C, persianas) y ajustes de la ruta de devolución ───────────
-@router.get("/api/croquis")
-def croquis_ver(u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
-    from ..services import ajustes, croquis
+
+
+# ─────────── Plano del depósito, módulos, camino y ajustes de la ruta de devolución ───────────
+@router.get("/api/plano")
+def ver_plano(u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
     cs = _conteos(db)
     us = db.scalars(select(Ubicacion).order_by(Ubicacion.orden, Ubicacion.codigo)).all()
-    faltan = [c["codigo"] for c in croquis.codigos_iniciales()
-              if c["codigo"] not in {x.codigo for x in us}]
-    return {"plano": croquis.plano(), "inicio": ajustes.leer("mapa_inicio", db) or "P1",
-            "rack_fallas": ajustes.leer("mapa_rack_fallas", db), "faltan": faltan,
-            "ubicaciones": [dict(svc.ubicacion_json(x, cs.get(x.id, 0)), rack=(croquis.partes(x.codigo) or [""])[0])
-                            for x in us]}
+    existentes = {x.codigo for x in us}
+    faltan = [c["codigo"] for c in plano.codigos_iniciales() if c["codigo"] not in existentes]
+    return {"plano": plano.plano(), "inicio": ajustes.leer("mapa_inicio", db) or "P1",
+            "rack_fallas": ajustes.leer("mapa_rack_fallas", db), "faltan": len(faltan),
+            "ubicaciones": [svc.ubicacion_json(x, cs.get(x.id, 0)) for x in us]}
 
 
-@router.post("/api/croquis/cargar")
-def croquis_cargar(u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
-    """Crea las ubicaciones del croquis que todavía no existen (A01…C05; B01 por columna y planta)."""
-    from ..services import croquis
+@router.post("/api/modulos/cargar")
+def cargar_modulos(u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    """Crea los módulos del plano que todavía no existen (rack · columna · nivel)."""
     existentes = set(db.scalars(select(Ubicacion.codigo)).all())
     orden = (db.scalar(select(func.max(Ubicacion.orden))) or 0)
     creadas = 0
-    for c in croquis.codigos_iniciales():
+    for c in plano.codigos_iniciales():
         if c["codigo"] in existentes:
             continue
         orden += 10
@@ -269,19 +214,47 @@ def croquis_cargar(u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
         creadas += 1
     db.commit()
     if creadas:
-        registrar(db, u, "mapeo", f"{creadas} ubicaciones cargadas del croquis", "mapeo")
+        registrar(db, u, "mapeo", f"{creadas} módulos cargados del plano", "mapeo")
     return {"ok": True, "creadas": creadas}
 
 
-class CroquisAjustesIn(BaseModel):
+@router.get("/api/migrar")
+def migrar_ver(u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    return svc.migrar_codigos(db)
+
+
+@router.post("/api/migrar")
+def migrar(u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    r = svc.migrar_codigos(db, aplicar=True)
+    if r["renombrar"]:
+        registrar(db, u, "mapeo", f"{len(r['renombrar'])} ubicaciones pasadas al formato A01-C03-N1", "mapeo")
+    return r
+
+
+@router.get("/api/camino")
+def camino(hasta: str, desde: str = "", x: float | None = None, y: float | None = None,
+           u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    """Camino por los pasillos hasta una ubicación. Sale de donde está la persona: un punto del plano (x, y),
+    el código de una ubicación escaneada o una persiana (P1 / P2)."""
+    if not plano.partes(hasta):
+        raise HTTPException(400, f"{hasta} no es un lugar del plano")
+    if x is not None and y is not None:
+        origen = plano.desde_punto(x, y)
+    elif plano.partes(desde):
+        origen = plano.desde_punto(*plano.acceso(desde))
+    else:
+        origen = plano.desde_punto(*plano.inicio(desde if desde in plano.PUERTAS else "P1"))
+    return plano.camino(origen, hasta)
+
+
+class AjustesIn(BaseModel):
     inicio: str = "P1"
     rack_fallas: str = ""
 
 
-@router.post("/api/croquis/ajustes")
-def croquis_ajustes(body: CroquisAjustesIn, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
-    from ..services import ajustes, croquis
-    if body.inicio not in croquis.PUERTAS:
+@router.post("/api/ajustes")
+def guardar_ajustes(body: AjustesIn, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    if body.inicio not in plano.PUERTAS:
         raise HTTPException(400, "Elegí Persiana 1 o Persiana 2")
     fallas = svc.normalizar_codigo(body.rack_fallas)
     if fallas and not db.scalar(select(Ubicacion).where(Ubicacion.codigo == fallas)):

@@ -149,7 +149,7 @@
 </div>
 {% endblock %}
 {% block scripts %}
-<script src="/static/croquis.js?v={{ static_v("croquis.js") }}"></script>
+<script src="/static/plano.js?v={{ static_v("plano.js") }}"></script>
 <script>
 let modelos = [], modelo = null, color = null, estado = '';   // Óptimo / Falla: sin valor por defecto, hay que elegirlo
 let items = [];   // {id, articulo, color, talle, sku, cantidad, estado, plataforma, venta}
@@ -892,7 +892,7 @@ function pintarRuta() {
   const puestas = ps.reduce((a, x) => a + x.items.reduce((b, it) => b + _puestas(it), 0), 0);
   document.getElementById('ruta-titulo').innerHTML = `🗺 Ruta de devolución PD-${r.did} <span class="text-sm font-normal text-zinc-500">· sale de ${esc(r.data.inicio.nombre)} · ${r.data.paradas.length} racks · ~${r.data.metros_aprox} m · guardadas ${puestas} de ${tot}</span>`;
   const hechas = new Set(ps.filter(_hecha).map(x => x.n));
-  document.getElementById('ruta-svg').innerHTML = dibujarCroquis(r.data.plano, { paradas: r.data.paradas, tramos: r.data.paradas.map(x => x.tramo), actual: p && !p.libre ? p.n : 0, hechas, inicio: r.data.inicio });
+  document.getElementById('ruta-svg').innerHTML = dibujarPlano(r.data.plano, { paradas: r.data.paradas, tramos: r.data.paradas.map(x => x.tramo), actual: p && !p.libre ? p.n : 0, hechas, inicio: r.data.inicio });
   const el = document.getElementById('ruta-parada');
   if (!p) { el.innerHTML = '<p class="text-zinc-500">No hay paradas.</p>'; }
   else {

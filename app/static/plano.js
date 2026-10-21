@@ -1,12 +1,17 @@
-// Croquis del depósito MAGONTEX en SVG (Mapeo y ruta de Devoluciones).
-// dibujarCroquis(plano, { paradas, tramos, actual, hechas, inicio, marcar, conteo, onRack })
+// Plano del depósito MAGONTEX visto de arriba, en SVG (ruta de Devoluciones).
+// dibujarPlano(plano, { paradas, tramos, actual, hechas, inicio, marcar, conteo, onRack })
+// Todos los racks tienen columnas: los largos van de norte (izquierda) a sur; los transversales, de abajo hacia arriba.
 (function () {
   const ZC = { A: ['#e3efef', '#9bc3c6', '#2f7d82'], B: ['#f5e6ea', '#d6a3b0', '#a83f5c'], C: ['#f6ece0', '#dcb895', '#b0702e'] };
   const e = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const rackDe = cod => (String(cod || '').match(/^([A-Z]\d{2})/) || [])[1] || '';
   const colDe = cod => +((String(cod || '').match(/-C(\d{1,2})/) || [])[1] || 0);
+  // rectángulo de la columna k (1…n) dentro del rack
+  const colRect = (r, k) => r.vertical
+    ? { x: r.x, y: r.y + r.h - k * r.h / r.columnas, w: r.w, h: r.h / r.columnas }
+    : { x: r.x + (k - 1) * r.w / r.columnas, y: r.y, w: r.w / r.columnas, h: r.h };
 
-  window.dibujarCroquis = function (plano, o = {}) {
+  window.dibujarPlano = function (plano, o = {}) {
     const W = plano.ancho, H = plano.alto, M = 26;
     const paradas = o.paradas || [], hechas = o.hechas || new Set(), marcar = o.marcar || {};
     const porRack = {};
@@ -20,27 +25,27 @@
     s += plano.puertas.map(p => `<rect x="${p.x}" y="${H - 1}" width="${p.w}" height="6" fill="#c62828"/>
       <text x="${p.x + p.w / 2}" y="${H + 20}" text-anchor="middle" font-size="10" font-weight="700" fill="#c62828">${e(p.nombre.toUpperCase())}</text>`).join('');
     for (const r of plano.racks) {
-      const c = ZC[r.zona], ps = porRack[r.codigo] || [], vert = r.h > r.w;
+      const c = ZC[r.zona], ps = porRack[r.codigo] || [];
       const act = ps.some(p => p.n === o.actual), lista = ps.length && ps.every(p => hechas.has(p.n));
-      const fill = r.columnas ? (marcar[r.codigo] || c[1]) : act ? '#18181b' : lista ? '#16a34a' : ps.length ? c[2] : (marcar[r.codigo] || c[1]);
-      const txt = act || ps.length || lista ? '#fff' : '#27272a';
+      const fill = marcar[r.codigo] || (act ? '#18181b' : lista ? '#16a34a' : c[1]);
+      const enteras = ps.filter(p => !colDe(p.codigo));   // paradas del rack entero (código sin columna)
       s += `<g ${o.onRack ? `style="cursor:pointer" onclick="${o.onRack}('${r.codigo}')"` : ''}>
-        <rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="2" fill="${fill}" stroke="${c[2]}" stroke-width="1.2"><title>${e(r.codigo)}${o.conteo && o.conteo[r.codigo] ? ' · ' + o.conteo[r.codigo] + ' artículos asignados' : ''}</title></rect>`;
-      if (r.columnas) {
-        for (let k = 1; k < r.columnas; k++) {
-          const x = r.x + k * r.w / r.columnas;
-          s += `<line x1="${x}" y1="${r.y}" x2="${x}" y2="${r.y + r.h}" stroke="${c[2]}" stroke-width=".8"/>`;
-        }
-        ps.forEach(p => { const k = colDe(p.codigo); if (!k) return;
-          const x = r.x + (k - 1) * r.w / r.columnas;
-          s += `<rect x="${x + 1}" y="${r.y + 1}" width="${r.w / r.columnas - 2}" height="${r.h - 2}" fill="${p.n === o.actual ? '#facc15' : hechas.has(p.n) ? '#16a34a' : c[2]}"/>
-            <text x="${x + r.w / r.columnas / 2}" y="${r.y + r.h / 2 + 4}" text-anchor="middle" font-size="10" font-weight="700" fill="${p.n === o.actual ? '#18181b' : '#fff'}">C${k}</text>`; });
+        <rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="2" fill="${enteras.length && !act && !lista ? c[2] : fill}" stroke="${c[2]}" stroke-width="1.2"><title>${e(r.codigo)}${o.conteo && o.conteo[r.codigo] ? ' · ' + o.conteo[r.codigo] + ' artículos asignados' : ''}</title></rect>`;
+      for (let k = 1; k < r.columnas; k++) {
+        const q = colRect(r, k);
+        s += r.vertical
+          ? `<line x1="${r.x}" y1="${q.y}" x2="${r.x + r.w}" y2="${q.y}" stroke="${c[2]}" stroke-width=".6"/>`
+          : `<line x1="${q.x + q.w}" y1="${r.y}" x2="${q.x + q.w}" y2="${r.y + r.h}" stroke="${c[2]}" stroke-width=".6"/>`;
       }
+      ps.forEach(p => { const k = colDe(p.codigo); if (!k) return;
+        const q = colRect(r, k), a = p.n === o.actual;
+        s += `<rect x="${q.x + 1}" y="${q.y + 1}" width="${q.w - 2}" height="${q.h - 2}" fill="${a ? '#facc15' : hechas.has(p.n) ? '#16a34a' : c[2]}"/>
+          <text x="${q.x + q.w / 2}" y="${q.y + q.h / 2 + 4}" text-anchor="middle" font-size="10" font-weight="700" fill="${a ? '#18181b' : '#fff'}">C${k}</text>`; });
       const tx = r.x + r.w / 2, ty = r.y + r.h / 2 + 4;
-      if (!r.columnas || !ps.length) s += vert
-        ? `<text x="${tx + 4}" y="${r.y + r.h / 2}" text-anchor="middle" font-size="11" font-weight="700" fill="${txt}" transform="rotate(-90 ${tx + 4} ${r.y + r.h / 2})">${e(r.codigo)}</text>`
-        : `<text x="${tx}" y="${ty}" text-anchor="middle" font-size="11" font-weight="700" fill="${txt}">${e(r.codigo)}</text>`;
-      else s += `<text x="${r.x - 4}" y="${ty}" text-anchor="end" font-size="11" font-weight="700" fill="${c[2]}">${e(r.codigo)}</text>`;
+      s += r.vertical
+        ? `<text x="${r.x - 5}" y="${r.y + r.h / 2}" text-anchor="middle" font-size="11" font-weight="700" fill="${c[2]}" transform="rotate(-90 ${r.x - 5} ${r.y + r.h / 2})">${e(r.codigo)}</text>`
+        : ps.length ? `<text x="${r.x - 4}" y="${ty}" text-anchor="end" font-size="11" font-weight="700" fill="${c[2]}">${e(r.codigo)}</text>`
+        : `<text x="${tx}" y="${ty}" text-anchor="middle" font-size="11" font-weight="700" fill="#27272a">${e(r.codigo)}</text>`;
       if (o.conteo && o.conteo[r.codigo] && !ps.length) s += `<circle cx="${r.x + r.w - 4}" cy="${r.y + 4}" r="3.5" fill="#7c3aed"/>`;
       s += '</g>';
     }

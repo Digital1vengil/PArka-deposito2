@@ -64,6 +64,52 @@ def ubicaciones_de(db: Session, art: Articulo) -> list[Ubicacion]:
     return salida
 
 
+def migrar_codigos(db: Session, aplicar: bool = False) -> dict:
+    """Pasa las ubicaciones al formato del plano (A01-C03-N1). Sin `aplicar` solo dice qué haría.
+    - renombrar: se entiende el módulo (b1-c3-n1 → B01-C03-N1). Si el código nuevo ya existe, sus artículos
+      pasan a ese y la vieja se borra.
+    - incompletas: rack o columna sin nivel (A03, B01-C02): siguen andando en la ruta, pero conviene pasar sus
+      artículos a un módulo.
+    - fuera: no son del plano (A-03-2, pasillos viejos)."""
+    from . import ajustes, plano
+    us = db.scalars(select(Ubicacion).order_by(Ubicacion.orden, Ubicacion.codigo)).all()
+    por_cod = {u.codigo: u for u in us}
+    renombrar, incompletas, fuera, ok = [], [], [], 0
+    for u in us:
+        p = plano.partes(u.codigo)
+        n = len(u.asignaciones)
+        if not p:
+            fuera.append({"codigo": u.codigo, "articulos": n})
+        elif not p[1] or p[2] is None:
+            incompletas.append({"codigo": u.codigo, "nuevo": plano.codigo(*p), "articulos": n})
+        elif plano.codigo(*p) != u.codigo:
+            nuevo = plano.codigo(*p)
+            renombrar.append({"codigo": u.codigo, "nuevo": nuevo, "articulos": n, "junta": nuevo in por_cod})
+        else:
+            ok += 1
+    if aplicar and renombrar:
+        fallas = ajustes.leer("mapa_rack_fallas", db)
+        fallas_nuevo = next((r["nuevo"] for r in renombrar if r["codigo"] == fallas), "")
+        for r in renombrar:
+            vieja, nueva = por_cod[r["codigo"]], por_cod.get(r["nuevo"])
+            if nueva is None:
+                rack, col, nivel = plano.partes(r["nuevo"])
+                vieja.codigo, vieja.pasillo, vieja.modulo, vieja.nivel = r["nuevo"], rack, col, nivel + 1
+                vieja.zona, vieja.descripcion = rack[0], vieja.descripcion or plano.describir(r["nuevo"])
+                por_cod[r["nuevo"]] = vieja
+            else:
+                ya = {(a.modelo.upper(), a.color, a.articulo_id) for a in nueva.asignaciones}
+                for a in list(vieja.asignaciones):
+                    if (a.modelo.upper(), a.color, a.articulo_id) not in ya:
+                        a.ubicacion = nueva
+                db.flush()
+                db.delete(vieja)
+        db.commit()
+        if fallas_nuevo:
+            ajustes.guardar(db, "mapa_rack_fallas", fallas_nuevo)
+    return {"ok": ok, "renombrar": renombrar, "incompletas": incompletas, "fuera": fuera, "aplicado": aplicar}
+
+
 def articulo_por_sku(db: Session, sku: str) -> Articulo | None:
     """SKU de ML/TN → artículo: vínculo guardado, SKU igual, código de barras igual, o SKU contenido."""
     s = (sku or "").strip()

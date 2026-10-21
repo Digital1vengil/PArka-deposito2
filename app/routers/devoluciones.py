@@ -211,8 +211,8 @@ def rack(c: str = "", u: Usuario = Depends(acceso), db: Session = Depends(get_db
     db.commit()
     if not x:
         return {"ok": False, "motivo": f"{(c or '').strip() or 'Ese código'} no es un rack de Mapeo ni una ubicación de Odoo"}
-    from ..services import croquis
-    return {"ok": True, "codigo": x.codigo, "descripcion": croquis.describir(x.codigo) or x.descripcion}
+    from ..services import plano
+    return {"ok": True, "codigo": x.codigo, "descripcion": plano.describir(x.codigo) or x.descripcion}
 
 
 class GuardadoIn(BaseModel):
