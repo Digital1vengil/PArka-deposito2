@@ -101,6 +101,8 @@ class ConfirmarIn(BaseModel):
     items: list[ItemIn]
     plataforma: str = ""   # compatibilidad: si una prenda no trae plataforma se usa esta
     ruta: bool = False     # True = se guarda en la app y se arma la ruta; Drive recién al "Marcar como devuelto"
+    yo_x: float | None = None   # dónde está la persona (punto del plano): la ruta sale de ahí
+    yo_y: float | None = None
 
 
 def dev_json(d: Devolucion) -> dict:
@@ -182,7 +184,7 @@ def confirmar(body: ConfirmarIn, u: Usuario = Depends(acceso), db: Session = Dep
         # Paso 2 (en la ruta): cada prenda guardada completa "Ubicación" y "Devuelto al rack" en el Excel del día.
         d.ruta_estado = "PENDIENTE"
         db.commit()
-        ruta = ruta_svc.armar(db, d)
+        ruta = ruta_svc.armar(db, d, _yo(body.yo_x, body.yo_y))
         ruta_svc.actualizar_excel_dia(d.fecha)
         _enviar(db, d)
         return {"ok": True, "devolucion": dev_json(d), "ruta": ruta}
@@ -199,9 +201,24 @@ def _dev(db: Session, did: int) -> Devolucion:
     return d
 
 
+def _yo(x: float | None, y: float | None) -> tuple[float, float] | None:
+    return (x, y) if x is not None and y is not None else None
+
+
 @router.get("/api/{did}/ruta")
-def ver_ruta(did: int, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
-    return ruta_svc.armar(db, _dev(db, did))
+def ver_ruta(did: int, x: float | None = None, y: float | None = None, u: Usuario = Depends(acceso),
+             db: Session = Depends(get_db)):
+    """La ruta sale de donde está la persona (x, y: punto del plano) o, sin eso, de la persiana de Ajustes."""
+    return ruta_svc.armar(db, _dev(db, did), _yo(x, y))
+
+
+@router.get("/api/camino")
+def camino(hasta: str, x: float, y: float, u: Usuario = Depends(acceso)):
+    """Camino por los pasillos desde donde está la persona hasta la parada actual."""
+    from ..services import plano
+    if not plano.partes(hasta):
+        raise HTTPException(400, f"{hasta} no es un lugar del plano")
+    return plano.camino(plano.desde_punto(x, y), hasta)
 
 
 @router.get("/api/rack")

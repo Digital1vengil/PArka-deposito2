@@ -1,0 +1,26 @@
+/* Visor 3D del depósito: racks azules con larguero naranja, mismos colores de zona que el plano. */
+.m3d { --zA:#2f7f8a; --zB:#a8445f; --zC:#b06a2a; --acento:#0a7ea4; }
+.m3d-visor { position:relative; height:clamp(420px,68vh,760px); border-radius:14px; overflow:hidden; border:1px solid #d7dbe0; background:#dfe5ec; }
+.m3d-visor canvas { display:block; width:100%; height:100%; touch-action:none; cursor:grab; }
+.m3d-visor.mover canvas { cursor:crosshair; }
+.m3d-ayuda { position:absolute; left:10px; bottom:10px; font-size:11.5px; color:#4b5563; background:#fff; border:1px solid #d7dbe0; border-radius:8px; padding:5px 9px; pointer-events:none; max-width:calc(100% - 20px); }
+.m3d-ley { position:absolute; right:10px; top:10px; display:flex; flex-direction:column; gap:3px; font-size:11px; background:#fff; border:1px solid #d7dbe0; border-radius:8px; padding:6px 9px; color:#4b5563; }
+.m3d-ley span { display:flex; align-items:center; gap:6px; }
+.m3d-sw { width:11px; height:11px; border-radius:2px; display:inline-block; flex:none; }
+.m3d-cargando { position:absolute; inset:0; display:grid; place-items:center; color:#6b7280; font-size:13px; }
+.m3d-donde { position:absolute; left:10px; top:10px; background:#fff; border:1px solid #d7dbe0; border-radius:10px; padding:6px 10px; font-size:12px; color:#374151; max-width:calc(100% - 180px); }
+.m3d-donde b { font-size:14px; color:#ea580c; }
+.m3d-seg { display:flex; gap:3px; background:#fff; border:1px solid #d7dbe0; border-radius:10px; padding:3px; }
+.m3d-seg button { font:600 13px/1 inherit; padding:8px 11px; border-radius:7px; border:0; background:transparent; color:#1b1f24; cursor:pointer; white-space:nowrap; }
+.m3d-seg button[aria-pressed="true"] { background:#1b1f24; color:#fff; }
+.m3d-seg button.za[aria-pressed="true"] { background:var(--zA); } .m3d-seg button.zb[aria-pressed="true"] { background:var(--zB); } .m3d-seg button.zc[aria-pressed="true"] { background:var(--zC); }
+.m3d-seg button.mov[aria-pressed="true"] { background:#ea580c; }
+.m3d-fila { display:grid; grid-template-columns:46px minmax(0,1fr) auto; gap:8px; align-items:center; text-align:left; width:100%; padding:7px 6px; border-radius:7px; cursor:pointer; font-size:13px; }
+.m3d-fila:hover { background:rgba(127,127,127,.12); }
+.m3d-cols { display:grid; grid-template-columns:repeat(auto-fill,minmax(52px,1fr)); gap:5px; }
+.m3d-colb { font:600 12px/1 ui-monospace,Menlo,monospace; padding:9px 0; border-radius:7px; border:1px solid rgba(127,127,127,.35); cursor:pointer; position:relative; }
+.m3d-colb[aria-pressed="true"] { background:var(--acento); border-color:var(--acento); color:#fff; }
+.m3d-colb i { position:absolute; top:3px; right:4px; width:6px; height:6px; border-radius:50%; background:#7c3aed; }
+.m3d-modb { display:flex; justify-content:space-between; align-items:center; gap:8px; text-align:left; width:100%; padding:10px; border-radius:9px; border:1px solid rgba(127,127,127,.35); cursor:pointer; }
+.m3d-modb[aria-pressed="true"] { border-color:var(--acento); box-shadow:0 0 0 2px var(--acento) inset; }
+.m3d-cod { font:700 13px/1 ui-monospace,Menlo,monospace; letter-spacing:.02em; }

@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block titulo %}Devoluciones · {{ APP_NOMBRE }}{% endblock %}
-{% block head %}<script src="/static/vendor/html5-qrcode-2.3.8.min.js?v=2.3.8"></script>{% endblock %}
+{% block head %}<script src="/static/vendor/html5-qrcode-2.3.8.min.js?v=2.3.8"></script>
+<link rel="stylesheet" href="/static/deposito3d.css?v={{ static_v("deposito3d.css") }}">{% endblock %}
 {% block contenido %}
 <a href="/" class="text-sm text-zinc-500 hover:text-violeta">← Inicio</a>
 <h1 class="text-2xl font-bold mb-1">↩️ Devoluciones</h1>
@@ -127,7 +128,23 @@
       <h2 class="text-lg font-bold flex-1" id="ruta-titulo">Ruta de devolución</h2>
       <button class="btn btn-gris btn-chico" onclick="cerrarRuta()" title="La ruta queda en Últimas devoluciones para seguirla después">✕ Seguir después</button>
     </div>
-    <div class="overflow-x-auto mb-3"><div id="ruta-svg" class="min-w-[680px]"></div></div>
+    <div class="m3d mb-3">
+      <div class="flex flex-wrap gap-2 items-center mb-2">
+        <div class="m3d-seg" role="group" aria-label="Vista">
+          <button data-rv="iso" aria-pressed="true">3D</button><button data-rv="planta" aria-pressed="false">Planta</button>
+        </div>
+        <div class="m3d-seg" role="group" aria-label="Dónde estoy">
+          <button id="r-mover" class="mov" aria-pressed="false" title="Tocá el piso donde estás parado">📍 Estoy acá</button>
+          <button onclick="rutaDesdeAca(this)" title="Vuelve a ordenar las paradas que faltan saliendo de donde está el monigote">↻ Salir desde acá</button>
+        </div>
+      </div>
+      <div class="m3d-visor !h-[clamp(300px,46vh,520px)]" id="ruta-visor">
+        <div class="m3d-cargando">Cargando el depósito…</div>
+        <div class="m3d-donde" id="ruta-donde">Estás en <b>—</b></div>
+        <div class="m3d-ayuda" id="ruta-ayuda">El camino naranja va de vos a la parada actual · escaneá el rack al llegar</div>
+      </div>
+      <div id="ruta-svg" class="hidden overflow-x-auto"><div class="min-w-[680px]"></div></div>
+    </div>
     <div class="grid md:grid-cols-5 gap-4">
       <div class="md:col-span-3 flex flex-col gap-3">
         <div id="ruta-parada" class="rounded-xl border-2 p-4"></div>
@@ -150,6 +167,9 @@
 {% endblock %}
 {% block scripts %}
 <script src="/static/plano.js?v={{ static_v("plano.js") }}"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="/static/deposito3d.js?v={{ static_v("deposito3d.js") }}"></script>
 <script>
 let modelos = [], modelo = null, color = null, estado = '';   // Óptimo / Falla: sin valor por defecto, hay que elegirlo
 let items = [];   // {id, articulo, color, talle, sku, cantidad, estado, plataforma, venta}
@@ -768,7 +788,7 @@ async function confirmar(modo = 'ruta') {
   bs.disabled = bd.disabled = true; (modo === 'ruta' ? bs : bd).textContent = modo === 'ruta' ? 'Armando la ruta…' : 'Subiendo a Drive…';
   const b = document.getElementById('btn-confirmar'); b.disabled = true; b.textContent = 'Guardando…';
   try {
-    const r = await api('/devoluciones/api/confirmar', { json: { ruta: modo === 'ruta', items: items.map(x => ({ articulo_id: x.id, descripcion: x.id ? '' : x.articulo, llego: x.llego || '', reemplaza: x.reemplaza || '', cantidad: x.cantidad, estado: x.estado, plataforma: x.plataforma, venta: x.venta })) } });
+    const r = await api('/devoluciones/api/confirmar', { json: { ruta: modo === 'ruta', ...yoParams(), items: items.map(x => ({ articulo_id: x.id, descripcion: x.id ? '' : x.articulo, llego: x.llego || '', reemplaza: x.reemplaza || '', cantidad: x.cantidad, estado: x.estado, plataforma: x.plataforma, venta: x.venta })) } });
     cerrarResumen();
     const desde = +document.getElementById('desde').value || 1;
     if (r.devolucion.items.some(i => i.estado !== 'AJENO')) imprimirEtiquetas('devoluciones', r.devolucion.id, { desde });
@@ -838,7 +858,8 @@ function _chipNuevo(x) { return _nuevos.has(x.id) ? `<span id="nuevo-PD-${x.id}"
 let rutaAct = null;   // {did, data, paradas, actual, rackOk, puestos: {item_id: {codigo: n}}, saltadas: []}
 const _RACK = /^[A-Z]\d{2}(-C\d{1,2})?(-N\d)?$/;
 const _clave = did => 'ruta_PD_' + did;
-function _guardarProg() { try { const r = rutaAct; localStorage.setItem(_clave(r.did), JSON.stringify({ saltadas: r.saltadas, actual: r.actual })); } catch {} }
+const _k = p => p.codigo || 'libre';   // las paradas se identifican por código: el orden cambia según de dónde salís
+function _guardarProg() { try { const r = rutaAct, p = r.paradas[r.actual]; localStorage.setItem(_clave(r.did), JSON.stringify({ saltadas: r.saltadas, parada: p ? _k(p) : '' })); } catch {} }
 function abrirRuta(data) {
   pararCam();
   const paradas = data.paradas.slice();
@@ -848,7 +869,10 @@ function abrirRuta(data) {
   const puestos = {};
   paradas.forEach(p => p.items.forEach(it => { if (it.guardados && Object.keys(it.guardados).length) puestos[it.item_id] = { ...it.guardados }; }));
   rutaAct = { did: data.devolucion_id, data, paradas, actual: 0, rackOk: null, puestos, saltadas: [] };
-  try { const g = JSON.parse(localStorage.getItem(_clave(data.devolucion_id)) || 'null'); if (g) Object.assign(rutaAct, { saltadas: g.saltadas || [], actual: Math.min(g.actual || 0, Math.max(0, paradas.length - 1)) }); } catch {}
+  try {
+    const g = JSON.parse(localStorage.getItem(_clave(data.devolucion_id)) || 'null');
+    if (g) { rutaAct.saltadas = (g.saltadas || []).filter(x => typeof x === 'string'); const i = paradas.findIndex(x => _k(x) === g.parada); if (i >= 0) rutaAct.actual = i; }
+  } catch {}
   if (!paradas.length) rutaAct.actual = 0;
   else if (_hecha(paradas[rutaAct.actual] || {})) _siguiente();
   document.getElementById('modal-ruta').classList.remove('hidden');
@@ -859,22 +883,22 @@ function abrirRuta(data) {
 function cerrarRuta() { if (camScanner && camModo === 'ruta') pararCam(); rutaAct = null; document.getElementById('modal-ruta').classList.add('hidden'); document.body.style.overflow = ''; historial(); }
 async function seguirRuta(id, b) {
   b.disabled = true;
-  try { abrirRuta(await api(`/devoluciones/api/${id}/ruta`)); } catch (e) { toast(e.message, 'error'); }
+  try { abrirRuta(await api(`/devoluciones/api/${id}/ruta${yoQuery()}`)); } catch (e) { toast(e.message, 'error'); }
   b.disabled = false;
 }
 const _puestas = it => Object.values(rutaAct.puestos[it.item_id] || {}).reduce((a, n) => a + n, 0);
 const _faltan = it => Math.max(0, it.cantidad - _puestas(it));
 const _hecha = p => p.items && p.items.every(it => !_faltan(it));
-const _cerrada = p => _hecha(p) || rutaAct.saltadas.includes(p.n);
+const _cerrada = p => _hecha(p) || rutaAct.saltadas.includes(_k(p));
 function _siguiente() {
   const ps = rutaAct.paradas, ini = rutaAct.actual;
   for (let k = 1; k <= ps.length; k++) { const i = (ini + k) % ps.length; if (!_cerrada(ps[i])) { rutaAct.actual = i; rutaAct.rackOk = null; return true; } }
   rutaAct.rackOk = null; return false;
 }
-function irParada(i) { rutaAct.actual = i; rutaAct.rackOk = null; rutaAct.saltadas = rutaAct.saltadas.filter(n => n !== rutaAct.paradas[i].n); _guardarProg(); _estadoRuta(null, 'Escaneá el código del rack'); pintarRuta(); }
+function irParada(i) { rutaAct.actual = i; rutaAct.rackOk = null; rutaAct.saltadas = rutaAct.saltadas.filter(k => k !== _k(rutaAct.paradas[i])); _guardarProg(); _estadoRuta(null, 'Escaneá el código del rack'); pintarRuta(); }
 function saltarParada() {
   const p = rutaAct.paradas[rutaAct.actual]; if (!p) return;
-  if (!rutaAct.saltadas.includes(p.n)) rutaAct.saltadas.push(p.n);
+  if (!rutaAct.saltadas.includes(_k(p))) rutaAct.saltadas.push(_k(p));
   const hay = _siguiente(); _guardarProg();
   _estadoRuta(null, hay ? `Saltaste la parada ${p.n}. Seguí con la siguiente.` : 'No quedan paradas: marcá como devuelto o guardá en Drive sin devolver.');
   pintarRuta();
@@ -892,11 +916,11 @@ function pintarRuta() {
   const puestas = ps.reduce((a, x) => a + x.items.reduce((b, it) => b + _puestas(it), 0), 0);
   document.getElementById('ruta-titulo').innerHTML = `🗺 Ruta de devolución PD-${r.did} <span class="text-sm font-normal text-zinc-500">· sale de ${esc(r.data.inicio.nombre)} · ${r.data.paradas.length} racks · ~${r.data.metros_aprox} m · guardadas ${puestas} de ${tot}</span>`;
   const hechas = new Set(ps.filter(_hecha).map(x => x.n));
-  document.getElementById('ruta-svg').innerHTML = dibujarPlano(r.data.plano, { paradas: r.data.paradas, tramos: r.data.paradas.map(x => x.tramo), actual: p && !p.libre ? p.n : 0, hechas, inicio: r.data.inicio });
+  pintarVisor(hechas);
   const el = document.getElementById('ruta-parada');
   if (!p) { el.innerHTML = '<p class="text-zinc-500">No hay paradas.</p>'; }
   else {
-    const rack = p.libre ? (r.rackOk ? `Rack elegido: <b>${esc(r.rackOk)}</b>` : 'Escaneá el rack donde las vas a dejar') : `<span class="text-3xl font-black tracking-wide">${esc(p.codigo)}</span>`;
+    const rack = p.libre ? (r.rackOk ? `Rack elegido: <b>${esc(r.rackOk)}</b>` : 'Escaneá el rack donde las vas a dejar') : `<span class="text-3xl font-black tracking-wide">${esc(p.codigo)}</span>${nivelChips(p.codigo)}`;
     el.style.borderColor = r.rackOk ? '#15803d' : '#ea580c';
     el.innerHTML = `<div class="flex flex-wrap items-center gap-2 mb-1"><span class="chip ${p.libre ? 'chip-pendiente' : 'chip-en_curso'}">PARADA ${p.n} DE ${ps.length}</span>${p.es_fallas ? '<span class="chip" style="background:#fee2e2;color:#b91c1c">RACK DE FALLAS</span>' : ''}${(p.items || []).some(x => x.odoo && x.odoo === p.codigo) ? '<span class="chip" style="background:#ede9fe;color:#5b21b6">UBICACIÓN DE ODOO</span>' : ''}${r.rackOk ? '<span class="chip chip-hecha">RACK OK</span>' : ''}</div>
       <div class="mb-1">${rack}</div><div class="text-sm text-zinc-500 mb-3">${esc(p.descripcion || '')}</div>
@@ -908,7 +932,7 @@ function pintarRuta() {
       <div class="flex gap-2 mt-3"><button class="btn btn-gris btn-chico" onclick="saltarParada()">⏭ Saltar esta parada (no hay lugar)</button></div>`;
   }
   document.getElementById('ruta-lista').innerHTML = ps.map((x, i) => {
-    const h = _hecha(x), sal = !h && r.saltadas.includes(x.n), u = x.items.reduce((a, it) => a + it.cantidad, 0);
+    const h = _hecha(x), sal = !h && r.saltadas.includes(_k(x)), u = x.items.reduce((a, it) => a + it.cantidad, 0);
     return `<button class="flex items-center gap-2 py-1.5 px-2 rounded-lg text-left ${i === r.actual ? 'bg-zinc-100 font-bold' : ''}" onclick="irParada(${i})">
       <span class="w-6 h-6 rounded-full flex items-center justify-center text-xs text-white" style="background:${h ? '#16a34a' : i === r.actual ? '#ea580c' : sal ? '#a1a1aa' : '#18181b'}">${h ? '✓' : x.n}</span>
       <span class="flex-1">${x.libre ? 'Sin ubicación' : esc(x.codigo)}${sal ? ' <span class="text-xs text-zinc-500">(saltada)</span>' : ''}</span><span class="text-zinc-500">${u} u.</span></button>`;
@@ -918,6 +942,77 @@ function pintarRuta() {
   b.textContent = todo ? '✔ Marcar como devuelto' : `✔ Marcar como devuelto (faltan ${tot - puestas})`;
   b.disabled = !puestas && tot > 0;
 }
+// ── Visor 3D de la ruta: el monigote sos vos (se comparte con Mapeo en este equipo) ──
+let V3 = null, _caminoKey = '';
+const NIVELES = ['PLANTA BAJA', '1ER NIVEL', '2DO NIVEL'];
+function nivelChips(cod) {
+  const m = String(cod || '').match(/-C(\d{1,2})(?:-N(\d))?$/);
+  if (!m) return '<div class="text-sm font-bold text-zinc-500 mt-1">Rack entero (sin columna ni nivel)</div>';
+  return `<div class="flex flex-wrap gap-2 mt-1"><span class="chip chip-en_curso !text-sm">COLUMNA ${+m[1]}</span>${m[2] != null
+    ? `<span class="chip !text-sm" style="background:#ea580c;color:#fff">${NIVELES[+m[2]] || 'NIVEL ' + m[2]}</span>` : '<span class="chip chip-pendiente">sin nivel</span>'}</div>`;
+}
+// dónde está el monigote, en puntos del plano (20 por metro; el oeste abajo)
+function yoPts() {
+  if (V3 && V3.ok) return V3.yoPuntos();
+  try { const g = JSON.parse(localStorage.getItem('mapeo_yo') || 'null'); if (g && isFinite(g.x)) return [+(g.x * 20).toFixed(1), +((10.4 - g.z) * 20).toFixed(1)]; } catch {}
+  return null;
+}
+const yoParams = () => { const p = yoPts(); return p ? { yo_x: p[0], yo_y: p[1] } : {}; };
+const yoQuery = () => { const p = yoPts(); return p ? `?x=${p[0]}&y=${p[1]}` : ''; };
+function moverYoA(cod) { if (V3 && V3.ok) V3.yoEnCodigo(cod); }
+function crearVisor(plano) {
+  if (V3) return;
+  if (!window.Deposito3D) { V3 = { ok: false }; return; }
+  V3 = Deposito3D(document.getElementById('ruta-visor'), plano, {
+    vista: 'iso',
+    alMoverYo: () => { _caminoKey = ''; if (rutaAct) caminoParada(); },
+    alMover: on => { document.getElementById('r-mover').setAttribute('aria-pressed', on);
+      document.getElementById('ruta-ayuda').textContent = on ? 'Tocá el piso donde estás parado' : 'El camino naranja va de vos a la parada actual · escaneá el rack al llegar'; },
+  });
+  if (!V3.ok) return;
+  V3.yoGuardado(rutaAct && rutaAct.data.inicio.clave !== 'yo' ? rutaAct.data.inicio.clave : 'P1');
+  document.querySelectorAll('[data-rv]').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('[data-rv]').forEach(x => x.setAttribute('aria-pressed', x === b)); V3.vista(b.dataset.rv);
+    const p = rutaAct && rutaAct.paradas[rutaAct.actual]; if (p && p.codigo) V3.irTramo(p.codigo);
+  }));
+  document.getElementById('r-mover').addEventListener('click', () => V3.mover(!V3.estado.mover));
+}
+function pintarVisor(hechas) {
+  const r = rutaAct, p = r.paradas[r.actual];
+  crearVisor(r.data.plano);
+  if (!V3.ok) {   // sin WebGL: el plano visto de arriba
+    document.getElementById('ruta-visor').classList.add('hidden'); document.getElementById('ruta-svg').classList.remove('hidden');
+    document.querySelector('#ruta-svg > div').innerHTML = dibujarPlano(r.data.plano, { paradas: r.data.paradas, tramos: r.data.paradas.map(x => x.tramo), actual: p && !p.libre ? p.n : 0, hechas, inicio: r.data.inicio });
+    return;
+  }
+  V3.ajustar();
+  V3.paradas(r.data.paradas.map(x => ({ codigo: x.codigo, n: x.n,
+    estado: hechas.has(x.n) ? 'hecha' : p && x.n === p.n && !p.libre ? 'actual' : r.saltadas.includes(_k(x)) ? 'saltada' : 'pendiente' })));
+  const q = p && !p.libre ? V3.partes(p.codigo) : null;
+  V3.resaltar(q ? q.r : null, q && q.i, q && q.n, 0xea580c);   // el módulo exacto: rack, columna y nivel
+  caminoParada();
+}
+async function caminoParada() {
+  const r = rutaAct; if (!r || !V3 || !V3.ok) return;
+  const p = r.paradas[r.actual], yo = V3.yoPuntos(), dn = document.getElementById('ruta-donde');
+  if (!p || p.libre || !p.codigo || !yo) { V3.borrarCamino(); _caminoKey = ''; dn.innerHTML = `Estás en <b>${esc(V3.estado.yoTxt || '—')}</b>`; return; }
+  const key = p.codigo + '|' + yo.join(',');
+  if (key === _caminoKey) return;
+  _caminoKey = key;
+  let d;
+  try { d = await api(`/devoluciones/api/camino?hasta=${encodeURIComponent(p.codigo)}&x=${yo[0]}&y=${yo[1]}`); } catch { return; }
+  if (_caminoKey !== key) return;
+  V3.camino(d.tramo, p.codigo); V3.irTramo(p.codigo);
+  dn.innerHTML = `Estás en <b>${esc(V3.estado.yoTxt)}</b> · parada ${p.n}: <b>${esc(p.codigo)}</b> a ~${d.metros} m`;
+}
+// vuelve a ordenar lo que falta saliendo de donde está el monigote (lo ya guardado no se pierde)
+async function rutaDesdeAca(b) {
+  if (!rutaAct) return;
+  b.disabled = true;
+  try { const did = rutaAct.did; _guardarProg(); abrirRuta(await api(`/devoluciones/api/${did}/ruta${yoQuery()}`)); toast('Ruta ordenada desde donde estás'); }
+  catch (e) { toast(e.message, 'error'); }
+  b.disabled = false;
+}
 async function escanearRuta(raw) {
   const r = rutaAct, p = r.paradas[r.actual];
   if (!p) return;
@@ -926,9 +1021,9 @@ async function escanearRuta(raw) {
     if (p.libre) {
       const x = await api('/devoluciones/api/rack?c=' + encodeURIComponent(cod)).catch(e => ({ ok: false, motivo: e.message }));
       if (!x.ok) { beepError(); _estadoRuta(false, x.motivo); return; }
-      r.rackOk = x.codigo; beepOk(); _estadoRuta(true, `Rack ${x.codigo}`, 'Ahora escaneá cada prenda que dejás en este rack.'); pintarRuta(); return;
+      r.rackOk = x.codigo; moverYoA(x.codigo); beepOk(); _estadoRuta(true, `Rack ${x.codigo}`, 'Ahora escaneá cada prenda que dejás en este rack.'); pintarRuta(); return;
     }
-    if (cod === p.codigo) { r.rackOk = cod; beepOk(); _estadoRuta(true, `Rack ${cod} correcto`, 'Ahora escaneá cada prenda que dejás acá.'); pintarRuta(); return; }
+    if (cod === p.codigo) { r.rackOk = cod; moverYoA(cod); beepOk(); _estadoRuta(true, `Rack ${cod} correcto`, 'Ahora escaneá cada prenda que dejás acá.'); pintarRuta(); return; }
     const otra = r.paradas.findIndex(x => x.codigo === cod);
     beepError();
     _estadoRuta(false, `Este rack es ${cod}: tenés que estar en ${p.codigo}`,

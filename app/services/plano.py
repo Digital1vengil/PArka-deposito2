@@ -225,13 +225,22 @@ def camino(desde: tuple[float, float], hasta: str) -> dict:
     return {"tramo": _simplificar(celdas), "metros": _metros(len(celdas) - 1), "punto": list(a_plano(*fin))}
 
 
-def ordenar(paradas: list[str], desde: str = "P1") -> dict:
-    """Mejor orden para recorrer las paradas (códigos de ubicación) saliendo de la persiana elegida.
-    Devuelve {orden: [códigos], tramos: [[[x,y],…] por parada], metros_aprox}. Las que no están en el
-    plano van al final, en el orden recibido."""
+def _origen_m(desde: str | tuple[float, float]) -> tuple[float, float]:
+    """Persiana (P1 / P2) o un punto en metros (donde está la persona)."""
+    return desde if isinstance(desde, tuple) else _inicio_m(desde)
+
+
+def punto_origen(desde: str | tuple[float, float]) -> tuple[int, int]:
+    return a_plano(*_origen_m(desde))
+
+
+def ordenar(paradas: list[str], desde: str | tuple[float, float] = "P1") -> dict:
+    """Mejor orden para recorrer las paradas (códigos de ubicación) saliendo de la persiana elegida o de un
+    punto en metros. Devuelve {orden: [códigos], tramos: [[[x,y],…] por parada], metros_aprox}. Las que no
+    están en el plano van al final, en el orden recibido."""
     en_mapa = [c for c in dict.fromkeys(paradas) if _acceso_m(c)]
     fuera = [c for c in dict.fromkeys(paradas) if not _acceso_m(c)]
-    pts = [_celda(_inicio_m(desde))] + [_celda(_acceso_m(c)) for c in en_mapa]
+    pts = [_celda(_origen_m(desde))] + [_celda(_acceso_m(c)) for c in en_mapa]
     padres = [_bfs(p) for p in pts]
     n = len(pts)
     INF = 10 ** 9

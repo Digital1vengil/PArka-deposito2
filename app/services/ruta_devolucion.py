@@ -117,8 +117,8 @@ def ubicacion_de_producto(db: Session, a: Articulo | None) -> str:
     return cod
 
 
-def _cerca(codigo: str, desde: str) -> int:
-    a, s = plano.acceso(codigo), plano.inicio(desde)
+def _cerca(codigo: str, desde) -> int:
+    a, s = plano.acceso(codigo), plano.punto_origen(desde)
     return abs(a[0] - s[0]) + abs(a[1] - s[1]) if a else 10 ** 6
 
 
@@ -208,10 +208,12 @@ def _subir_pendientes() -> None:
             log.exception("No se pudo actualizar el Excel de devoluciones del %s", fecha)
 
 
-def armar(db: Session, d: Devolucion) -> dict:
-    desde = ajustes.leer("mapa_inicio", db) or "P1"
-    if desde not in plano.PUERTAS:
-        desde = "P1"
+def armar(db: Session, d: Devolucion, yo: tuple[float, float] | None = None) -> dict:
+    """`yo`: dónde está la persona (punto del plano). Sin eso, la ruta sale de la persiana de Ajustes."""
+    persiana = ajustes.leer("mapa_inicio", db) or "P1"
+    if persiana not in plano.PUERTAS:
+        persiana = "P1"
+    desde = plano.desde_punto(*yo) if yo else persiana
     fallas = ubicacion(db, ajustes.leer("mapa_rack_fallas", db))
     candidatos: list[tuple[object, list[str]]] = []
     for i in d.items:
@@ -250,6 +252,7 @@ def armar(db: Session, d: Devolucion) -> dict:
                        "items": [dict(item_json(i), alternativas=[c for c in cods if c != cod])
                                  for i, cods in paradas[cod]]})
     return {"devolucion_id": d.id, "estado": d.ruta_estado or "", "plano": plano.plano(),
-            "inicio": {"clave": desde, "nombre": plano.PUERTAS[desde][0], "punto": list(plano.inicio(desde))},
+            "inicio": ({"clave": "yo", "nombre": "donde estás", "punto": list(plano.punto_origen(desde))} if yo else
+                       {"clave": persiana, "nombre": plano.PUERTAS[persiana][0], "punto": list(plano.inicio(persiana))}),
             "rack_fallas": fallas.codigo if fallas else "", "paradas": salida,
             "sin_ubicacion": [item_json(i) for i in sin], "metros_aprox": r["metros_aprox"]}

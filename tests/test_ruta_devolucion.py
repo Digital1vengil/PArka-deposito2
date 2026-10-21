@@ -174,3 +174,27 @@ def test_migrar_codigos_al_formato_del_plano():
         with SessionLocal() as db:
             assert not db.query(Ubicacion).filter_by(codigo="B1-C3-N1").first()
             assert mapeo.migrar_codigos(db)["ok"] >= 2
+
+
+def test_ruta_sale_desde_donde_estas(monkeypatch):
+    monkeypatch.setattr(svc, "enviar", lambda d: {"ok": True, "id": "D-5"})
+    # desde el fondo sur se arranca por la zona C; desde la Persiana 2, por la A
+    yo = plano.acceso("C05")
+    assert plano.ordenar(["C05", "A01", "B01-C04-N1"], plano.desde_punto(*yo))["orden"][0] == "C05"
+    with TestClient(app) as c:
+        _login(c)
+        c.post("/mapeo/api/modulos/cargar")
+        ubs = {u["codigo"]: u for u in c.get("/mapeo/api/plano").json()["ubicaciones"]}
+        m = next(x for x in c.get("/devoluciones/api/buscar?q=abba 02003").json()["modelos"] if x["articulo"] == "ABBA 02003")
+        v = m["variantes"][0]
+        c.post("/mapeo/api/asignar", json={"ubicacion_id": ubs["C05-C02-N1"]["id"], "articulo_id": v["id"]})
+        res = c.post("/devoluciones/api/confirmar", json={"ruta": True, "yo_x": yo[0], "yo_y": yo[1], "items": [
+            {"articulo_id": v["id"], "cantidad": 1, "estado": "OPTIMO", "plataforma": "TN", "venta": "1270"}]}).json()
+        assert res["ruta"]["inicio"]["clave"] == "yo" and res["ruta"]["inicio"]["punto"] == list(yo)
+        did = res["devolucion"]["id"]
+        assert c.get(f"/devoluciones/api/{did}/ruta").json()["inicio"]["clave"] in plano.PUERTAS
+        assert c.get(f"/devoluciones/api/{did}/ruta?x={yo[0]}&y={yo[1]}").json()["inicio"]["clave"] == "yo"
+        cam = c.get(f"/devoluciones/api/camino?hasta=C05-C02-N1&x={yo[0]}&y={yo[1]}").json()
+        assert cam["metros"] <= 3 and cam["tramo"]
+        assert c.get("/devoluciones/api/camino?hasta=Z99&x=1&y=1").status_code == 400
+        assert "deposito3d.js" in c.get("/devoluciones").text
