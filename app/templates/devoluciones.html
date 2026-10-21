@@ -310,7 +310,8 @@ function pintarVenta(err) {
     }
     return `<div class="py-1.5 border-b border-zinc-200 last:border-0">
       <div class="flex justify-between gap-2"><span class="min-w-0"><span class="block truncate">${esc(x.titulo)}${x.color || x.talle ? ` <span class="text-zinc-500">· ${esc([x.color, x.talle].filter(Boolean).join(' · '))}</span>` : ''}</span>
-        <span class="block text-xs font-mono text-zinc-600 break-all">SKU: ${x.sku ? esc(x.sku) : '<span class="font-sans text-zinc-400">sin SKU</span>'}</span></span><b>x${x.cantidad}</b></div>${acc}</div>`;
+        <span class="block text-xs font-mono text-zinc-600 break-all">SKU${x.variante && x.sku && x.variante.sku && x.variante.sku.toUpperCase() !== x.sku.toUpperCase() ? (venta.plataforma === 'ML' ? ' ML' : ' TN') : ''}: ${x.sku ? esc(x.sku) : '<span class="font-sans text-zinc-400">sin SKU</span>'}</span>
+        ${x.variante && x.variante.sku && x.variante.sku.toUpperCase() !== String(x.sku || '').toUpperCase() ? `<span class="block text-xs font-mono font-semibold text-teal-700 break-all">↳ Odoo: ${esc(x.variante.sku)}${x.variante.nombre ? ` <span class="font-sans font-normal text-zinc-600">· ${esc(x.variante.nombre)}</span>` : ''}</span>` : ''}</span><b>x${x.cantidad}</b></div>${acc}</div>`;
   };
   const prendas = hay ? `<div class="mt-2 text-sm flex flex-col">${i.items.map(prenda).join('')}</div>` : '';
   const distinto = llegoModo === 'DISTINTO' ? panelDistinto(i, hay)
