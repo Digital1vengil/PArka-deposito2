@@ -418,19 +418,20 @@ def fecha_de(ped: dict) -> str:
     return f"{f[8:10]}/{f[5:7]}/{f[:4]}" if len(f) >= 10 else ""
 
 
-# ZPL a 300 dpi: 11,81 puntos por mm. Etiqueta Zebra de 100 x 150 mm = 1181 x 1772 puntos.
-# El rótulo va pegado abajo: los mm de arriba (Conexiones → "Margen libre arriba", 40 por defecto) quedan en blanco
-# porque en la etiqueta de Mercado Libre esa parte se separa.
+# ZPL a 300 dpi: 11,81 puntos por mm. La etiqueta de Mercado Libre mide 100 x 200 mm = 1181 x 2362 puntos:
+# los 50 mm de arriba son la parte que se separa y quedan en blanco, y el rótulo entra en los 150 mm de abajo.
+# Los mm libres se ajustan en Conexiones → "Margen libre arriba".
 DPMM = 300 / 25.4
-PW, LL = round(100 * DPMM), round(150 * DPMM)
+ANCHO_MM, ALTO_MM = 100, 200
+PW, LL = round(ANCHO_MM * DPMM), round(ALTO_MM * DPMM)
 MX = 35   # margen lateral (puntos)
-ARRIBA_MM = 65
+ARRIBA_MM = 50
 DISENO_ALTO = 1710   # el diseño ZPL está dibujado en puntos de 30 a 1740; se achica para entrar en la zona de abajo
 
 
 def _arriba(v) -> float:
     try:
-        return max(0.0, min(70.0, float(v)))
+        return max(0.0, min(ALTO_MM - 80.0, float(v)))
     except (TypeError, ValueError):
         return ARRIBA_MM
 
@@ -603,11 +604,11 @@ def qr_svg(texto: str, lado_mm: float) -> str:
     return re.sub(r'<svg([^>]*?)width="[^"]*"\s+height="[^"]*"', rf'<svg\1width="{lado_mm}mm" height="{lado_mm}mm"', s, count=1)
 
 
-CSS_ROTULO = """@page{size:100mm 150mm;margin:0}
+CSS_ROTULO = """
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:Arial,Helvetica,sans-serif;color:#000;background:#fff}
-.rot{width:100mm;height:150mm;page-break-after:always;overflow:hidden}
-.zona{width:100mm;overflow:hidden}
+.rot{page-break-after:always;overflow:hidden}
+.zona{overflow:hidden}
 .cont{padding:2.5mm 3mm;transform-origin:0 0}
 .rot:last-child{page-break-after:auto}
 .c{border:.3mm solid #000;border-top:0;overflow:hidden}.c:first-child{border-top:.3mm solid #000}
@@ -651,16 +652,18 @@ def _rotulo_html(r: dict) -> str:
 </div></div></div>"""
 
 
-CONT_ALTO_MM = 140   # alto del diseño HTML sin achicar (con nombres largos)
+CONT_ALTO_MM = 140   # alto del diseño HTML a escala 1 (con nombres largos)
 
 
 def css_zona(arriba: float = ARRIBA_MM) -> str:
-    """Los mm de arriba en blanco y el rótulo achicado para entrar en el resto de la etiqueta de 150 mm."""
+    """Los mm de arriba en blanco y el rótulo estirado para llenar el resto de la etiqueta."""
     arriba = _arriba(arriba)
-    alto = 150 - arriba
-    k = min(1.0, (alto - 2) / CONT_ALTO_MM)
-    return (f".rot{{padding-top:{arriba:g}mm}}.zona{{height:{alto:g}mm}}"
-            f".cont{{width:{100 / k:.2f}mm;transform:scale({k:.3f})}}")
+    alto = ALTO_MM - arriba
+    k = (alto - 2) / CONT_ALTO_MM   # se agranda o se achica para ocupar toda la zona libre
+    return (f"@page{{size:{ANCHO_MM}mm {ALTO_MM}mm;margin:0}}"
+            f".rot{{width:{ANCHO_MM}mm;height:{ALTO_MM}mm;padding-top:{arriba:g}mm}}"
+            f".zona{{width:{ANCHO_MM}mm;height:{alto:g}mm}}"
+            f".cont{{width:{ANCHO_MM / k:.2f}mm;transform:scale({k:.3f})}}")
 
 
 def build_html(rotulos: list[dict], titulo: str = "Rótulos", auto_print: bool = True, arriba: float = ARRIBA_MM) -> str:
