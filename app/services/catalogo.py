@@ -269,12 +269,7 @@ def _mejor(cands: list[Articulo], clave: str) -> Articulo | None:
     return ok[0] if ok else None
 
 
-def por_sku_plataforma(db: Session, sku: str, consultar_odoo: bool = True) -> Articulo | None:
-    """SKU de Mercado Libre / Tienda Nube (ej. W-2055-BEIG-L) → artículo de Odoo (1-CAMP-W-02055-BEIG-L-PARK).
-    Primero exacto (por si la plataforma ya trae el SKU de Odoo), después por clave equivalente."""
-    a = por_codigo(db, sku, consultar_odoo=consultar_odoo)
-    if a is not None:
-        return a
+def _por_clave(db: Session, sku: str, consultar_odoo: bool) -> Articulo | None:
     clave = clave_sku(sku)
     if clave.count("-") < 2 or not re.search(r"[A-Z]", clave):   # muy corto o sólo números: no adivinar
         return None
@@ -297,6 +292,113 @@ def por_sku_plataforma(db: Session, sku: str, consultar_odoo: bool = True) -> Ar
         return None
     guardar_productos(db, productos, completo=False)
     return _mejor(list(db.scalars(select(Articulo).where(Articulo.sku.ilike(patron)).limit(200))), clave)
+
+
+# ── Equivalencia flexible: el SKU de la plataforma no sigue el formato de Odoo ──
+# Ej. ML "WORKJ-BLACK-L" ↔ Odoo 1-CAMP-M-WORKJ-BLCK-L-PARK: se busca por modelo (WORKJ) y se verifica
+# color (BLACK = BLCK: mismo nombre, mismo código o mismas consonantes; también en castellano) y talle (L).
+TALLES_SKU = {"XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL", "2XL", "3XL", "4XL", "U", "UNICO", "UNI", "TU"}
+COLORES_ES = {"NEGRO": "BLACK", "NEGRA": "BLACK", "BLANCO": "WHITE", "BLANCA": "WHITE", "GRIS": "GREY",
+              "AZUL": "BLUE", "MARINO": "NAVY", "VERDE": "GREEN", "ROJO": "RED", "ROJA": "RED", "MARRON": "BROWN",
+              "CRUDO": "NATURAL", "CREMA": "CREAM", "ROSA": "PINK", "AMARILLO": "YELLOW", "NARANJA": "ORANGE",
+              "VIOLETA": "VIOLET", "BORDO": "BORDEAUX", "CELESTE": "LIGHTBLUE", "TOSTADO": "TAN"}
+
+
+def _es_talle(t: str) -> bool:
+    return t in TALLES_SKU or (t.isdigit() and len(t) <= 2)
+
+
+def _consonantes(t: str) -> str:
+    return t[:1] + re.sub(r"[AEIOU]", "", t[1:]) if t else ""
+
+
+def _partes_odoo(sku: str) -> dict | None:
+    """1-CAMP-M-WORKJ-BLCK-L-PARK → {modelo: WORKJ, color: BLCK, talle: L}. None si no tiene ese formato."""
+    t = [x for x in re.split(r"[-_\s/.]+", (sku or "").upper().strip()) if x]
+    if len(t) not in (6, 7) or not t[0].isdigit() or not re.fullmatch(r"[A-Z]{2,5}", t[1]):
+        return None
+    return {"modelo": t[3].lstrip("0") or "0", "color": t[4], "talle": t[5] if len(t) == 7 else ""}
+
+
+def _nombres_color(a: Articulo, p: dict) -> set[str]:
+    nombres = {p["color"], (a.color or ""), (a.color_nombre or ""), (a.variante or "").split(",")[0]}
+    return {re.sub(r"[^A-Z0-9]", "", n.upper()) for n in nombres if n and n.strip()}
+
+
+def _color_ok(tokens: list[str], nombres: set[str]) -> bool:
+    candidatos = set(tokens) | {a + b for a, b in zip(tokens, tokens[1:])}
+    for tok in candidatos:
+        tok = COLORES_ES.get(tok, tok)
+        if tok in nombres or any(len(tok) >= 3 and _consonantes(tok) == _consonantes(n) for n in nombres):
+            return True
+    return False
+
+
+def _flexible_local(db: Session, tokens: list[str]) -> Articulo | None:
+    talles = [t for t in tokens if _es_talle(t)]
+    grupos: dict[tuple, list[Articulo]] = {}
+    for tok in tokens:
+        if _es_talle(tok) or len(tok) < 3 or tok in COLORES_ES:
+            continue
+        modelo = tok.lstrip("0") or "0"
+        resto = [t for t in tokens if t != tok]
+        for a in db.scalars(select(Articulo).where(Articulo.sku.ilike(f"%-%{modelo}-%")).limit(400)):
+            p = _partes_odoo(a.sku)
+            if not p or p["modelo"] != modelo:
+                continue
+            if p["talle"] and p["talle"] not in talles:
+                continue
+            if not p["talle"] and talles:
+                continue
+            if not _color_ok([t for t in resto if t not in talles], _nombres_color(a, p)):
+                continue
+            grupos.setdefault((p["modelo"], p["color"], p["talle"]), []).append(a)
+    if len(grupos) != 1:   # nada, o más de un artículo posible: no se adivina
+        return None
+    cands = next(iter(grupos.values()))
+    cands.sort(key=lambda a: (bool(a.inactivo), not a.codigo_barras,
+                              not (a.sku or "").upper().endswith(MARCAS_SKU_PREFERIDAS), a.sku))
+    return cands[0]
+
+
+def _por_flexible(db: Session, sku: str, consultar_odoo: bool) -> Articulo | None:
+    tokens = [x for x in re.split(r"[-_\s/.]+", (sku or "").upper().strip()) if x]
+    if len(tokens) < 2 or len(tokens) > 6:
+        return None
+    a = _flexible_local(db, tokens)
+    if a is not None or not consultar_odoo or not odoo.configurado(db):
+        return a
+    k = "FLEX:" + "-".join(tokens)
+    if time.time() - _NO_ESTA.get(k, 0) < NO_ESTA_SEG:
+        return None
+    modelos = [t.lstrip("0") for t in tokens if not _es_talle(t) and len(t) >= 3 and t not in COLORES_ES]
+    try:
+        c = odoo.cliente(db, timeout=8)
+        productos = []
+        for m in modelos[:3]:
+            productos += odoo.leer_productos(c, dominio=[["default_code", "=ilike", f"%-%{m}-%"]] + DOMINIO_ACTIVOS_Y_NO,
+                                             limite=200)
+    except odoo.OdooError as e:
+        log.info("Consulta a Odoo (equivalencia flexible) por %s: %s", sku, e)
+        return None
+    if productos:
+        guardar_productos(db, productos, completo=False)
+        a = _flexible_local(db, tokens)
+    if a is None:
+        _NO_ESTA[k] = time.time()
+    return a
+
+
+def por_sku_plataforma(db: Session, sku: str, consultar_odoo: bool = True) -> Articulo | None:
+    """SKU de Mercado Libre / Tienda Nube → artículo de Odoo.
+    1) exacto (código de barras o SKU de Odoo); 2) misma clave (W-2055-BEIG-L ↔ 1-CAMP-W-02055-BEIG-L-PARK);
+    3) flexible por modelo + color + talle (WORKJ-BLACK-L ↔ 1-CAMP-M-WORKJ-BLCK-L-PARK)."""
+    a = por_codigo(db, sku, consultar_odoo=consultar_odoo)
+    if a is None:
+        a = _por_clave(db, sku, consultar_odoo)
+    if a is None:
+        a = _por_flexible(db, sku, consultar_odoo)
+    return a
 
 
 def buscar(db: Session, q: str, limite: int = 100, marca: str = "", con_codigo: bool = False,
