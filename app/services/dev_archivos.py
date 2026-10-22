@@ -60,7 +60,8 @@ def _desc(articulo: str, color: str, talle: str) -> str:
 
 
 def nombre(d: Devolucion, clave: str, fecha: date | None = None) -> str:
-    if clave == "dev_04_odoo":
+    """Los 4 archivos se llaman igual (DEV-01.xlsx), cada uno en su carpeta 01–04."""
+    if clave == "dev_04_odoo" or in_odoo.codigo_dev(d):
         return in_odoo.nombre_archivo(d, fecha)
     return f"{ARCHIVOS[clave][0]}_{(fecha or in_odoo.fecha_paso2(d)).isoformat()}_PD-{d.id}.xlsx"
 
@@ -164,7 +165,8 @@ def _subir(db, clave: str, nombre_: str, contenido: bytes) -> tuple[dict, bool]:
         if "inválida" not in str(e) and "invalida" not in str(e):
             raise
         log.warning("Apps Script sin la carpeta %s: %s va a %s", clave, nombre_, CARPETA_RESPALDO)
-        return re_drive.guardar_deposito_archivo(db, CARPETA_RESPALDO, nombre_, contenido), True
+        # todos juntos en una carpeta: con prefijo para que no se pisen (DEV-01.xlsx en las 4)
+        return re_drive.guardar_deposito_archivo(db, CARPETA_RESPALDO, f"{clave[4:6]}_{nombre_}", contenido), True
 
 
 def generar_y_subir(db, d: Devolucion, usuario=None) -> dict:
@@ -173,6 +175,7 @@ def generar_y_subir(db, d: Devolucion, usuario=None) -> dict:
     | error | motivo}. Las claves nombre/filas/url/motivo se mantienen como antes para la pantalla."""
     from ..actividad import registrar
     try:
+        in_odoo.asegurar_numero(db, d)
         lista, avisos = archivos(d)
     except Exception as e:  # noqa: BLE001
         log.exception("No se pudieron armar los archivos de PD-%s", d.id)
@@ -225,4 +228,5 @@ def zip_(d: Devolucion) -> tuple[bytes | None, str]:
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for a in lista:
             z.writestr(f"{carpetas[a['clave']]}/{a['nombre']}", a["contenido"])
-    return buf.getvalue(), f"DEV_{in_odoo.fecha_paso2(d).isoformat()}_PD-{d.id}.zip"
+    cod = in_odoo.codigo_dev(d)
+    return buf.getvalue(), (f"{cod}.zip" if cod else f"DEV_{in_odoo.fecha_paso2(d).isoformat()}_PD-{d.id}.zip")
