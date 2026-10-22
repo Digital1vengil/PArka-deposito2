@@ -425,7 +425,7 @@ DPMM = 300 / 25.4
 ANCHO_MM, ALTO_MM = 100, 200
 PW, LL = round(ANCHO_MM * DPMM), round(ALTO_MM * DPMM)
 MX = 35   # margen lateral (puntos)
-ARRIBA_MM = 60
+ARRIBA_MM = 65
 DISENO_ALTO = 1710   # el diseño ZPL está dibujado en puntos de 30 a 1740; se achica para entrar en la zona de abajo
 
 
