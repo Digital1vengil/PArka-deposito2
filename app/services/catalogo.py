@@ -325,13 +325,33 @@ def _nombres_color(a: Articulo, p: dict) -> set[str]:
     return {re.sub(r"[^A-Z0-9]", "", n.upper()) for n in nombres if n and n.strip()}
 
 
+def _subsecuencia(corto: str, largo: str) -> bool:
+    """BLK está "adentro" de BLCK / BLACK (mismas letras en el mismo orden, misma inicial)."""
+    if len(corto) < 3 or not largo or corto[0] != largo[0]:
+        return False
+    it = iter(largo)
+    return all(c in it for c in corto)
+
+
 def _color_ok(tokens: list[str], nombres: set[str]) -> bool:
     candidatos = set(tokens) | {a + b for a, b in zip(tokens, tokens[1:])}
     for tok in candidatos:
         tok = COLORES_ES.get(tok, tok)
-        if tok in nombres or any(len(tok) >= 3 and _consonantes(tok) == _consonantes(n) for n in nombres):
+        if tok in nombres or any(len(tok) >= 3 and (_consonantes(tok) == _consonantes(n) or _subsecuencia(tok, n))
+                                 for n in nombres):
             return True
     return False
+
+
+def _modelo_ok(tok: str, modelo_odoo: str) -> bool:
+    """WORKJ = WORKJ; 2055 = 02055; WORKJAC2 empieza con WORKJ (modelo de Odoo de 4+ letras)."""
+    m = tok.lstrip("0") or "0"
+    return m == modelo_odoo or (len(modelo_odoo) >= 4 and not modelo_odoo.isdigit() and m.startswith(modelo_odoo))
+
+
+def _patron_modelo(tok: str) -> str:
+    m = tok.lstrip("0") or "0"
+    return f"%-%{m}-%" if m.isdigit() else f"%-%{m[:4]}%"
 
 
 def _flexible_local(db: Session, tokens: list[str]) -> Articulo | None:
@@ -340,11 +360,10 @@ def _flexible_local(db: Session, tokens: list[str]) -> Articulo | None:
     for tok in tokens:
         if _es_talle(tok) or len(tok) < 3 or tok in COLORES_ES:
             continue
-        modelo = tok.lstrip("0") or "0"
         resto = [t for t in tokens if t != tok]
-        for a in db.scalars(select(Articulo).where(Articulo.sku.ilike(f"%-%{modelo}-%")).limit(400)):
+        for a in db.scalars(select(Articulo).where(Articulo.sku.ilike(_patron_modelo(tok))).limit(600)):
             p = _partes_odoo(a.sku)
-            if not p or p["modelo"] != modelo:
+            if not p or not _modelo_ok(tok, p["modelo"]):
                 continue
             if p["talle"] and p["talle"] not in talles:
                 continue
@@ -353,6 +372,9 @@ def _flexible_local(db: Session, tokens: list[str]) -> Articulo | None:
             if not _color_ok([t for t in resto if t not in talles], _nombres_color(a, p)):
                 continue
             grupos.setdefault((p["modelo"], p["color"], p["talle"]), []).append(a)
+    if grupos:   # si hay modelos que coinciden más (WORKJAC vs WORKJ), queda el más largo
+        largo = max(len(k[0]) for k in grupos)
+        grupos = {k: v for k, v in grupos.items() if len(k[0]) == largo}
     if len(grupos) != 1:   # nada, o más de un artículo posible: no se adivina
         return None
     cands = next(iter(grupos.values()))
@@ -371,13 +393,13 @@ def _por_flexible(db: Session, sku: str, consultar_odoo: bool) -> Articulo | Non
     k = "FLEX:" + "-".join(tokens)
     if time.time() - _NO_ESTA.get(k, 0) < NO_ESTA_SEG:
         return None
-    modelos = [t.lstrip("0") for t in tokens if not _es_talle(t) and len(t) >= 3 and t not in COLORES_ES]
+    modelos = [t for t in tokens if not _es_talle(t) and len(t) >= 3 and t not in COLORES_ES]
     try:
         c = odoo.cliente(db, timeout=8)
         productos = []
         for m in modelos[:3]:
-            productos += odoo.leer_productos(c, dominio=[["default_code", "=ilike", f"%-%{m}-%"]] + DOMINIO_ACTIVOS_Y_NO,
-                                             limite=200)
+            productos += odoo.leer_productos(c, dominio=[["default_code", "=ilike", _patron_modelo(m)]]
+                                             + DOMINIO_ACTIVOS_Y_NO, limite=300)
     except odoo.OdooError as e:
         log.info("Consulta a Odoo (equivalencia flexible) por %s: %s", sku, e)
         return None
