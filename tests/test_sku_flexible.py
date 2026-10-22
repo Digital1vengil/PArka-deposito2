@@ -15,6 +15,8 @@ def test_flexible_modelo_color_talle():
         assert por_sku_plataforma(db, "WORKJ-BLACK", consultar_odoo=False) is None     # sin talle: no se adivina
         assert por_sku_plataforma(db, "WORKJ-PINK-L", consultar_odoo=False) is None    # color que no existe
         assert por_sku_plataforma(db, "WORKJ-BLACK-L", consultar_odoo=False).sku == "1-CAMP-M-WORKJ-BLCK-L-PARK"
+        # ejemplo real (TN #1262): WORKJAC2-BLK-XXL ↔ 1-CAMP-M-WORKJ-BLCK-XXL-PARK
+        assert por_sku_plataforma(db, "WORKJAC2-BLK-XXL", consultar_odoo=False).sku == "1-CAMP-M-WORKJ-BLCK-XXL-PARK"
         # lo de antes sigue igual
         assert por_sku_plataforma(db, "W-2003-BLCK-M", consultar_odoo=False).sku == "1-CAMP-W-02003-BLCK-M-PARK"
 
