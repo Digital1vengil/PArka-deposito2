@@ -9,7 +9,10 @@ Reglas (plantilla "Plantilla_IN_Devoluciones_ML_TN_ODOO"):
 - Una fila por escaneo del paso 2 (1 unidad). Solo prendas OPTIMO; las FALLA no van.
 - Cada escaneo tiene que cruzar con una fila OPTIMO del paso 1 (N° devolución + SKU). Si no cruza, no se exporta
   y se avisa.
-- Un bloque por plataforma: primero ML, abajo TN. A–E solo en la primera fila de cada bloque.
+- Un bloque por plataforma: primero ML, abajo TN. A–F solo en la primera fila de cada bloque.
+- partner_id unificado: "Devolucion ecommerce" para ML y TN (decisión 22/10; el contacto tiene que existir en Odoo).
+- origin (D) = nombre del archivo sin .xlsx → en Odoo cada IN queda con el archivo en "Documento origen".
+- A–I se importan en Odoo; J–Q son control interno (al importar: "No importar").
 """
 from __future__ import annotations
 
@@ -25,13 +28,13 @@ from ..models import Devolucion
 log = logging.getLogger("parka.in_odoo")
 
 ENCABEZADOS = [
-    "picking_type_id", "partner_id", "scheduled_date", "location_id", "location_dest_id",
+    "picking_type_id", "partner_id", "scheduled_date", "origin", "location_id", "location_dest_id",
     "move_ids_without_package/product_id", "move_ids_without_package/name", "move_ids_without_package/product_uom_qty",
     "N° DEVOLUCIÓN", "PLATAFORMA", "CÓDIGO DE BARRAS", "ARTÍCULO", "COLOR", "TALLE", "UBICACIÓN", "ESTADO",
 ]
-ANCHOS = [22, 28, 13, 18, 16, 32, 32, 11, 12, 10, 17, 16, 10, 7, 14, 10]
+ANCHOS = [22, 22, 13, 26, 18, 16, 32, 32, 11, 12, 10, 17, 16, 10, 7, 14, 10]
 TIPO_OPERACION = "Magontex: Recepciones"
-CONTACTO = {"ML": "DEVOLUCIONES MERCADOLIBRE", "TN": "DEVOLUCIONES TIENDA NUBE"}
+CONTACTO = "Devolucion ecommerce"   # mismo contacto para ML y TN (no "Devolución Mercado Libre / Tienda Nube")
 ORIGEN = "Partners/Customers"
 DESTINO = "WH/Existencias"
 PLATAFORMAS = ("ML", "TN")   # orden de los bloques
@@ -76,7 +79,9 @@ def filas(d: Devolucion) -> tuple[list[dict], list[str]]:
             continue
         for rack, n in g.items():
             for _ in range(int(n)):
-                out.append({"sku": sku, "plataforma": plat, "devolucion": pd, "codigo": str(i.codigo_barras or ""),
+                out.append({"_item": i, "venta": (i.venta or "").strip(),
+                            "fecha": i.devuelto_at.date() if i.devuelto_at else None,
+                            "sku": sku, "plataforma": plat, "devolucion": pd, "codigo": str(i.codigo_barras or ""),
                             "articulo": i.articulo or "", "color": i.color or "", "talle": i.talle or "",
                             "ubicacion": rack})
     return out, avisos
@@ -88,6 +93,7 @@ def excel(d: Devolucion, fecha: date | None = None) -> tuple[bytes | None, int, 
     if not escaneos:
         return None, 0, avisos
     f = (fecha or fecha_paso2(d)).isoformat()
+    origin = nombre_archivo(d, fecha)[:-5]   # IN_DEV_AAAA-MM-DD_PD-<id>
     wb = Workbook()
     ws = wb.active
     ws.title = "IN DEVOLUCIONES"
@@ -97,12 +103,12 @@ def excel(d: Devolucion, fecha: date | None = None) -> tuple[bytes | None, int, 
     for plat in PLATAFORMAS:
         bloque = [e for e in escaneos if e["plataforma"] == plat]
         for n, e in enumerate(bloque):
-            cab = [TIPO_OPERACION, CONTACTO[plat], f, ORIGEN, DESTINO] if n == 0 else [None] * 5
+            cab = [TIPO_OPERACION, CONTACTO, f, origin, ORIGEN, DESTINO] if n == 0 else [None] * 6
             ws.append(cab + [e["sku"], e["sku"], 1, e["devolucion"], plat, e["codigo"], e["articulo"], e["color"],
                              e["talle"], e["ubicacion"], "OPTIMO"])
             fila = ws.max_row
             # fecha y código de barras como texto (no se pierden dígitos ni se convierte en fecha)
-            for col in ("C", "K"):
+            for col in ("C", "L"):
                 ws[f"{col}{fila}"].number_format = "@"
                 if ws[f"{col}{fila}"].value is not None:
                     ws[f"{col}{fila}"].data_type = "s"
