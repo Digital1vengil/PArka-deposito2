@@ -133,12 +133,12 @@ def test_endpoints_in_odoo(monkeypatch):
             r = c.post(f"/devoluciones/api/{did}/guardar", json={"item_id": item_id, "codigo": "A01", "cantidad": 1})
         x = r.json()
         assert x["completa"] and x["in_odoo"]["ok"] and x["in_odoo"]["filas"] == 1 and len(x["in_odoo"]["archivos"]) == 4
-        assert subidos[-1][0] == "dev_04_odoo" and subidos[-1][1].endswith(f"_PD-{did}.xlsx")
+        assert subidos[-1][0] == "dev_04_odoo" and subidos[-1][1].startswith("DEV-") and subidos[-1][1].endswith(".xlsx")
         assert [s[0] for s in subidos[-4:]] == ["dev_01_cantidades", "dev_02_detalle", "dev_03_historial", "dev_04_odoo"]
         z = c.get(f"/devoluciones/{did}/archivos.zip")
         assert z.status_code == 200 and z.headers["content-type"] == "application/zip"
         xl = c.get(f"/devoluciones/{did}/in-odoo.xlsx")
-        assert xl.status_code == 200 and f"PD-{did}.xlsx" in xl.headers["content-disposition"]
+        assert xl.status_code == 200 and subidos[-1][1] in xl.headers["content-disposition"]
         assert c.post(f"/devoluciones/api/{did}/in-odoo").json()["ok"]
 
 
@@ -199,3 +199,54 @@ def test_sin_rack_solo_historial(monkeypatch):
     monkeypatch.setattr("app.actividad.registrar", lambda *a, **k: None)
     r = dev_archivos.generar_y_subir(None, d)
     assert r["ok"] and not r["nombre"] and len(r["archivos"]) == 1 and "historial" in r["motivo"]
+
+
+def test_nombre_dev_correlativo():
+    """Desde 22/10 los archivos se llaman DEV-01, DEV-02… (correlativo único, no se reinicia)."""
+    from app.services import dev_archivos
+    d = _dev()
+    d.numero_dev = 7
+    assert in_odoo.nombre_archivo(d) == "DEV-07.xlsx"
+    d.numero_dev = 123
+    assert in_odoo.codigo_dev(d) == "DEV-123"
+    d.numero_dev = 1
+    lista, _ = dev_archivos.archivos(d)
+    assert {a["nombre"] for a in lista} == {"DEV-01.xlsx"} and len(lista) == 4
+    _ws, f4 = _hoja(lista[-1]["contenido"])
+    assert f4[1][3] == "DEV-01" and f4[1][1] == "Devoluciones Ecommerce"
+    assert dev_archivos.zip_(d)[1] == "DEV-01.zip"
+
+
+def test_numero_dev_en_base(monkeypatch):
+    """Cada devolución toma el siguiente número una sola vez; volver a generar no lo cambia."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.db import SessionLocal
+    from app.models import Devolucion
+    from app.services import re_drive
+    subidos = []
+    monkeypatch.setattr(re_drive, "guardar_deposito_archivo",
+                        lambda db, sec, nombre, b: subidos.append((sec, nombre)) or {"url": "u"})
+    monkeypatch.setattr("app.actividad.registrar", lambda *a, **k: None)
+    with TestClient(app):
+        from app.services import dev_archivos
+        with SessionLocal() as db:
+            base = max([x.numero_dev or 0 for x in db.query(Devolucion).all()] + [0])
+            ds = []
+            for _ in range(2):
+                d = Devolucion(fecha=datetime(2026, 10, 22).date(), plataforma="ML")
+                db.add(d)
+                db.commit()
+                cols = ("sku", "codigo_barras", "talle", "plataforma", "estado", "guardados", "cantidad", "articulo",
+                        "color", "devuelto_at")
+                for it in _dev().items:
+                    db.add(DevolucionItem(devolucion_id=d.id, **{c: getattr(it, c) for c in cols}))
+                db.commit()
+                db.refresh(d)
+                ds.append(d)
+            r1 = dev_archivos.generar_y_subir(db, ds[0])
+            r2 = dev_archivos.generar_y_subir(db, ds[1])
+            r1b = dev_archivos.generar_y_subir(db, ds[0])
+            assert r1["nombre"] == f"DEV-{base + 1:02d}.xlsx" and r2["nombre"] == f"DEV-{base + 2:02d}.xlsx"
+            assert r1b["nombre"] == r1["nombre"]
+            assert all(n == r1["nombre"] for s, n in subidos[:4])
