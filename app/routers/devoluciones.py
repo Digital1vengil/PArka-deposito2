@@ -15,7 +15,7 @@ from ..db import get_db, hoy
 from ..models import Articulo, Devolucion, DevolucionItem, Usuario
 from ..services import devoluciones as svc
 from ..services import ruta_devolucion as ruta_svc
-from ..services import in_odoo
+from ..services import dev_archivos, in_odoo
 from ..services.etiquetas import pdf_etiquetas
 from ..services.etiquetas_html import html_etiquetas
 from ..services import etiquetas_rollo as rollo
@@ -250,8 +250,9 @@ def _cerrar_devuelta(db: Session, d: Devolucion, u: Usuario) -> dict:
     registrar(db, u, "devolucion", f"PD-{d.id} devuelta a los racks", "devoluciones")
     if not d.drive_ok:   # normalmente ya se subió al confirmar
         _enviar(db, d)
-    # Paso 2 confirmado en los racks: Excel para el IN de Odoo (solo OPTIMO) → Drive / Devoluciones
-    return in_odoo.generar_y_subir(db, d, u)
+    # Paso 2 confirmado en los racks: los 4 archivos (cantidades, detalle, historial, IN de Odoo; solo OPTIMO)
+    # → Drive / Plantilla credito odoo / 01…04
+    return dev_archivos.generar_y_subir(db, d, u)
 
 
 @router.post("/api/{did}/guardar")
@@ -319,7 +320,9 @@ def sin_devolver(did: int, u: Usuario = Depends(acceso), db: Session = Depends(g
         ruta_svc.actualizar_excel_dia(d.fecha)
     if not d.drive_ok:
         _enviar(db, d)
-    return {"ok": True, "devolucion": dev_json(d)}
+    # sin IN: solo el historial (todo Pendiente) a 03_Historial_Recepciones
+    archivos_r = dev_archivos.generar_y_subir(db, d, u)
+    return {"ok": True, "devolucion": dev_json(d), "in_odoo": archivos_r}
 
 
 @router.post("/api/{did}/reintentar")
@@ -346,13 +349,24 @@ def in_odoo_xlsx(did: int, u: Usuario = Depends(acceso), db: Session = Depends(g
                     headers={"Content-Disposition": f'attachment; filename="{in_odoo.nombre_archivo(d)}"'})
 
 
+@router.get("/{did}/archivos.zip")
+def archivos_zip(did: int, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    """Los 4 archivos de la devolución (01–04) en un .zip con sus carpetas."""
+    d = _dev(db, did)
+    contenido, nombre = dev_archivos.zip_(d)
+    if contenido is None:
+        raise HTTPException(404, "Esta devolución no tiene prendas OPTIMO")
+    return Response(contenido, media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{nombre}"'})
+
+
 @router.post("/api/{did}/in-odoo")
 def in_odoo_drive(did: int, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
     """Vuelve a armar y subir a Drive el Excel del IN (ej. si falló la subida al cerrar la ruta)."""
     d = _dev(db, did)
-    if d.ruta_estado != "DEVUELTO":
-        raise HTTPException(409, "El IN se genera cuando la devolución está confirmada en los racks")
-    r = in_odoo.generar_y_subir(db, d, u)
+    if d.ruta_estado not in ("DEVUELTO", "SIN_DEVOLVER"):
+        raise HTTPException(409, "Los archivos se generan cuando la devolución está confirmada en los racks")
+    r = dev_archivos.generar_y_subir(db, d, u)
     if not r["ok"]:
         raise HTTPException(502, r["error"])
     return r
