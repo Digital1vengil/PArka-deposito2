@@ -44,14 +44,14 @@ def test_excel_in_odoo_formato():
     assert filas[0] == in_odoo.ENCABEZADOS and len(filas[0]) == 17 and filas[0][3] == "origin"
     assert len(filas) == 5
     # bloque ML primero (3 escaneos: M + L x2), después TN; partner unificado y origin = nombre del archivo
-    assert filas[1][:9] == ["Magontex: Recepciones", "Devolucion ecommerce", "2026-10-21", "IN_DEV_2026-10-21_PD-15",
+    assert filas[1][:9] == ["Magontex: Recepciones", "Devoluciones Ecommerce", "2026-10-21", "IN_DEV_2026-10-21_PD-15",
                             "Partners/Customers", "WH/Existencias", "1-CAMP-M-WORKJ-BLCK-M-PARK",
                             "1-CAMP-M-WORKJ-BLCK-M-PARK", 1]
     assert filas[1][9:] == ["PD-15", "ML", "2000000011226", "ORIGIN 00002", "BLACK", "M", "M3-R2", "OPTIMO"]
     assert filas[2][:6] == [None] * 6 and filas[3][:6] == [None] * 6
     assert filas[2][6] == filas[3][6] == "1-CAMP-M-WORKJ-BLCK-L-PARK" and filas[2][8] == 1
     assert filas[3][11] == "0000000011196" and ws["L4"].data_type == "s"   # código como texto, con sus ceros
-    assert filas[4][:6] == ["Magontex: Recepciones", "Devolucion ecommerce", "2026-10-21", "IN_DEV_2026-10-21_PD-15",
+    assert filas[4][:6] == ["Magontex: Recepciones", "Devoluciones Ecommerce", "2026-10-21", "IN_DEV_2026-10-21_PD-15",
                             "Partners/Customers", "WH/Existencias"]
     assert filas[4][9:] == ["PD-15", "TN", "2000000011318", "ORIGIN 00002", "BLACK", "XXL", "M1-R4", "OPTIMO"]
     assert ws["C2"].data_type == "s" and ws["C2"].number_format == "@"
