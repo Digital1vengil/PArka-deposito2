@@ -46,7 +46,9 @@ def _get(db: Session | None, ruta: str, params: dict | None = None) -> dict:
     if not base or not clave:
         raise DespachosError("Falta configurar Despachos (Conexiones → Despachos: dirección y llave)")
     url = f"{base}/integracion/{ruta}" + (f"?{urllib.parse.urlencode(params)}" if params else "")
-    req = urllib.request.Request(url, headers={"X-API-Key": clave, "Accept": "application/json"})
+    # Despachos (Cloudflare) rechaza con 403 el identificador por defecto de Python (Python-urllib): hay que mandar uno propio
+    req = urllib.request.Request(url, headers={"X-API-Key": clave, "Accept": "application/json",
+                                               "User-Agent": "PARKA-Deposito/1.0 (+reparto)"})
     try:
         with urllib.request.urlopen(req, timeout=20) as r:
             return json.loads(r.read().decode("utf-8"))
@@ -123,8 +125,13 @@ def despacho(db: Session, chofer: Usuario, did: str) -> dict | None:
 
 # ───────────────────────── hoja de ruta (misma forma que hojas_ruta.detalle) ─────────────────────────
 def _dir(texto: str) -> tuple[str, str]:
-    """"Av. Rabanal 276, Capital Federal, Ciudad Autónoma de Buenos Aires (AR)" → (calle, localidad)."""
-    partes = [x.strip() for x in re.sub(r"\s*\([A-Z]{2}\)\s*$", "", texto or "").split(",") if x.strip()]
+    """"Av. Rabanal 276, Capital Federal, Ciudad Autónoma de Buenos Aires (AR)" → (calle, localidad).
+    Se descartan los "0" que trae Odoo en la ciudad y los pedazos repetidos (CABA aparece como ciudad y como provincia)."""
+    partes: list[str] = []
+    for x in re.sub(r"\s*\([A-Z]{2}\)\s*$", "", texto or "").split(","):
+        x = x.strip()
+        if x and x != "0" and _norm(x) not in [_norm(y) for y in partes]:
+            partes.append(x)
     return (partes[0] if partes else "", ", ".join(partes[1:]))
 
 

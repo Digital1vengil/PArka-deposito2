@@ -222,11 +222,12 @@
   <h2 class="text-lg font-bold mb-1">Rótulos de entrega · Zebra 10×15 (300 dpi)</h2>
   <p class="text-sm text-zinc-500 mb-4">El remitente sale de la compañía en Odoo (nombre, dirección y CUIT); acá va el teléfono.
     Para imprimir con diálogo, en Preferencias de impresión de la Zebra elegí el papel <b>100 × 150 mm</b>; en Chrome: márgenes Ninguno, escala 100 %.
-    El rótulo va pegado abajo; el <b>margen libre arriba</b> (40 mm) es la parte que se separa en la etiqueta de Mercado Libre.
+    El rótulo va pegado abajo; el <b>margen libre arriba</b> (65 mm) es la parte que se separa en la etiqueta de Mercado Libre.
+    Si el rótulo sale cortado, subí ese número; si sobra papel en blanco abajo, bajalo.
     Los corrimientos y la oscuridad son solo para el archivo ZPL.</p>
   <div class="grid sm:grid-cols-4 gap-3">
     <div class="sm:col-span-3"><label class="lbl">Teléfono del remitente</label><input class="input" name="rotulo_remitente_tel" value="{{ aj.rotulo_remitente_tel.valor }}" placeholder="11 1234-5678"></div>
-    <div><label class="lbl">Margen libre arriba (mm)</label><input class="input" name="rotulo_arriba_mm" type="number" step="1" min="0" max="70" value="{{ aj.rotulo_arriba_mm.valor }}"></div>
+    <div><label class="lbl">Margen libre arriba (mm)</label><input class="input" name="rotulo_arriba_mm" type="number" step="1" min="0" max="90" value="{{ aj.rotulo_arriba_mm.valor }}"></div>
     <div><label class="lbl">Corrimiento horizontal (mm)</label><input class="input" name="rotulo_desplaz_x" type="number" step="0.5" min="0" value="{{ aj.rotulo_desplaz_x.valor }}"></div>
     <div><label class="lbl">Corrimiento vertical (mm)</label><input class="input" name="rotulo_desplaz_y" type="number" step="0.5" min="0" value="{{ aj.rotulo_desplaz_y.valor }}"></div>
     <div><label class="lbl">Oscuridad (^MD, −30 a 30)</label><input class="input" name="rotulo_oscuridad" type="number" min="-30" max="30" value="{{ aj.rotulo_oscuridad.valor }}"></div>

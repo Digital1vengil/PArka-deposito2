@@ -35,7 +35,7 @@ CLAVES = {
     "odoo_sync_minutos": ("ODOO_SYNC_MINUTOS", "60", False),
     # Rótulos de entrega (Zebra 10x15, 300 dpi): el remitente sale de la compañía en Odoo; el teléfono se carga acá
     "rotulo_remitente_tel": ("ROTULO_REMITENTE_TEL", "", False),
-    "rotulo_arriba_mm": ("ROTULO_ARRIBA_MM", "40", False),
+    "rotulo_arriba_mm": ("ROTULO_ARRIBA_MM", "65", False),
     # App del chofer PARKA Reparto (Worker aparte): clave compartida que manda en cada pedido a /api/reparto
     "reparto_clave": ("REPARTO_CLAVE", "", True),
     # App Despachos (Gonzalo): de ahí salen los despachos del chofer (llave "Escaneo de bultos en entrega")

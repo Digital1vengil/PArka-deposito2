@@ -87,3 +87,36 @@ def test_etiqueta_es_el_chofer():
     assert dsp.es_del_chofer("Juani 2do viaje", "Juani") and dsp.es_del_chofer("Lo lleva Gonzalo", "Gonzalo")
     assert not dsp.es_del_chofer("Juani", "Juan") and not dsp.es_del_chofer("", "Juani")
     assert not dsp.es_del_chofer("Retira ellos", "Juani") and not dsp.es_del_chofer("Uber", "Juani")
+
+
+def test_manda_identificador_propio(monkeypatch):
+    """Despachos devuelve 403 al "Python-urllib" por defecto: la consulta tiene que llevar su propio User-Agent."""
+    import io
+    import json
+    import urllib.request
+    vistos = []
+
+    class Resp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def falso_urlopen(req, timeout=0):
+        vistos.append({k.lower(): v for k, v in req.header_items()})
+        return Resp(json.dumps({"despachos": [], "pedidos": []}).encode())
+    monkeypatch.setattr(urllib.request, "urlopen", falso_urlopen)
+    db = SessionLocal()
+    ajustes.guardar(db, "despachos_api_key", "dsp_test")
+    db.close()
+    ajustes.olvidar()
+    dsp._get(None, "pedidos", {"fecha": "2026-10-13"})
+    assert vistos[0]["x-api-key"] == "dsp_test" and vistos[0]["user-agent"].startswith("PARKA-Deposito")
+
+
+def test_direccion_sin_repetidos_ni_ceros():
+    assert dsp._dir("MUÑECAS 948, 0, Ciudad Autónoma de Buenos Aires (AR)") == ("MUÑECAS 948", "Ciudad Autónoma de Buenos Aires")
+    assert dsp._dir("Av. Dorrego 1309 dpto A - Caba, Ciudad Autónoma de Buenos Aires, Ciudad Autónoma de Buenos Aires (AR)") ==         ("Av. Dorrego 1309 dpto A - Caba", "Ciudad Autónoma de Buenos Aires")
+    assert dsp._dir("Corrientes 549, Rosario, Santa Fe (AR)") == ("Corrientes 549", "Rosario, Santa Fe")
+    assert dsp._dir("") == ("", "")

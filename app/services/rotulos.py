@@ -411,7 +411,7 @@ def fecha_de(ped: dict) -> str:
 DPMM = 300 / 25.4
 PW, LL = round(100 * DPMM), round(150 * DPMM)
 MX = 35   # margen lateral (puntos)
-ARRIBA_MM = 40
+ARRIBA_MM = 65
 DISENO_ALTO = 1710   # el diseño ZPL está dibujado en puntos de 30 a 1740; se achica para entrar en la zona de abajo
 
 
