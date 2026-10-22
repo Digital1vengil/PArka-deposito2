@@ -208,6 +208,8 @@ class Devolucion(Base):
     drive_resp: Mapped[str] = mapped_column(Text, default="")  # respuesta del script (JSON) o error
     # Ruta de devolución: "" (se subió directo) | PENDIENTE (guardando en racks) | DEVUELTO | SIN_DEVOLVER
     ruta_estado: Mapped[str] = mapped_column(String(14), default="")
+    # N° correlativo de los archivos de devolución ecommerce: DEV-01, DEV-02… (0 = todavía sin archivos)
+    numero_dev: Mapped[int] = mapped_column(Integer, default=0)
 
     usuario: Mapped[Optional[Usuario]] = relationship()
     items: Mapped[list["DevolucionItem"]] = relationship(back_populates="devolucion", cascade="all, delete-orphan")
