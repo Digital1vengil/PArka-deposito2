@@ -424,7 +424,7 @@ def fecha_de(ped: dict) -> str:
 DPMM = 300 / 25.4
 ANCHO_MM, ALTO_MM = 100, 200
 PW, LL = round(ANCHO_MM * DPMM), round(ALTO_MM * DPMM)
-MX = 35   # margen lateral (puntos)
+MX = 12   # margen lateral (puntos, ~1 mm): el rótulo ocupa casi todo el ancho
 ARRIBA_MM = 65
 DISENO_ALTO = 1710   # el diseño ZPL está dibujado en puntos de 30 a 1740; se achica para entrar en la zona de abajo
 
@@ -609,7 +609,7 @@ CSS_ROTULO = """
 body{font-family:Arial,Helvetica,sans-serif;color:#000;background:#fff}
 .rot{page-break-after:always;overflow:hidden}
 .zona{overflow:hidden}
-.cont{padding:2.5mm 3mm;transform-origin:0 0;display:flex;flex-direction:column}
+.cont{padding:1.5mm 1.2mm;transform-origin:0 0;display:flex;flex-direction:column}
 .rot:last-child{page-break-after:auto}
 .c{border:.3mm solid #000;border-top:0;overflow:hidden;flex:0 1 auto}
 .c.g{display:flex;flex-direction:column}.c.g>:last-child{flex:1}
