@@ -11,7 +11,9 @@ Reglas (plantilla "Plantilla_IN_Devoluciones_ML_TN_ODOO"):
   y se avisa.
 - Un bloque por plataforma: primero ML, abajo TN. A–F solo en la primera fila de cada bloque.
 - partner_id unificado: "Devoluciones Ecommerce" para ML y TN (contacto existente en Odoo, id 13979; nombre exacto).
-- origin (D) = nombre del archivo sin .xlsx → en Odoo cada IN queda con el archivo en "Documento origen".
+- origin (D) = nombre del archivo sin .xlsx (DEV-01, DEV-02…) → en Odoo cada IN queda con el archivo en "Documento origen".
+- Nombre de los archivos (desde 22/10): DEV-<n°> correlativo único (DEV-01, DEV-02… DEV-100), se asigna una sola vez
+  por devolución con asegurar_numero(); antes era IN_DEV_AAAA-MM-DD_PD-<id>.
 - A–I se importan en Odoo; J–Q son control interno (al importar: "No importar").
 """
 from __future__ import annotations
@@ -53,8 +55,25 @@ def fecha_paso2(d: Devolucion) -> date:
     return max(ts).date() if ts else hoy()
 
 
+def codigo_dev(d: Devolucion) -> str:
+    """DEV-01, DEV-02… (vacío si todavía no tiene número)."""
+    n = int(getattr(d, "numero_dev", 0) or 0)
+    return f"DEV-{n:02d}" if n > 0 else ""
+
+
+def asegurar_numero(db, d: Devolucion) -> str:
+    """Le da a la devolución su N° correlativo DEV-xx la primera vez que se arman sus archivos (después no cambia)."""
+    if not codigo_dev(d) and db is not None:
+        from sqlalchemy import func
+        ultimo = db.query(func.max(Devolucion.numero_dev)).scalar() or 0
+        d.numero_dev = int(ultimo) + 1
+        db.commit()
+    return codigo_dev(d)
+
+
 def nombre_archivo(d: Devolucion, fecha: date | None = None) -> str:
-    return f"IN_DEV_{(fecha or fecha_paso2(d)).isoformat()}_PD-{d.id}.xlsx"
+    """DEV-01.xlsx (sin número todavía: el nombre viejo IN_DEV_AAAA-MM-DD_PD-<id>.xlsx)."""
+    return f"{codigo_dev(d)}.xlsx" if codigo_dev(d) else f"IN_DEV_{(fecha or fecha_paso2(d)).isoformat()}_PD-{d.id}.xlsx"
 
 
 def filas(d: Devolucion) -> tuple[list[dict], list[str]]:
@@ -93,7 +112,7 @@ def excel(d: Devolucion, fecha: date | None = None) -> tuple[bytes | None, int, 
     if not escaneos:
         return None, 0, avisos
     f = (fecha or fecha_paso2(d)).isoformat()
-    origin = nombre_archivo(d, fecha)[:-5]   # IN_DEV_AAAA-MM-DD_PD-<id>
+    origin = nombre_archivo(d, fecha)[:-5]   # DEV-01
     wb = Workbook()
     ws = wb.active
     ws.title = "IN DEVOLUCIONES"
