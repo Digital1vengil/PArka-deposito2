@@ -44,9 +44,6 @@ SECCIONES_BASE = [
     dict(slug="clientes", nombre="Códigos de clientes", icono="🏷️", orden=11, activa=True,
          roles="admin,deposito",   # el rol Recolector se suma solo (como a Depósito)
          descripcion="Clientes de Odoo con su código de barras y QR, ficha del cliente y rótulo de envío"),
-    dict(slug="hojas_ruta", nombre="Hojas de ruta", icono="🚚", orden=12, activa=True,
-         roles="admin,despacho,deposito",
-         descripcion="Armá la hoja de ruta del chofer con los pedidos de Odoo y seguí la entrega bulto por bulto (app PARKA Reparto)"),
 ]
 
 
@@ -119,6 +116,11 @@ def sembrar(db: Session) -> None:
     pick = next((s for s in secs if s.slug == "pick_odoo"), None)
     if pick and "recolector" not in (pick.roles or "").split(","):
         pick.roles = ",".join([r for r in (pick.roles or "").split(",") if r] + ["recolector"])
+    # v2026.10.22: la hoja de ruta del chofer sale solo de la app Despachos (Salidas) → se saca "Hojas de ruta"
+    vieja = next((x for x in secs if x.slug == "hojas_ruta"), None)
+    if vieja:
+        db.delete(vieja)
+        secs = [x for x in secs if x is not vieja]
     # v2026.10.16: Rótulos de entrega y Códigos de clientes — el Recolector las ve igual que Depósito (solo al crearlas)
     for s in secs:
         if s.slug in ("rotulos", "clientes") and s.roles == "admin,deposito":

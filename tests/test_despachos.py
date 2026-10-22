@@ -66,6 +66,10 @@ def test_despachos_del_chofer(monkeypatch):
         assert r == {"estado": "incompleta", "faltan": 9}
         h = c.get("/api/reparto/hojas/dfea07586c314ee9", headers=A).json()
         assert h["entregados"] == 2 and h["paradas_hechas"] == 2 and h["paradas"][1]["nota"] == "Recibió Ana"
+        # al cerrar la última parada, el despacho deja de aparecer (Despachos lo sigue teniendo "en viaje")
+        dia = h["paradas"][2]["id"]
+        c.post(f"/api/reparto/hojas/dfea07586c314ee9/paradas/{dia}/cerrar", headers=A, json={})
+        assert c.get("/api/reparto/hojas", headers=A).json()["hojas"] == []
         # Pedro no tiene despachos ni puede ver el de Juani
         tok2 = c.post("/api/reparto/login", headers=H, json={"usuario_id": pedro, "pin": "1357"}).json()["token"]
         B = {**H, "Authorization": f"Bearer {tok2}"}
@@ -80,4 +84,6 @@ def test_despachos_del_chofer(monkeypatch):
 
 def test_etiqueta_es_el_chofer():
     assert dsp.es_del_chofer("Juani", "Juani") and dsp.es_del_chofer("juani", "Juani Pérez")
+    assert dsp.es_del_chofer("Juani 2do viaje", "Juani") and dsp.es_del_chofer("Lo lleva Gonzalo", "Gonzalo")
     assert not dsp.es_del_chofer("Juani", "Juan") and not dsp.es_del_chofer("", "Juani")
+    assert not dsp.es_del_chofer("Retira ellos", "Juani") and not dsp.es_del_chofer("Uber", "Juani")

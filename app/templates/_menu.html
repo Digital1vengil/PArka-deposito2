@@ -16,7 +16,7 @@
 {% endif %}{% endmacro %}
 <a href="/" class="nav-link" title="Inicio"><span class="nav-ico">{{ ico('inicio') }}</span><span class="nav-txt">Inicio</span></a>
 {# Secciones en el orden que eligió el admin (Secciones → arrastrar) #}
-{% set _menu = ['despacho', 'devoluciones', 'conteo', 'ecommerce', 'cambios', 'pick_odoo', 'rotulos', 'clientes', 'hojas_ruta', 'mapeo', 'tareas', 'articulos', 'ml'] %}
+{% set _menu = ['despacho', 'devoluciones', 'conteo', 'ecommerce', 'cambios', 'pick_odoo', 'rotulos', 'clientes', 'mapeo', 'tareas', 'articulos', 'ml'] %}
 {% for sl in orden_menu if sl in _menu and sl in acc %}{{ _item(sl) }}{% endfor %}
 {% for sl in _menu if sl in acc and sl not in orden_menu %}{{ _item(sl) }}{% endfor %}
 {% if 'supervision' in acc %}<a href="/supervision" class="nav-link" title="Supervisión"><span class="nav-ico">{{ ico('supervision') }}</span><span class="nav-txt">Supervisión</span></a>{% endif %}

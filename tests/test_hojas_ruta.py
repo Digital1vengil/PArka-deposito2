@@ -46,8 +46,8 @@ def test_hoja_de_ruta_completa(monkeypatch):
     with TestClient(app) as c:
         _login(c)
         assert "Hojas de ruta" in c.get("/hojas-ruta").text
-        r = c.get("/s/hojas_ruta", follow_redirects=False)
-        assert r.status_code == 303 and r.headers["location"] == "/hojas-ruta"
+        # la sección ya no está en el menú (la hoja sale de Despachos), pero la pantalla sigue para el admin
+        assert c.get("/s/hojas_ruta", follow_redirects=False).status_code == 403
         peds = c.get("/hojas-ruta/api/pedidos?refrescar=1").json()["pedidos"]
         p412 = next(p for p in peds if p["id"] == 412)
         assert p412["destino"] == "Expreso JUPITER" and p412["hoja"] is None

@@ -26,7 +26,7 @@ from ..db import ahora, hoy
 from ..models import CierreParadaDespacho, EntregaDespacho, Usuario
 from . import ajustes, rotulos
 
-DIAS_ATRAS = 7                 # despachos de la última semana que todavía no se entregaron
+DIAS_ATRAS = 14                # despachos de las últimas 2 semanas que todavía no se entregaron
 CERRADOS = {"entregado", "entregada", "cancelado", "cancelada", "anulado", "anulada"}
 CACHE_SEG = 30
 _cache: dict[str, tuple[float, dict]] = {}
@@ -79,9 +79,12 @@ def _norm(s: str) -> str:
 
 
 def es_del_chofer(etiqueta: str, chofer: str) -> bool:
-    """La etiqueta del despacho es el chofer: "Juani" sirve para el usuario "Juani" o "Juani Pérez"."""
+    """La etiqueta del despacho nombra al chofer: "Juani", "Juani 2do viaje" o "Lo lleva Gonzalo" son de "Juani" /
+    "Gonzalo" (o "Juani Pérez"). Se busca el primer nombre del chofer como palabra suelta dentro de la etiqueta."""
     e, c = _norm(etiqueta), _norm(chofer)
-    return bool(e) and (e == c or e == c.split(" ")[0])
+    if not e or not c:
+        return False
+    return e == c or c.split(" ")[0] in e.split(" ")
 
 
 def despachos_recientes(db: Session | None, dias: int = DIAS_ATRAS) -> list[dict]:
@@ -103,8 +106,15 @@ def abierto(dsp: dict) -> bool:
     return any(_norm(p.get("estado", "")) not in CERRADOS for p in dsp["pedidos"])
 
 
+def terminado(db: Session, dsp: dict) -> bool:
+    """El chofer ya cerró todas las paradas (Despachos no marca la entrega, así que sin esto quedaría "en viaje")."""
+    paradas = {clave_parada(p) for p in dsp["pedidos"]}
+    return bool(paradas) and paradas <= set(cierres(db, dsp["id"]))
+
+
 def despachos_del_chofer(db: Session, chofer: Usuario) -> list[dict]:
-    return [d for d in despachos_recientes(db) if es_del_chofer(d.get("etiqueta", ""), chofer.nombre) and abierto(d)]
+    return [d for d in despachos_recientes(db) if es_del_chofer(d.get("etiqueta", ""), chofer.nombre) and abierto(d)
+            and not terminado(db, d)]
 
 
 def despacho(db: Session, chofer: Usuario, did: str) -> dict | None:
