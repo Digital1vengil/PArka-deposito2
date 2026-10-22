@@ -425,7 +425,7 @@ DPMM = 300 / 25.4
 ANCHO_MM, ALTO_MM = 100, 200
 PW, LL = round(ANCHO_MM * DPMM), round(ALTO_MM * DPMM)
 MX = 35   # margen lateral (puntos)
-ARRIBA_MM = 50
+ARRIBA_MM = 60
 DISENO_ALTO = 1710   # el diseño ZPL está dibujado en puntos de 30 a 1740; se achica para entrar en la zona de abajo
 
 
@@ -609,19 +609,21 @@ CSS_ROTULO = """
 body{font-family:Arial,Helvetica,sans-serif;color:#000;background:#fff}
 .rot{page-break-after:always;overflow:hidden}
 .zona{overflow:hidden}
-.cont{padding:2.5mm 3mm;transform-origin:0 0}
+.cont{padding:2.5mm 3mm;transform-origin:0 0;display:flex;flex-direction:column}
 .rot:last-child{page-break-after:auto}
-.c{border:.3mm solid #000;border-top:0;overflow:hidden}.c:first-child{border-top:.3mm solid #000}
+.c{border:.3mm solid #000;border-top:0;overflow:hidden;flex:0 1 auto}
+.c.g{display:flex;flex-direction:column}.c.g>:last-child{flex:1}
+.g1{flex-grow:1}.g2{flex-grow:2}.g3{flex-grow:3}.c:first-child{border-top:.3mm solid #000}
 .f{display:flex}.f>div{min-width:0}.bl{border-left:.3mm solid #000}
 .t{font-size:2.9mm;font-weight:700;padding:.8mm 1.4mm;border-bottom:.2mm solid #000}
-.b{padding:1mm 1.6mm;font-size:3.1mm;line-height:3.9mm}
+.b{padding:1mm 1.6mm;font-size:3.1mm;line-height:3.9mm;display:flex;flex-direction:column;justify-content:center}
 .emp{flex:1.15;font-size:7mm;font-weight:700;line-height:7.6mm;padding:2.5mm 2mm;display:flex;align-items:center}
 .cab{flex:1;font-size:2.9mm;line-height:4.2mm;padding:1.4mm 1.6mm;white-space:nowrap}.cab big{font-size:5.4mm;font-weight:700}
 .fr{font-size:3.4mm;font-weight:700;padding:1.2mm 1.6mm;width:22mm}
 .obs{flex:1;font-size:2.6mm;padding:1.6mm;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rs{font-size:4mm;font-weight:700;line-height:4.6mm;margin-bottom:.6mm;white-space:nowrap;overflow:hidden}
-.exp{text-align:center;font-weight:700;font-size:7.4mm;line-height:10mm;white-space:nowrap;overflow:hidden}
-.trk{display:flex;justify-content:space-between;align-items:flex-start;padding:2mm 2mm 1.5mm}
+.exp{display:flex;align-items:center;justify-content:center;text-align:center;font-weight:700;font-size:7.4mm;line-height:10mm;white-space:nowrap;overflow:hidden}
+.trk{display:flex;justify-content:space-between;align-items:center;padding:2mm 2mm 1.5mm}
 .trk .k{font-size:4mm;font-weight:700;margin-top:1mm}.trk .s{font-size:2.6mm;margin-top:.8mm}
 .rem{font-size:2.7mm;line-height:3.5mm}
 @media screen{body{background:#e4e4e7}.rot{background:#fff;margin:4mm auto;box-shadow:0 1px 4px #0003}}"""
@@ -640,14 +642,14 @@ def _rotulo_html(r: dict) -> str:
 <div><b>Bulto:</b> <big>{e(d['bulto'])}</big></div><div><b>Peso (kg):</b> {e(d['peso'] or '-')}</div>
 <div><b>#Pedido:</b> {e(d['pedido'])}{pick}</div></div></div>
 <div class="c f"><div class="fr">FRAGIL</div><div class="obs bl">OBS: {e(d['obs'])}</div></div>
-<div class="c"><div class="t">DESTINATARIO</div><div class="b"><div class="rs" style="font-size:{4 * d['f_rs']:.2f}mm">Razón social: {e(dest['Razón social'])}</div>
+<div class="c g g3"><div class="t">DESTINATARIO</div><div class="b"><div class="rs" style="font-size:{4 * d['f_rs']:.2f}mm">Razón social: {e(dest['Razón social'])}</div>
 {filas([(k, dest[k]) for k in ('CUIT', 'Dirección', 'Ciudad', 'Provincia')])}
 <div><b>CP:</b> {e(dest['CP'] or '-')} &nbsp; <b>Tel.:</b> {e(dest['Tel.'] or '-')}</div></div></div>
-<div class="c"><div class="t">EXPRESO</div><div class="exp" style="font-size:{7.4 * d['f_exp']:.2f}mm">{e(d['expreso'])}</div></div>
-<div class="c"><div class="t">TRACKING</div><div class="trk"><div>{barcode_svg(d['codigo'], 16, ancho_max_mm=63)}<div class="k">{e(d['codigo'])}</div>
+<div class="c g g1"><div class="t">EXPRESO</div><div class="exp" style="font-size:{7.4 * d['f_exp']:.2f}mm">{e(d['expreso'])}</div></div>
+<div class="c g g2"><div class="t">TRACKING</div><div class="trk"><div>{barcode_svg(d['codigo'], 16, ancho_max_mm=63)}<div class="k">{e(d['codigo'])}</div>
 <div class="s">Cliente: {e(d['cliente'])}</div>{seg}</div>
 {qr_svg(d['url'], 26)}</div></div>
-<div class="c"><div class="t">REMITENTE</div><div class="f rem"><div class="b" style="flex:1.1">{filas(d['rem_izq'])}</div>
+<div class="c g g2"><div class="t">REMITENTE</div><div class="f rem"><div class="b" style="flex:1.1">{filas(d['rem_izq'])}</div>
 <div class="b bl" style="flex:1">{filas(d['rem_der'])}</div></div></div>
 </div></div></div>"""
 
@@ -663,7 +665,7 @@ def css_zona(arriba: float = ARRIBA_MM) -> str:
     return (f"@page{{size:{ANCHO_MM}mm {ALTO_MM}mm;margin:0}}"
             f".rot{{width:{ANCHO_MM}mm;height:{ALTO_MM}mm;padding-top:{arriba:g}mm}}"
             f".zona{{width:{ANCHO_MM}mm;height:{alto:g}mm}}"
-            f".cont{{width:{ANCHO_MM / k:.2f}mm;transform:scale({k:.3f})}}")
+            f".cont{{width:{ANCHO_MM / k:.2f}mm;height:{alto / k:.2f}mm;transform:scale({k:.3f})}}")
 
 
 def build_html(rotulos: list[dict], titulo: str = "Rótulos", auto_print: bool = True, arriba: float = ARRIBA_MM) -> str:

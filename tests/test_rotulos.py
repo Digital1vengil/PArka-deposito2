@@ -192,14 +192,14 @@ def test_completa_cp_ciudad_y_telefono():
     assert svc.cp_de_localidad("CABA", caba) == ""
 
 
-def test_rotulo_deja_50mm_arriba():
-    """Etiqueta 100x200: los 50 mm de arriba (la parte que se separa en la de ML) quedan en blanco y el rótulo
-    entra entero en los 150 mm de abajo, sin achicarse."""
+def test_rotulo_deja_60mm_arriba():
+    """Etiqueta 100x200: los 60 mm de arriba (la parte que se separa en la de ML) quedan en blanco y el rótulo
+    ocupa los 140 mm de abajo."""
     cli = svc.armar_cliente(PARTNERS[11387])
     rem = {"nombre": "MAGONTEX S.A.", "cuit": "1", "calle": "x", "localidad": "", "cp": "", "provincia": "", "telefono": ""}
     z = svc.build_zpl(svc.lista_rotulos(None, cli, rem, 1, "http://x/clientes/11387"))
     ys = [int(m) for m in re.findall(r"\^FO\d+,(\d+)", z)]
-    assert "^PW1181^LL2362" in z and min(ys) >= round(50 * 300 / 25.4) and max(ys) < 2362
+    assert "^PW1181^LL2362" in z and min(ys) >= round(60 * 300 / 25.4) and max(ys) < 2362
     h = svc.build_html(svc.lista_rotulos(None, cli, rem, 1, "http://x/clientes/11387"))
-    assert "@page{size:100mm 200mm;margin:0}" in h and ".rot{width:100mm;height:200mm;padding-top:50mm}" in h
-    assert ".zona{width:100mm;height:150mm}" in h and "transform:scale(1.057)" in h   # estirado para llenar los 150 mm
+    assert "@page{size:100mm 200mm;margin:0}" in h and ".rot{width:100mm;height:200mm;padding-top:60mm}" in h
+    assert ".zona{width:100mm;height:140mm}" in h and "height:142.03mm" in h   # las cajas llenan el alto libre
