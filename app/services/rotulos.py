@@ -8,6 +8,9 @@ principal: nombre, CUIT, teléfono, Transportista por defecto = expreso) y direc
 Código de cliente: CLI- + id de Odoo del contacto principal con 6 dígitos (CLI-011661). Fijo y único, no se guarda.
 El QR lleva a la ficha del cliente en la app (/clientes/<id>).
 
+Código del rótulo (barras y QR): uno distinto por bulto, <venta>-<bulto>-<total> (S01472-7-55). Dos bultos del mismo
+cliente nunca comparten código, así hay que escanearlos todos al despachar. Sin pedido se usa el cliente (CLI011661-7-55).
+
 Rótulo: Zebra 10 x 15 cm a 300 dpi. ZPL nativo o HTML de 100 x 150 mm para imprimir con el driver.
 """
 from __future__ import annotations
@@ -384,6 +387,16 @@ def leer_codigo_bulto(texto: str) -> tuple[str | int, int, int] | None:
     return (int(ref) if ref.isdigit() else ref.upper(), b, t)
 
 
+def ref_bulto(r: dict) -> str:
+    """Lo que identifica al grupo de bultos: el número de venta y, si el rótulo no sale de un pedido, el cliente."""
+    return (r.get("pedido") or "").strip() or ((r.get("cli") or {}).get("codigo", "") or "SC").replace("-", "")
+
+
+def codigo_barras(r: dict) -> str:
+    """Código de barras del rótulo: distinto en cada bulto (S01472-7-55) para que haya que escanearlos todos."""
+    return codigo_bulto(ref_bulto(r), r.get("bulto", 1), r.get("total", 1))
+
+
 def lista_rotulos(ped: dict | None, cli: dict, rem: dict, bultos: int, url_ficha: str, fecha: str = "",
                   url_base: str = "") -> list[dict]:
     """Un rótulo por bulto ("1/3", "2/3"…). Con pedido y url_base, el QR de cada rótulo identifica ese bulto
@@ -444,7 +457,8 @@ def _datos(r: dict) -> dict:
         "dest": [("Razón social", cli["nombre"]), ("CUIT", cli.get("cuit", "")), ("Dirección", cli.get("calle", "")),
                  ("Ciudad", cli.get("localidad", "")), ("Provincia", cli.get("provincia", "")),
                  ("CP", cli.get("cp", "")), ("Tel.", cli.get("telefono", ""))],
-        "expreso": cli.get("expreso") or "SIN EXPRESO", "codigo": cli["codigo"], "url": r["url"],
+        "expreso": cli.get("expreso") or "SIN EXPRESO", "codigo": codigo_barras(r), "cliente": cli["codigo"],
+        "url": r["url"],
         # letra más chica si el texto es largo, para que entre en una línea
         "f_exp": _achicar(cli.get("expreso") or "SIN EXPRESO", 15, 0.45),
         "f_rs": _achicar(f"Razón social: {cli['nombre']}", 34, 0.62),
@@ -522,10 +536,12 @@ def _zpl_rotulo(r: dict, cfg: dict) -> str:
     y, h = 960, 460
     caja(y, h)
     titulo(y, "TRACKING")
-    z.append(f"^FO{X0 + 24},{_Y(y + 80)}^BY4,3,{_S(250)}^BCN,{_S(250)},N,N,N^FD{_z(d['codigo'])}^FS")
-    txt(X0 + 24, y + 345, 48, d["codigo"])
+    mod = max(2, min(4, (X1 - 330 - (X0 + 24)) // max(1, len(code128(d["codigo"])))))
+    z.append(f"^FO{X0 + 24},{_Y(y + 80)}^BY{mod},3,{_S(230)}^BCN,{_S(230)},N,N,N^FD{_z(d['codigo'])}^FS")
+    txt(X0 + 24, y + 330, 46, d["codigo"])
+    txt(X0 + 24, y + 384, 30, f"Cliente: {d['cliente']}", 640, 1)
     if d["tracking"]:
-        txt(X0 + 24, y + 405, 30, f"Seguimiento: {d['tracking']}", 640, 1)
+        txt(X0 + 24, y + 424, 30, f"Seguimiento: {d['tracking']}", 640, 1)
     z.append(f"^FO{X1 - 305},{_Y(y + 70)}^BQN,2,8^FDQA,{_z(d['url'])}^FS")
     # 6) remitente
     y, h, xs = 1420, 320, X0 + 600
@@ -560,8 +576,10 @@ def build_zpl(rotulos: list[dict], cfg: dict | None = None) -> str:
 
 
 # ───────────────────────── HTML 100 x 150 mm (driver de Windows) ─────────────────────────
-def barcode_svg(texto: str, alto_mm: float, modulo_mm: float = 0.42) -> str:
+def barcode_svg(texto: str, alto_mm: float, modulo_mm: float = 0.42, ancho_max_mm: float = 0) -> str:
     bits = code128(texto)
+    if ancho_max_mm and len(bits) * modulo_mm > ancho_max_mm:
+        modulo_mm = ancho_max_mm / len(bits)
     rects, i = [], 0
     while i < len(bits):
         if bits[i] == "1":
@@ -625,7 +643,8 @@ def _rotulo_html(r: dict) -> str:
 {filas([(k, dest[k]) for k in ('CUIT', 'Dirección', 'Ciudad', 'Provincia')])}
 <div><b>CP:</b> {e(dest['CP'] or '-')} &nbsp; <b>Tel.:</b> {e(dest['Tel.'] or '-')}</div></div></div>
 <div class="c"><div class="t">EXPRESO</div><div class="exp" style="font-size:{7.4 * d['f_exp']:.2f}mm">{e(d['expreso'])}</div></div>
-<div class="c"><div class="t">TRACKING</div><div class="trk"><div>{barcode_svg(d['codigo'], 18)}<div class="k">{e(d['codigo'])}</div>{seg}</div>
+<div class="c"><div class="t">TRACKING</div><div class="trk"><div>{barcode_svg(d['codigo'], 16, ancho_max_mm=63)}<div class="k">{e(d['codigo'])}</div>
+<div class="s">Cliente: {e(d['cliente'])}</div>{seg}</div>
 {qr_svg(d['url'], 26)}</div></div>
 <div class="c"><div class="t">REMITENTE</div><div class="f rem"><div class="b" style="flex:1.1">{filas(d['rem_izq'])}</div>
 <div class="b bl" style="flex:1">{filas(d['rem_der'])}</div></div></div>

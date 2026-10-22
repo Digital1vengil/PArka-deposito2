@@ -75,6 +75,18 @@ def _limpiar():
         k.update(t=0.0, data=None)
 
 
+def test_codigo_barras_por_bulto():
+    cli = {"codigo": "CLI-011661"}
+    rs = svc.lista_rotulos({"origen": "S01472"}, cli, {"nombre": "X"}, 55, "/c/1", url_base="https://x")
+    cods = [svc.codigo_barras(r) for r in rs]
+    assert len(set(cods)) == 55 and cods[0] == "S01472-1-55" and cods[-1] == "S01472-55-55"
+    # el scanner USB lee el barras igual que la cámara el QR
+    assert svc.leer_codigo_bulto(cods[6]) == ("S01472", 7, 55)
+    # sin pedido, el código sale del cliente y también se puede leer
+    sp = svc.lista_rotulos(None, cli, {"nombre": "X"}, 3, "/c/1")
+    assert svc.codigo_barras(sp[1]) == "CLI011661-2-3" and svc.leer_codigo_bulto("CLI011661-2-3") == ("CLI011661", 2, 3)
+
+
 def test_codigo_cliente():
     assert svc.codigo_cliente(11661) == "CLI-011661"
     assert svc.id_de_codigo("CLI-011661") == 11661 == svc.id_de_codigo("cli011661") == svc.id_de_codigo(" 11661 ")
@@ -122,7 +134,9 @@ def test_pedidos_rotulos(monkeypatch):
         # bultos corregidos a mano y ZPL 300 dpi
         z = c.get("/rotulos/412/rotulo.zpl?bultos=2")
         assert z.status_code == 200 and z.text.count("^XA") == 2 and "^PW1181^LL1772" in z.text
-        assert "^FDCLI-011387^FS" in z.text and "QA,http://testserver/b/S01413-1-2" in z.text and "QA,http://testserver/b/S01413-2-2" in z.text and "2 de 2" in z.text
+        # el código de barras es distinto en cada bulto (hay que escanearlos todos) y el cliente queda como texto
+        assert "^FDS01413-1-2^FS" in z.text and "^FDS01413-2-2^FS" in z.text and "Cliente: CLI-011387" in z.text
+        assert "QA,http://testserver/b/S01413-1-2" in z.text and "QA,http://testserver/b/S01413-2-2" in z.text and "2 de 2" in z.text
         assert c.get("/rotulos/999/rotulo.html").status_code == 404
         # el QR del bulto, escaneado con la cámara común, abre la ficha del cliente
         r = c.get("/b/412-2-3", follow_redirects=False)
