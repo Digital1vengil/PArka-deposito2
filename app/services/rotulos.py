@@ -11,7 +11,7 @@ El QR lleva a la ficha del cliente en la app (/clientes/<id>).
 Código del rótulo (barras y QR): uno distinto por bulto, <venta>-<bulto>-<total> (S01472-7-55). Dos bultos del mismo
 cliente nunca comparten código, así hay que escanearlos todos al despachar. Sin pedido se usa el cliente (CLI011661-7-55).
 
-Rótulo: Zebra 10 x 15 cm a 300 dpi. ZPL nativo o HTML de 100 x 150 mm para imprimir con el driver.
+Rótulo: Zebra 10 x 20 cm a 300 dpi. ZPL nativo o HTML de 100 x 200 mm para imprimir con el driver.
 """
 from __future__ import annotations
 
