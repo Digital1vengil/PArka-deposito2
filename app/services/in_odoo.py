@@ -10,7 +10,7 @@ Reglas (plantilla "Plantilla_IN_Devoluciones_ML_TN_ODOO"):
 - Cada escaneo tiene que cruzar con una fila OPTIMO del paso 1 (N° devolución + SKU). Si no cruza, no se exporta
   y se avisa.
 - Un bloque por plataforma: primero ML, abajo TN. A–F solo en la primera fila de cada bloque.
-- partner_id unificado: "Devolucion ecommerce" para ML y TN (decisión 22/10; el contacto tiene que existir en Odoo).
+- partner_id unificado: "Devoluciones Ecommerce" para ML y TN (contacto existente en Odoo, id 13979; nombre exacto).
 - origin (D) = nombre del archivo sin .xlsx → en Odoo cada IN queda con el archivo en "Documento origen".
 - A–I se importan en Odoo; J–Q son control interno (al importar: "No importar").
 """
@@ -34,7 +34,7 @@ ENCABEZADOS = [
 ]
 ANCHOS = [22, 22, 13, 26, 18, 16, 32, 32, 11, 12, 10, 17, 16, 10, 7, 14, 10]
 TIPO_OPERACION = "Magontex: Recepciones"
-CONTACTO = "Devolucion ecommerce"   # mismo contacto para ML y TN (no "Devolución Mercado Libre / Tienda Nube")
+CONTACTO = "Devoluciones Ecommerce"  # mismo contacto para ML y TN (no "Devolución Mercado Libre / Tienda Nube")
 ORIGEN = "Partners/Customers"
 DESTINO = "WH/Existencias"
 PLATAFORMAS = ("ML", "TN")   # orden de los bloques
