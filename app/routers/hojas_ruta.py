@@ -3,6 +3,7 @@ que es un proyecto aparte (Worker de Cloudflare) y entra por /api/reparto con:
   - cabecera X-Reparto-Clave = clave compartida (Conexiones → App del chofer), que guarda el Worker de Reparto;
   - cabecera Authorization: Bearer <token> que devuelve /api/reparto/login (nombre + PIN de un usuario Chofer).
 """
+import hashlib
 import hmac
 from datetime import date
 from html import escape
@@ -155,7 +156,16 @@ def _serializador() -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(config.SECRET_KEY, salt="parka-reparto")
 
 
+def firma_interna() -> str:
+    """Firma que agrega el Worker de PArka-deposito2 (src/index.js) solo a los pedidos que llegan por el Service Binding
+    de PARKA Reparto (sin CF-Connecting-IP, o sea, desde adentro de la cuenta de Cloudflare). Mismo SECRET_KEY y texto."""
+    return hmac.new(config.SECRET_KEY.encode(), b"parka-reparto-interno", hashlib.sha256).hexdigest()
+
+
 def reparto_habilitado(request: Request, db: Session = Depends(get_db)) -> None:
+    interno = request.headers.get("x-reparto-interno", "")
+    if interno and hmac.compare_digest(interno, firma_interna()):
+        return   # PARKA Reparto por la conexión interna: no hace falta la clave compartida
     clave = (ajustes.leer("reparto_clave", db) or "").strip()
     if not clave:
         raise HTTPException(503, "La app del chofer no está habilitada (Conexiones → App del chofer)")

@@ -32,9 +32,23 @@ function enHorario(d = new Date()) {
   return dia >= 1 && dia <= 5 && min >= 7 * 60 + 50 && min < 17 * 60 + 30;
 }
 
+// PARKA Reparto (app del chofer) llama por Service Binding: esos pedidos no traen CF-Connecting-IP (no pasan por
+// internet). Solo a ellos se les agrega una firma con SECRET_KEY, que la app verifica en /api/reparto; la cabecera
+// que venga de afuera se borra siempre, así que nadie la puede falsificar.
+async function firmaInterna(secreto) {
+  const k = await crypto.subtle.importKey("raw", new TextEncoder().encode(secreto), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const s = await crypto.subtle.sign("HMAC", k, new TextEncoder().encode("parka-reparto-interno"));
+  return [...new Uint8Array(s)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 export default {
   async fetch(request, env) {
-    return principal(env).fetch(request);
+    const headers = new Headers(request.headers);
+    headers.delete("x-reparto-interno");
+    if (!request.headers.get("cf-connecting-ip") && env.SECRET_KEY && new URL(request.url).pathname.startsWith("/api/reparto/")) {
+      headers.set("x-reparto-interno", await firmaInterna(env.SECRET_KEY));
+    }
+    return principal(env).fetch(new Request(request, { headers }));
   },
 
   // Cada minuto (ver triggers en wrangler.jsonc): en horario la mantiene despierta para que corran

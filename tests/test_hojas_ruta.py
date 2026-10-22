@@ -111,3 +111,17 @@ def test_hoja_de_ruta_completa(monkeypatch):
         assert c.post(f"/hojas-ruta/api/{h['id']}/cerrar", json={}).json()["estado"] == "cerrada"
         assert c.get("/api/reparto/hojas", headers=A).json()["hojas"] == []
         assert esc(jup["id"], "412-3-3")["tipo"] == "cerrada"
+
+
+def test_reparto_por_conexion_interna():
+    """Por el Service Binding (firma de SECRET_KEY) PARKA Reparto entra sin clave compartida; una firma falsa no."""
+    from app.routers.hojas_ruta import firma_interna
+    db = SessionLocal()
+    ajustes.guardar(db, "reparto_clave", "")
+    db.close()
+    ajustes.olvidar()
+    with TestClient(app) as c:
+        assert c.get("/api/reparto/choferes").status_code == 503
+        assert c.get("/api/reparto/choferes", headers={"X-Reparto-Interno": "falsa"}).status_code == 503
+        r = c.get("/api/reparto/choferes", headers={"X-Reparto-Interno": firma_interna()})
+        assert r.status_code == 200 and "choferes" in r.json()
