@@ -342,6 +342,8 @@ def reintentar(did: int, u: Usuario = Depends(acceso), db: Session = Depends(get
 def in_odoo_xlsx(did: int, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
     """Excel del IN de Odoo de la devolución (para bajarlo si no se pudo subir a Drive)."""
     d = _dev(db, did)
+    if in_odoo.filas(d)[0]:
+        in_odoo.asegurar_numero(db, d)   # DEV-xx: el mismo nombre que en Drive
     contenido, _n, _avisos = in_odoo.excel(d)
     if contenido is None:
         raise HTTPException(404, "Esta devolución no tiene prendas OPTIMO guardadas en rack para el IN")
@@ -353,6 +355,8 @@ def in_odoo_xlsx(did: int, u: Usuario = Depends(acceso), db: Session = Depends(g
 def archivos_zip(did: int, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
     """Los 4 archivos de la devolución (01–04) en un .zip con sus carpetas."""
     d = _dev(db, did)
+    if dev_archivos.archivos(d)[0]:
+        in_odoo.asegurar_numero(db, d)
     contenido, nombre = dev_archivos.zip_(d)
     if contenido is None:
         raise HTTPException(404, "Esta devolución no tiene prendas OPTIMO")
