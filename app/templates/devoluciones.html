@@ -472,6 +472,8 @@ function enVenta(v) {
   const num = (art.match(/\d{4,5}/) || [''])[0];
   return it.some(x => {
     if (x.variante && v.id && x.variante.id === v.id) return true;
+    // mismo artículo, color y talle que la prenda de la venta (aunque sea otra marca / código de barras)
+    if (x.variante && v.articulo && v.color && v.talle && x.variante.articulo === v.articulo && x.variante.color === v.color && x.variante.talle === v.talle) return true;
     const xs = String(x.sku || '').toUpperCase(), xt = String(x.titulo || '').toUpperCase();
     return (sku && xs === sku) || (art && (xt.includes(art) || xs.includes(art))) || (num && (xs.includes(num) || xt.includes(num)));
   });
