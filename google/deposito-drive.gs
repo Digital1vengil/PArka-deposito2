@@ -1,5 +1,5 @@
 /**
- * PARKA Depósito — Backend Drive (Apps Script)  ·  versión 2026.10.21-2
+ * PARKA Depósito — Backend Drive (Apps Script)  ·  versión 2026.10.22-1
  * (antes "Recolección Ecommerce — Backend Drive": este archivo lo reemplaza completo)
  *
  * Solo se ocupa de Drive. Toda la lógica y los datos están en PARKA Depósito (Python), que arma los Excel.
@@ -9,6 +9,11 @@
  *     Devoluciones/   2026-10-16 - Devoluciones.xlsx  (lo que se devolvió en el día)
  *     Conteos/        2026-10-16 - Conteos.xlsx       (lo que se contó en el día)
  *     Cierre/         2026-10-16 - Cierre.xlsx        (todo lo realizado y despachado en el día)
+ *     Plantilla credito odoo/   archivos de cada devolución ecommerce (ML + TN), uno por carpeta:
+ *       01_Cantidades_Netas/      CANT_DEV_2026-10-22_PD-15.xlsx
+ *       02_Detalle_Por_Venta/     DET_DEV_2026-10-22_PD-15.xlsx
+ *       03_Historial_Recepciones/ HIST_DEV_2026-10-22_PD-15.xlsx
+ *       04_Carga_Odoo/            IN_DEV_2026-10-22_PD-15.xlsx   (IN para importar en Odoo)
  *     Recolección Ecommerce/ 2026-10-16/ …            (archivos de ventas que sube el equipo; ver ordenarCarpetas)
  *
  * Cada vez que la app vuelve a mandar un día, el archivo de esa fecha se REEMPLAZA (nunca quedan duplicados).
@@ -19,7 +24,7 @@
  * Después: Implementar → Administrar implementaciones → editar → Versión nueva (la URL /exec no cambia).
  */
 
-var VERSION = '2026.10.21-2';
+var VERSION = '2026.10.22-1';
 
 var CONFIG = {
   NOMBRE_DEPOSITO: 'DEPOSITO PARKA',
@@ -39,7 +44,15 @@ var SECCIONES = {
 
 /** Carpetas extra de DEPOSITO PARKA (archivos con nombre propio, no un Excel por día). */
 var CARPETAS_EXTRA = {
-  credito_odoo: 'Plantilla credito odoo'   // IN de devoluciones para importar en Odoo (IN_DEV_AAAA-MM-DD_PD-xx.xlsx)
+  credito_odoo: 'Plantilla credito odoo'   // devoluciones ecommerce (y respaldo si falta una subcarpeta)
+};
+
+/** Subcarpetas de "Plantilla credito odoo": los 4 archivos de cada devolución ecommerce. */
+var CARPETAS_DEV = {
+  dev_01_cantidades: '01_Cantidades_Netas',
+  dev_02_detalle:    '02_Detalle_Por_Venta',
+  dev_03_historial:  '03_Historial_Recepciones',
+  dev_04_odoo:       '04_Carga_Odoo'
 };
 
 var MIME_SHEET = 'application/vnd.google-apps.spreadsheet';
@@ -55,6 +68,7 @@ function configurar() {
   var dep = carpetaDeposito_();
   Object.keys(SECCIONES).forEach(function (k) { carpetaSeccion_(k); });
   Object.keys(CARPETAS_EXTRA).forEach(function (k) { carpetaExtraOSeccion_(k); });
+  Object.keys(CARPETAS_DEV).forEach(function (k) { carpetaExtraOSeccion_(k); });
   var raiz = carpetaRaiz_();
   instalarDisparador();
   var hoy = crearCarpetaHoy();
@@ -124,6 +138,9 @@ function carpetaSeccion_(seccion) {
 
 /** Carpeta extra (CARPETAS_EXTRA) o subcarpeta de sección de DEPOSITO PARKA. */
 function carpetaExtraOSeccion_(clave) {
+  if (CARPETAS_DEV[clave]) {
+    return carpetaGuardada_('CARPETA_' + clave.toUpperCase() + '_ID', CARPETAS_DEV[clave], carpetaExtraOSeccion_('credito_odoo'));
+  }
   if (CARPETAS_EXTRA[clave]) {
     return carpetaGuardada_('CARPETA_' + clave.toUpperCase() + '_ID', CARPETAS_EXTRA[clave], carpetaDeposito_());
   }
