@@ -827,8 +827,8 @@ function avisoIN(r, id) {
   if (!r) return;
   setTimeout(() => {
     if (!r.ok) toast(`IN de Odoo PD-${id}: ${r.error || 'no se pudo generar'} — bajalo o reintentalo desde "Últimas devoluciones"`, 'error', 10000);
-    else if (!r.nombre) toast(`PD-${id}: ${r.motivo || 'sin prendas OPTIMO para el IN'}${(r.archivos || []).length ? ` · ${r.archivos.length} archivo(s) en Drive` : ''}`, 'info', 6000);
-    else toast(`PD-${id}: ${(r.archivos || []).length || 1} archivos en Drive (01–04) · IN de Odoo ${r.nombre} (${r.filas} prenda${r.filas === 1 ? '' : 's'})`, 'ok', 7000);
+    else if (!r.nombre) toast(`PD-${id}: ${r.motivo || 'sin prendas OPTIMO ubicadas para el IN'}${(r.archivos || []).length ? ` · ${r.archivos.length} archivo(s) en Drive` : ''}`, 'info', 6000);
+    else toast(`PD-${id}: ${(r.archivos || []).length || 1} archivos en Drive (1- RECEPCIONES … 4 - historial) · IN en "2- in odoo": ${r.nombre} (${r.filas} prenda${r.filas === 1 ? '' : 's'})`, 'ok', 7000);
     (r.avisos || []).forEach((a, k) => setTimeout(() => toast(a, 'warn', 10000), 900 * (k + 1)));
   }, 1500);
 }
@@ -852,7 +852,7 @@ async function historial() {
       <span class="flex-1 min-w-[200px] truncate">${(x.ventas || []).length ? `<b>${x.ventas.map(esc).join(', ')}</b> · ` : ''}${x.items.map(i => `${i.plataforma ? esc(i.plataforma) + ' ' : ''}${esc(i.articulo)} ${esc(i.color)} ${esc(i.talle)} x${i.cantidad}`).join(' · ')}</span>
       ${x.ruta_estado === 'PENDIENTE' ? `${x.drive_ok ? '<span class="chip chip-hecha">☁ Drive</span>' : `<button class="btn btn-gris btn-chico" onclick="reintentar(${x.id}, this)">⚠ Reintentar Drive</button>`}<button class="btn btn-amarillo btn-chico" onclick="seguirRuta(${x.id}, this)">🗺 Seguir la ruta</button>`
         : x.drive_ok ? '<span class="chip chip-hecha">☁ Drive</span>' : `<button class="btn btn-gris btn-chico" onclick="reintentar(${x.id}, this)">⚠ Reintentar Drive</button>`}
-      ${x.ruta_estado === 'DEVUELTO' ? `<span class="chip chip-hecha">✔ En racks</span><a class="btn btn-gris btn-chico" href="/devoluciones/${x.id}/in-odoo.xlsx">⬇ IN Odoo</a><a class="btn btn-gris btn-chico" href="/devoluciones/${x.id}/archivos.zip" title="01 Cantidades · 02 Detalle · 03 Historial · 04 IN Odoo">⬇ 4 archivos</a><button class="btn btn-gris btn-chico" onclick="subirIN(${x.id}, this)">☁ Archivos a Drive</button>` : x.ruta_estado === 'SIN_DEVOLVER' ? `<span class="chip chip-pendiente">Sin devolver</span><a class="btn btn-gris btn-chico" href="/devoluciones/${x.id}/archivos.zip">⬇ Historial</a>` : ''}
+      ${x.ruta_estado === 'DEVUELTO' ? `<span class="chip chip-hecha">✔ En racks</span><a class="btn btn-gris btn-chico" href="/devoluciones/${x.id}/in-odoo.xlsx">⬇ IN Odoo</a><a class="btn btn-gris btn-chico" href="/devoluciones/${x.id}/archivos.zip" title="1- RECEPCIONES · 2- in odoo (+ In-Devol-ubicadas) · 3- HISTORIAL RECEPCIONES">⬇ Archivos</a><button class="btn btn-gris btn-chico" onclick="subirIN(${x.id}, this)">☁ Archivos a Drive</button>` : x.ruta_estado === 'SIN_DEVOLVER' ? `<span class="chip chip-pendiente">Sin devolver</span><a class="btn btn-gris btn-chico" href="/devoluciones/${x.id}/archivos.zip">⬇ Historial</a>` : ''}
       <button class="btn btn-primario btn-chico" onclick="marcarVisto(${x.id}); imprimirEtiquetas('devoluciones', ${x.id}, { btn: this })">🖨 Imprimir etiquetas</button>
     </div>`).join('') : '<p class="text-zinc-500">Todavía no hay devoluciones.</p>';
 }
@@ -901,6 +901,8 @@ function abrirRuta(data) {
   pintarRuta();
   const nSin = data.sin_ubicacion.reduce((a, it) => a + it.cantidad, 0);
   if (nSin) toast(`⚠ ${nSin} prenda${nSin > 1 ? 's' : ''} sin ubicación: ${nSin > 1 ? 'van' : 'va'} en la última parada de la ruta`, 'warn', 7000);
+  const nFal = (data.no_se_ubican || []).filter(it => it.estado === 'FALLA').reduce((a, it) => a + it.cantidad, 0);
+  if (nFal) toast(`${nFal} prenda${nFal > 1 ? 's' : ''} con falla: no se ubica${nFal > 1 ? 'n' : ''} (queda${nFal > 1 ? 'n' : ''} registrada${nFal > 1 ? 's' : ''} en 1- RECEPCIONES)`, 'info', 7000);
 }
 function cerrarRuta() { if (camScanner && camModo === 'ruta') pararCam(); rutaAct = null; document.getElementById('modal-ruta').classList.add('hidden'); document.body.style.overflow = ''; historial(); }
 async function seguirRuta(id, b) {
