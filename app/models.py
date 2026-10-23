@@ -617,6 +617,37 @@ class PreguntaML(Base):
     actualizada_at: Mapped[datetime] = mapped_column(DateTime, default=ahora, onupdate=ahora)
 
 
+class MensajeML(Base):
+    """Respondedor de mensajes de post venta de Mercado Libre (Gemini): una fila por conversación (pack).
+
+    Mismos estados que PreguntaML. Si el comprador escribe de nuevo después de una respuesta, la fila vuelve a "nueva"
+    con la conversación actualizada (ultimo_msg_id cambia).
+    """
+    __tablename__ = "mensajes_ml"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    pack_id: Mapped[str] = mapped_column(String(30), unique=True, index=True)
+    comprador_id: Mapped[str] = mapped_column(String(30), default="")
+    venta: Mapped[str] = mapped_column(String(300), default="")
+    conversacion: Mapped[str] = mapped_column(Text, default="")
+    ultimo_texto: Mapped[str] = mapped_column(Text, default="")
+    ultimo_msg_id: Mapped[str] = mapped_column(String(60), default="")
+    fecha_mensaje: Mapped[str] = mapped_column(String(40), default="")
+    contexto: Mapped[str] = mapped_column(Text, default="")
+    estado: Mapped[str] = mapped_column(String(20), default="nueva", index=True)
+    borrador: Mapped[str] = mapped_column(Text, default="")
+    decision: Mapped[str] = mapped_column(String(10), default="")
+    categoria: Mapped[str] = mapped_column(String(30), default="")
+    motivo: Mapped[str] = mapped_column(String(300), default="")
+    intentos: Mapped[int] = mapped_column(Integer, default=0)
+    respuesta: Mapped[str] = mapped_column(Text, default="")
+    publicada_por: Mapped[str] = mapped_column(String(60), default="")
+    auto: Mapped[bool] = mapped_column(Boolean, default=False)
+    publicada_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    error: Mapped[str] = mapped_column(String(300), default="")
+    creada_at: Mapped[datetime] = mapped_column(DateTime, default=ahora, index=True)
+    actualizada_at: Mapped[datetime] = mapped_column(DateTime, default=ahora, onupdate=ahora)
+
+
 class OdooPickImpresion(Base):
     """Recolecciones de Odoo (WH/PICK): cada vez que se imprimieron sus etiquetas. Sin impresión = NUEVO."""
     __tablename__ = "odoo_pick_impresiones"

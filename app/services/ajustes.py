@@ -30,6 +30,7 @@ CLAVES = {
     "resp_firma": ("RESP_FIRMA", "¡Saludos! Equipo PARKA", False),
     "resp_instrucciones": ("RESP_INSTRUCCIONES", "", False),   # políticas propias (envíos, cambios, retiros…)
     "resp_estado": ("RESP_ESTADO", "", False),
+    "posv_estado": ("POSV_ESTADO", "", False),
     # Odoo: catálogo de artículos y códigos de barra (solo lectura, usuario técnico con API key)
     "odoo_url": ("ODOO_URL", "https://magontex.odoo.com", False),
     "odoo_db": ("ODOO_DB", "oncompetence-magontex-main-28955103", False),

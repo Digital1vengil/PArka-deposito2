@@ -19,12 +19,13 @@
 
 <div class="flex flex-wrap gap-2 mb-3 text-sm" id="tabs">
   <button class="btn btn-primario btn-chico" data-tab="preguntas" onclick="tab('preguntas')">Preguntas</button>
+  <button class="btn btn-gris btn-chico" data-tab="postventa" onclick="tab('postventa')">Post venta</button>
   <button class="btn btn-gris btn-chico" data-tab="ventas" onclick="tab('ventas')">Ventas</button>
   <button class="btn btn-gris btn-chico" data-tab="devoluciones" onclick="tab('devoluciones')">Devoluciones</button>
   <button class="btn btn-gris btn-chico" data-tab="buscar" onclick="tab('buscar')">🔍 Buscar</button>
 </div>
 <div id="panel" class="card p-4 text-sm">Cargando…</div>
-<p class="text-xs text-zinc-500 mt-2">Las respuestas a preguntas se publican en ML desde acá (respondedor con Gemini). Ventas, devoluciones y publicaciones: solo lectura.</p>
+<p class="text-xs text-zinc-500 mt-2">Las respuestas a preguntas y a mensajes de post venta se envían a ML desde acá (respondedor con Gemini). Ventas, devoluciones y publicaciones: solo lectura.</p>
 {% endblock %}
 {% block scripts %}
 <script>
@@ -54,8 +55,9 @@ async function resumen() {
 
 function tab(t) {
   if (t !== 'preguntas') clearInterval(timerResp);
+  if (t !== 'postventa') clearInterval(timerPosv);
   document.querySelectorAll('#tabs button').forEach(b => b.className = 'btn btn-chico ' + (b.dataset.tab === t ? 'btn-primario' : 'btn-gris'));
-  ({ preguntas, ventas, devoluciones, buscar: pestBuscar })[t]();
+  ({ preguntas, postventa, ventas, devoluciones, buscar: pestBuscar })[t]();
 }
 
 // ─────────── Preguntas + respondedor (Gemini) ───────────
@@ -185,6 +187,101 @@ async function respondidasML(det) {
     box.innerHTML = r.respondidas.map(q => `<div class="py-2 border-b border-zinc-700"><div class="flex gap-2 text-xs text-zinc-500"><span>${fecha(q.fecha)}</span>${linkMla(q.mla)}<span class="truncate">${esc(q.publicacion || '')}</span></div>
       <div class="font-semibold mt-1">${esc(q.pregunta)}</div>${q.respuesta ? `<div class="text-zinc-500">↳ ${esc(q.respuesta)}</div>` : ''}</div>`).join('') || '<p class="text-zinc-500 py-2">Sin datos.</p>';
   } catch (e) { box.innerHTML = '<p class="text-red-400">' + esc(e.message) + '</p>'; }
+}
+
+// ─────────── Post venta + respondedor (Gemini) ───────────
+let PV = null, revisandoPv = false, timerPosv = null;
+
+async function postventa() {
+  if (!PV) $('panel').innerHTML = 'Cargando…';
+  try { PV = await api('/ml/api/postventa'); pintarPosventa(); } catch (e) { $('panel').innerHTML = '<p class="text-red-400">' + esc(e.message) + '</p>'; return; }
+  revisarPv(true);
+  clearInterval(timerPosv);
+  timerPosv = setInterval(() => { if (document.querySelector('#tabs [data-tab=postventa].btn-primario') && !document.querySelector('#panel textarea:focus')) revisarPv(true); }, 60000);
+}
+
+async function revisarPv(silencioso) {
+  if (revisandoPv) return;
+  revisandoPv = true;
+  const b = $('btn-revisar-pv'); if (b) { b.disabled = true; b.textContent = 'Revisando…'; }
+  try {
+    const r = await api('/ml/api/postventa/revisar', { method: 'POST' });
+    PV = { config: r.config, pendientes: r.pendientes, publicadas: r.publicadas };
+    if (!document.querySelector('#panel textarea:focus') && document.querySelector('#tabs [data-tab=postventa].btn-primario')) pintarPosventa();
+    const v = r.vuelta || {};
+    if (!silencioso) toast(v.error ? v.error : v.publicadas ? `Listo: ${v.publicadas} respondidos solos` : 'Post venta al día', v.error ? 'info' : 'ok');
+    if (v.publicadas && silencioso) toast(`El respondedor envió ${v.publicadas} mensaje${v.publicadas > 1 ? 's' : ''} de post venta`, 'info', 5000);
+  } catch (e) { if (!silencioso) toast(e.message, 'error', 6000); }
+  finally { revisandoPv = false; const b2 = $('btn-revisar-pv'); if (b2) { b2.disabled = false; b2.textContent = '↻ Revisar ahora'; } }
+}
+
+function pintarPosventa() {
+  const c = PV.config, est = c.estado || {};
+  const ayuda = c.modo === 'manual' ? 'Modo Solo borradores: Gemini redacta y vos enviás.'
+    : 'Salen solos solo los mensajes simples sobre el envío o agradecimientos (también en Todo automático); el resto espera tu OK.';
+  const avisos = [
+    !c.ml ? `⚠️ La post venta necesita la clave de la API de Costos${ES_ADMIN ? ' (<a class="underline" href="/admin/conexiones">Conexiones</a> → Mercado Libre directo)' : ''}.` : '',
+    !c.gemini ? '⚠️ Falta la clave de Gemini: sin eso no hay borradores.' : '',
+    est.error ? '⚠️ Última revisión: ' + esc(est.error) : '',
+  ].filter(Boolean).map(a => `<p class="text-xs mt-1">${a}</p>`).join('');
+  const cab = `<div class="rounded-xl p-3 mb-3" style="background:var(--soft)">
+      <div class="flex flex-wrap items-center gap-2"><b>🤖 Post venta con Gemini</b><span class="chip chip-auto">Modo: ${esc(c.modos[c.modo])}</span>
+        <button id="btn-revisar-pv" class="btn btn-gris btn-chico ml-auto" onclick="revisarPv(false)">↻ Revisar ahora</button></div>
+      <p class="text-xs text-zinc-500 mt-1">${ayuda} El modo, la firma y las políticas se cambian en la pestaña Preguntas. Revisa cada ${c.minutos} min · última: ${hora(est.ultima)}${est.publicadas ? ' · envió ' + est.publicadas + ' en esa vuelta' : ''}</p>
+      ${avisos}</div>`;
+  const pend = PV.pendientes.map(tarjetaPv).join('') || '<p class="text-zinc-500 py-2">No hay mensajes de post venta pendientes 🎉</p>';
+  const pub = PV.publicadas.map(m => `<div class="py-2 border-b border-zinc-700">
+      <div class="flex gap-2 text-xs text-zinc-500 flex-wrap"><span>${fecha(m.publicada_at)}</span><span>Venta ${esc(m.pack_id)}</span><span class="truncate">${esc(m.venta || '')}</span>
+      <span class="chip ${m.auto ? 'chip-auto' : 'chip-hecha'}">${m.auto ? '🤖 Automático' : '✓ ' + esc(m.publicada_por)}</span></div>
+      <div class="font-semibold mt-1 whitespace-pre-line">${esc(m.ultimo_texto)}</div><div class="text-zinc-500">↳ ${esc(m.respuesta)}</div></div>`).join('') || '<p class="text-zinc-500 py-2">Todavía no se respondió ninguno desde la app.</p>';
+  $('panel').innerHTML = cab + `<h3 class="font-semibold">Sin responder (${PV.pendientes.length})</h3>${pend}
+    <details class="mt-4"><summary class="cursor-pointer font-semibold">Respondidos desde la app (${PV.publicadas.length})</summary>${pub}</details>`;
+}
+
+function tarjetaPv(m) {
+  const chip = !m.borrador ? (m.error ? `<span class="chip chip-vencida">${esc(m.error)}</span>` : '<span class="chip chip-pendiente">Redactando…</span>')
+    : m.saldria_sola ? `<span class="chip chip-hecha" title="${esc(m.motivo)}">✓ Simple${PV.config.modo !== 'manual' ? ' · sale solo' : ''}</span>`
+    : `<span class="chip chip-en_curso">⚠ Revisar: ${esc(m.frenos.join(' · ') || m.motivo)}</span>`;
+  return `<div class="py-3 border-b border-zinc-700" id="m-${m.id}">
+    <div class="flex gap-2 text-xs text-zinc-500 flex-wrap items-center"><span>${fecha(m.fecha)}</span><span>Venta ${esc(m.pack_id)}</span><span class="truncate">${esc(m.venta || '')}</span>${chip}${m.categoria ? `<span class="chip chip-auto">${esc(m.categoria)}</span>` : ''}</div>
+    <details class="mt-1"><summary class="cursor-pointer text-xs text-zinc-500">Conversación</summary><div class="whitespace-pre-line text-xs text-zinc-400 mt-1">${esc(m.conversacion)}</div></details>
+    <div class="font-semibold mt-1 whitespace-pre-line">${esc(m.ultimo_texto)}</div>
+    ${m.borrador ? `<textarea class="input mt-2 w-full" rows="3" maxlength="350" id="tm-${m.id}" oninput="$('nm-${m.id}').textContent=this.value.length">${esc(m.borrador)}</textarea>
+      <div class="flex flex-wrap gap-2 items-center mt-1">
+        <button class="btn btn-primario btn-chico" onclick="enviarPv(${m.id}, this)">Enviar al comprador</button>
+        <input id="im-${m.id}" class="input !py-1 text-xs flex-1 min-w-[160px]" placeholder="Pedile un cambio a Gemini (ej.: más corto, decile que lo revisamos hoy)">
+        <button class="btn btn-gris btn-chico" onclick="otraVersionPv(${m.id}, this)">✨ Otra versión</button>
+        <button class="btn btn-gris btn-chico" onclick="descartarPv(${m.id})" title="Lo saca de esta lista; en ML sigue sin responder">Descartar</button>
+        <span class="text-xs text-zinc-500 ml-auto"><span id="nm-${m.id}">${m.borrador.length}</span>/350</span>
+      </div>` : `<button class="btn btn-gris btn-chico mt-2" onclick="otraVersionPv(${m.id}, this)">✨ Redactar con Gemini</button>`}
+  </div>`;
+}
+
+function reemplazarPv(m) {
+  const i = PV.pendientes.findIndex(x => x.id === m.id);
+  if (m.estado === 'publicada') { if (i >= 0) PV.pendientes.splice(i, 1); PV.publicadas.unshift(m); }
+  else if (i >= 0) PV.pendientes[i] = m;
+  pintarPosventa();
+}
+
+async function enviarPv(id, b) {
+  const texto = $('tm-' + id).value.trim();
+  if (!texto) return toast('La respuesta está vacía', 'error');
+  b.disabled = true; b.textContent = 'Enviando…';
+  try { reemplazarPv(await api(`/ml/api/mensajes/${id}/publicar`, { json: { texto } })); toast('Mensaje enviado al comprador'); }
+  catch (e) { toast(e.message, 'error', 7000); b.disabled = false; b.textContent = 'Enviar al comprador'; }
+}
+
+async function otraVersionPv(id, b) {
+  const ind = $('im-' + id) ? $('im-' + id).value.trim() : '';
+  b.disabled = true; b.textContent = 'Gemini escribiendo…';
+  try { reemplazarPv(await api(`/ml/api/mensajes/${id}/redactar`, { json: { indicacion: ind } })); }
+  catch (e) { toast(e.message, 'error', 6000); b.disabled = false; b.textContent = '✨ Otra versión'; }
+}
+
+async function descartarPv(id) {
+  try { await api(`/ml/api/mensajes/${id}/descartar`, { method: 'POST' }); PV.pendientes = PV.pendientes.filter(x => x.id !== id); pintarPosventa(); }
+  catch (e) { toast(e.message, 'error'); }
 }
 
 async function ventas(dias = 0) {

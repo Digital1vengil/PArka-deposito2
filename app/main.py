@@ -185,7 +185,7 @@ def _iniciar_scheduler():
     sch.add_job(job_ventas, "interval", minutes=1, id="ventas_auto",
                 next_run_time=(ahora() + __import__("datetime").timedelta(seconds=45)).replace(tzinfo=config.TZ))
 
-    # 6) Respondedor de preguntas de ML (Gemini): borradores nuevos y, en modo Mixto / Automático, publica
+    # 6) Respondedor de preguntas y post venta de ML (Gemini): borradores nuevos y, en modo Mixto / Automático, publica
     def job_respondedor():
         from .services import respondedor
         db = SessionLocal()
@@ -194,6 +194,11 @@ def _iniciar_scheduler():
                 r = respondedor.sincronizar(db)
                 if r.get("nuevas") or r.get("publicadas"):
                     log.info("Respondedor ML: %s", r)
+            from .services import postventa
+            if postventa.toca(db):
+                r = postventa.sincronizar(db)
+                if r.get("nuevas") or r.get("publicadas"):
+                    log.info("Post venta ML: %s", r)
         except Exception as e:  # noqa: BLE001
             log.warning("Respondedor ML: falló la revisión: %s", e)
         finally:

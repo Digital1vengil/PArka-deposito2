@@ -11,8 +11,8 @@ from sqlalchemy.orm import Session
 from ..actividad import registrar
 from ..auth import requiere
 from ..db import get_db
-from ..models import PreguntaML, Usuario
-from ..services import parkahub, respondedor
+from ..models import MensajeML, PreguntaML, Usuario
+from ..services import parkahub, postventa, respondedor
 from ..templating import render
 
 router = APIRouter(prefix="/ml")
@@ -164,3 +164,59 @@ def pregunta_descartar(pid: int, u: Usuario = Depends(acceso), db: Session = Dep
 
 
 PENDIENTES_UI = respondedor.PENDIENTES
+
+
+# ─────────────── Respondedor de post venta (Gemini) ───────────────
+
+def _posv(fn, *a, **k):
+    try:
+        return fn(*a, **k)
+    except postventa.PostventaError as e:
+        raise HTTPException(400, str(e)) from None
+
+
+def _mensaje(db: Session, mid: int) -> MensajeML:
+    m = db.get(MensajeML, mid)
+    if not m:
+        raise HTTPException(404, "No encontré ese mensaje")
+    return m
+
+
+@router.get("/api/postventa")
+def postventa_estado(u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    return {"config": postventa.config(db), **postventa.lista(db)}
+
+
+@router.post("/api/postventa/revisar")
+def postventa_revisar(u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    r = postventa.sincronizar(db)
+    if not r.get("ok") and r.get("error") != "Ya se está revisando":
+        raise HTTPException(400, r.get("error") or "No se pudo revisar")
+    return {"ok": r.get("ok"), "vuelta": r, **postventa.lista(db), "config": postventa.config(db)}
+
+
+@router.post("/api/mensajes/{mid}/redactar")
+def mensaje_redactar(mid: int, body: RedactarIn, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    m = _mensaje(db, mid)
+    if m.estado in ("publicada", "respondida_ml"):
+        raise HTTPException(400, "Ese mensaje ya está respondido")
+    m.intentos = 0
+    _posv(postventa.redactar, db, m, body.indicacion)
+    return postventa.a_json(m, respondedor.modo(db))
+
+
+@router.post("/api/mensajes/{mid}/publicar")
+def mensaje_publicar(mid: int, body: PublicarIn, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    m = _mensaje(db, mid)
+    _posv(postventa.publicar, db, m, body.texto, u)
+    return postventa.a_json(m, respondedor.modo(db))
+
+
+@router.post("/api/mensajes/{mid}/descartar")
+def mensaje_descartar(mid: int, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    """Saca el mensaje de la lista (en ML sigue sin responder: se contesta desde ML)."""
+    m = _mensaje(db, mid)
+    if m.estado in postventa.PENDIENTES:
+        m.estado = "descartada"
+        db.commit()
+    return {"ok": True}
