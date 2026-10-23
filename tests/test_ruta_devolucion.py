@@ -62,6 +62,7 @@ def test_flujo_ruta_devolucion(monkeypatch):
         p_opt = next(p for p in ruta["paradas"] if p["codigo"] in ("A03-C02-N0", "B01-C07-N0"))
         p_fal = next(p for p in ruta["paradas"] if p["codigo"] == "C05-C01-N0")
         sin = ruta["sin_ubicacion"][0]
+        assert sin["sin_ubicacion"] and sin["motivo"] == "No tiene ubicación en Odoo ni en Mapeo"   # aviso en la ruta
         r = c.post(f"/devoluciones/api/{d['id']}/devuelto", json={"guardados": [
             {"item_id": p_opt["items"][0]["item_id"], "codigo": p_opt["codigo"], "cantidad": 2},
             {"item_id": p_fal["items"][0]["item_id"], "codigo": "C05-C01-N0", "cantidad": 1},
