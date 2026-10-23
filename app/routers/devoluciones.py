@@ -115,6 +115,8 @@ def dev_json(d: Devolucion) -> dict:
     return {"id": d.id, "hora": d.creado_at.strftime("%d/%m %H:%M"), "total": d.total, "plataforma": d.plataforma or "",
             "usuario": d.usuario.nombre if d.usuario else "", "usuario_id": d.usuario_id, "drive_ok": d.drive_ok,
             "drive_error": "" if d.drive_ok else d.drive_resp, "drive": resp, "ruta_estado": d.ruta_estado or "",
+            "dev": in_odoo.codigo_dev(d), "in_estado": dev_archivos.IN_TEXTO.get(d.in_estado or "", ""),
+            "in_odoo_ref": d.in_odoo_ref or "",
             "items": [{"articulo": i.articulo, "color": i.color, "talle": i.talle, "cantidad": i.cantidad,
                        "estado": i.estado, "plataforma": i.plataforma or "", "venta": i.venta or "", "llego": i.llego or "", "reemplaza": i.reemplaza or "", "sku": i.sku,
                        "ubicacion": i.ubicacion or "", "devuelto_cant": i.devuelto_cant or 0}
@@ -122,7 +124,15 @@ def dev_json(d: Devolucion) -> dict:
             "ventas": list(dict.fromkeys(f"{i.plataforma} {i.venta}" for i in d.items if i.venta))}
 
 
+def _credito_reingreso(db: Session) -> bool:
+    """Apps Script viejo "Devoluciones ML" (carpeta de devoluciones). Apagado por defecto desde 23/10."""
+    from ..services import ajustes
+    return ajustes.leer("devol_credito_reingreso", db).strip() == "1"
+
+
 def _enviar(db: Session, d: Devolucion) -> None:
+    if not _credito_reingreso(db):
+        return
     try:
         r = svc.enviar(d)
         d.drive_ok, d.drive_resp = True, json.dumps(r, ensure_ascii=False)[:2000]
@@ -181,16 +191,18 @@ def confirmar(body: ConfirmarIn, u: Usuario = Depends(acceso), db: Session = Dep
     db.commit()
     ventas = ", ".join(dict.fromkeys(f"{i.plataforma} {i.venta}" for i in d.items))
     registrar(db, u, "devolucion", f"PD-{d.id} · {ventas} · {d.total} unidades", "devoluciones")
-    if body.ruta and any(i.estado != "AJENO" for i in d.items):
-        # Paso 1 (al confirmar): se genera todo en Drive — Excel del día ("Pendiente") + Crédito y Reingreso.
-        # Paso 2 (en la ruta): cada prenda guardada completa "Ubicación" y "Devuelto al rack" en el Excel del día.
+    in_odoo.asegurar_numero(db, d)   # DEV-xx desde el primer momento: es el nombre de todos sus archivos
+    if body.ruta and ruta_svc.a_ubicar(d):
+        # "Armar ruta": arranca todo el proceso. 1- RECEPCIONES y 3- HISTORIAL RECEPCIONES con las prendas en
+        # "Pendiente"; las Falla (y lo que no es nuestro) quedan registradas pero NO entran a la ruta.
         d.ruta_estado = "PENDIENTE"
         db.commit()
         ruta = ruta_svc.armar(db, d, _yo(body.yo_x, body.yo_y))
-        ruta_svc.actualizar_excel_dia(d.fecha)
+        ruta_svc.actualizar_archivos(d.id)
         _enviar(db, d)
         return {"ok": True, "devolucion": dev_json(d), "ruta": ruta}
-    ruta_svc.actualizar_excel_dia(d.fecha)   # el Excel del día se sube ya (en paralelo con Crédito y Reingreso)
+    # sin nada para ubicar (solo Falla / no es nuestro) o carga directa: igual queda registrado lo que llegó
+    ruta_svc.actualizar_archivos(d.id)
     _enviar(db, d)
     return {"ok": True, "devolucion": dev_json(d)}
 
@@ -248,10 +260,10 @@ def _cerrar_devuelta(db: Session, d: Devolucion, u: Usuario) -> dict:
     d.ruta_estado = "DEVUELTO"
     db.commit()
     registrar(db, u, "devolucion", f"PD-{d.id} devuelta a los racks", "devoluciones")
-    if not d.drive_ok:   # normalmente ya se subió al confirmar
+    if not d.drive_ok:
         _enviar(db, d)
-    # Paso 2 confirmado en los racks: los 4 archivos (cantidades, detalle, historial, IN de Odoo; solo OPTIMO)
-    # → Drive / Plantilla credito odoo / 01…04
+    # Ubicadas en los racks: In-Devol-ubicadas → IN en "2- in odoo" (origin DEV-xx) → "4 - historial…" como
+    # Pendiente de carga; 1- RECEPCIONES y 3- HISTORIAL quedan con cada prenda en "Devuelto".
     return dev_archivos.generar_y_subir(db, d, u)
 
 
@@ -265,6 +277,8 @@ def guardar_en_rack(did: int, body: GuardadoIn, u: Usuario = Depends(acceso), db
     it = next((i for i in d.items if i.id == body.item_id), None)
     if not it or it.estado == "AJENO":
         raise HTTPException(400, "Esa prenda no es de esta devolución")
+    if it.estado == "FALLA":
+        raise HTTPException(400, "Las prendas con falla no se ubican en los racks")
     x = ruta_svc.ubicacion(db, body.codigo)
     if not x:
         raise HTTPException(400, f"{body.codigo} no es un rack cargado en Mapeo ni una ubicación de Odoo")
@@ -277,7 +291,8 @@ def guardar_en_rack(did: int, body: GuardadoIn, u: Usuario = Depends(acceso), db
         raise HTTPException(409, str(e)) from e
     db.commit()
     completa = ruta_svc.completa(d)
-    ruta_svc.actualizar_excel_dia(d.fecha)   # primero el Excel del día (en segundo plano), después Crédito y Reingreso
+    if not completa:   # la prenda pasa a "Devuelto" en 1 y 3 y entra a In-Devol-ubicadas (en segundo plano)
+        ruta_svc.actualizar_archivos(d.id)
     in_odoo_r = _cerrar_devuelta(db, d, u) if completa else None
     return {"ok": True, "in_odoo": in_odoo_r, "item_id": it.id, "guardados": ruta_svc.guardados(it), "completa": completa,
             "aprendidas": aprendidas, "devolucion": dev_json(d)}
@@ -293,8 +308,8 @@ def devuelto(did: int, body: DevueltoIn = DevueltoIn(), u: Usuario = Depends(acc
     items = {i.id: i for i in d.items}
     for g in body.guardados:   # compatibilidad: progreso que quedó solo en el equipo (versión anterior)
         it, x = items.get(g.item_id), ruta_svc.ubicacion(db, g.codigo)
-        if not it or it.estado == "AJENO":
-            raise HTTPException(400, "Hay una prenda que no es de esta devolución")
+        if not it or it.estado != "OPTIMO":
+            raise HTTPException(400, "Hay una prenda que no es de esta devolución o no se ubica (falla)")
         if not x:
             raise HTTPException(400, f"{g.codigo} no es un rack cargado en Mapeo")
         if it.estado == "OPTIMO" and it.ubic_odoo and x.codigo != it.ubic_odoo:
@@ -302,9 +317,6 @@ def devuelto(did: int, body: DevueltoIn = DevueltoIn(), u: Usuario = Depends(acc
         ya = ruta_svc.guardados(it).get(x.codigo, 0)
         if g.cantidad > ya and (it.devuelto_cant or 0) < it.cantidad:
             aprendidas += ruta_svc.guardar_prenda(db, d, it, x.codigo, g.cantidad - ya, u.id)
-    d.ruta_estado = "DEVUELTO"
-    db.commit()
-    ruta_svc.actualizar_excel_dia(d.fecha)
     in_odoo_r = _cerrar_devuelta(db, d, u)
     return {"ok": True, "devolucion": dev_json(d), "aprendidas": aprendidas, "in_odoo": in_odoo_r}
 
@@ -317,10 +329,9 @@ def sin_devolver(did: int, u: Usuario = Depends(acceso), db: Session = Depends(g
         d.ruta_estado = "SIN_DEVOLVER"
         db.commit()
         registrar(db, u, "devolucion", f"PD-{d.id} guardada en Drive sin devolver a los racks", "devoluciones")
-        ruta_svc.actualizar_excel_dia(d.fecha)
     if not d.drive_ok:
         _enviar(db, d)
-    # sin IN: solo el historial (todo Pendiente) a 03_Historial_Recepciones
+    # sin IN: 1- RECEPCIONES y 3- HISTORIAL con las prendas en "Sin devolver"
     archivos_r = dev_archivos.generar_y_subir(db, d, u)
     return {"ok": True, "devolucion": dev_json(d), "in_odoo": archivos_r}
 
@@ -330,6 +341,11 @@ def reintentar(did: int, u: Usuario = Depends(acceso), db: Session = Depends(get
     d = db.get(Devolucion, did)
     if not d:
         raise HTTPException(404)
+    if not _credito_reingreso(db):   # ya no hay Crédito y Reingreso: se re-suben los archivos 1 y 3
+        r = dev_archivos.sincronizar_estado(db, d)
+        if not r["ok"]:
+            raise HTTPException(502, " · ".join(r["errores"])[:300])
+        return {"ok": True, "devolucion": dev_json(d)}
     if d.drive_ok:
         return {"ok": True, "devolucion": dev_json(d)}
     _enviar(db, d)
@@ -355,9 +371,8 @@ def in_odoo_xlsx(did: int, u: Usuario = Depends(acceso), db: Session = Depends(g
 def archivos_zip(did: int, u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
     """Los 4 archivos de la devolución (01–04) en un .zip con sus carpetas."""
     d = _dev(db, did)
-    if dev_archivos.archivos(d)[0]:
-        in_odoo.asegurar_numero(db, d)
-    contenido, nombre = dev_archivos.zip_(d)
+    in_odoo.asegurar_numero(db, d)
+    contenido, nombre = dev_archivos.zip_(d, db)
     if contenido is None:
         raise HTTPException(404, "Esta devolución no tiene prendas OPTIMO")
     return Response(contenido, media_type="application/zip",
@@ -374,6 +389,24 @@ def in_odoo_drive(did: int, u: Usuario = Depends(acceso), db: Session = Depends(
     if not r["ok"]:
         raise HTTPException(502, r["error"])
     return r
+
+
+@router.post("/api/in-cargados/verificar")
+def in_cargados_verificar(u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    """4 - historial de in cargados a odoo: busca en Odoo cada IN pendiente por su ORIGEN (DEV-xx) y re-sube el archivo."""
+    r = dev_archivos.verificar_in_odoo(db)
+    try:
+        dev_archivos.subir_historial_in(db)
+    except Exception as e:  # noqa: BLE001
+        r["error"] = f"No se pudo subir el historial de IN: {e}"[:300]
+    return r
+
+
+@router.get("/in-cargados.xlsx")
+def in_cargados_xlsx(u: Usuario = Depends(acceso), db: Session = Depends(get_db)):
+    return Response(dev_archivos.excel_in_cargados(db),
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{dev_archivos.ARCHIVO_4}"'})
 
 
 @router.get("/api/historial")
