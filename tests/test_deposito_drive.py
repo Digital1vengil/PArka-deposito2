@@ -61,7 +61,8 @@ def test_excels_y_subida(monkeypatch):
     _cargar_dia()
     with SessionLocal() as db:
         r = deposito_drive.sincronizar(db, hoy())
-        assert {a["seccion"] for a in r["archivos"]} == {"despachos", "devoluciones", "conteos", "cierre"}
+        # la carpeta "Devoluciones" ya no se usa (23/10): las devoluciones van a 1- RECEPCIONES … 4 -
+        assert {a["seccion"] for a in r["archivos"]} == {"despachos", "conteos", "cierre"}
         # sin cambios: no se vuelve a subir
         assert deposito_drive.sincronizar(db, hoy())["archivos"] == []
     fecha, archivos = subidas[0]
@@ -76,8 +77,9 @@ def test_excels_y_subida(monkeypatch):
     assert ["Flex Mercado Libre", 1] in desp["Resumen"] and ["Flex Tienda Nube", 1] in desp["Resumen"]
     assert ["TOTAL", 4] in desp["Resumen"]
 
-    dev = _hojas(archivos["devoluciones"])
-    assert ["ML", 2, 1, 3] in dev["Resumen"] and len(dev["Detalle"]) == 3
+    assert "devoluciones" not in archivos
+    dev = {"Detalle": _hojas(archivos["cierre"])["Devoluciones"]}   # el Cierre sigue mostrando el resumen del día
+    assert len(dev["Detalle"]) == 3
     # después de "Plataforma" (D) va el nº de venta (ML) / orden (TN) en la columna E
     assert dev["Detalle"][0][3:5] == ["Plataforma", "Nº venta / orden"] and dev["Detalle"][1][3:5] == ["ML", "2000012345678901"]
     enc = dev["Detalle"][0]
@@ -91,22 +93,22 @@ def test_excels_y_subida(monkeypatch):
     assert {"Resumen", "Despachados", "Devoluciones", "Conteos", "Tareas", "Actividad"} <= set(cie)
     assert ["Envíos despachados", 4] in cie["Resumen"] and len(cie["Despachados"]) == 5
 
-    # un cambio en devoluciones vuelve a subir esa sección y el cierre, nada más
+    # un cambio en devoluciones vuelve a subir solo el cierre
     with SessionLocal() as db:
         d = Devolucion(fecha=hoy(), total=1, plataforma="TN")
         d.items = [DevolucionItem(codigo_barras="202", articulo="ABBA", estado="OPTIMO", plataforma="TN", cantidad=1)]
         db.add(d)
         db.commit()
         r = deposito_drive.sincronizar(db, hoy())
-    assert set(subidas[-1][1]) == {"devoluciones", "cierre"}
+    assert set(subidas[-1][1]) == {"cierre"}
 
     # botón de Cierre diario: fuerza los 4
     with TestClient(app) as c:
         _login(c)
         assert "DEPOSITO PARKA" in c.get("/admin/cierre").text
         r = c.post("/admin/api/deposito-drive/guardar", json={}).json()
-        assert r["ok"] and len(r["archivos"]) == 4
-    assert set(subidas[-1][1]) == {"despachos", "devoluciones", "conteos", "cierre"}
+        assert r["ok"] and len(r["archivos"]) == 3
+    assert set(subidas[-1][1]) == {"despachos", "conteos", "cierre"}
 
 
 def test_payload_guardar_deposito(monkeypatch):

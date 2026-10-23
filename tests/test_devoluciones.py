@@ -28,6 +28,7 @@ def test_flujo_devolucion(monkeypatch):
         enviados.append(dev)
         return {"ok": True, "id": "D-001", "credito": "Crédito D-001", "reingreso": "Reingreso D-001", "total": dev.total}
     monkeypatch.setattr(svc, "enviar", fake_enviar)
+    monkeypatch.setattr("app.routers.devoluciones._credito_reingreso", lambda db: True)   # Apps Script viejo encendido
     with TestClient(app) as c:
         _login(c)
         assert "Devoluciones" in c.get("/").text
@@ -67,6 +68,7 @@ def test_drive_falla_y_reintento(monkeypatch):
     def falla(dev):
         raise RuntimeError("sin conexión")
     monkeypatch.setattr(svc, "enviar", falla)
+    monkeypatch.setattr("app.routers.devoluciones._credito_reingreso", lambda db: True)   # Apps Script viejo encendido
     with TestClient(app) as c:
         _login(c)
         v = c.get("/devoluciones/api/buscar?q=2000000035901").json()["modelos"][0]["variantes"][0]
@@ -135,6 +137,7 @@ def test_escaner_codigo_directo():
 def test_plataforma_por_prenda(monkeypatch):
     enviados = []
     monkeypatch.setattr(svc, "enviar", lambda dev: enviados.append(dev) or {"ok": True, "id": "D-9"})
+    monkeypatch.setattr("app.routers.devoluciones._credito_reingreso", lambda db: True)   # Apps Script viejo encendido
     with TestClient(app) as c:
         _login(c)
         v = c.get("/devoluciones/api/buscar?q=2000000035901").json()["modelos"][0]["variantes"][0]
@@ -201,6 +204,7 @@ def test_busqueda_equivalencias():
 def test_venta_obligatoria_por_prenda(monkeypatch):
     enviados = []
     monkeypatch.setattr(svc, "enviar", lambda dev: enviados.append(dev) or {"ok": True, "id": "D-10"})
+    monkeypatch.setattr("app.routers.devoluciones._credito_reingreso", lambda db: True)   # Apps Script viejo encendido
     with TestClient(app) as c:
         _login(c)
         v = c.get("/devoluciones/api/buscar?q=2000000035901").json()["modelos"][0]["variantes"][0]
@@ -295,6 +299,7 @@ def test_mismo_distinto_y_ajeno(monkeypatch):
     from app.services import tiendanube as tn
     enviados = []
     monkeypatch.setattr(svc, "enviar", lambda dev: enviados.append([i.estado for i in dev.items]) or {"ok": True, "id": "D-11"})
+    monkeypatch.setattr("app.routers.devoluciones._credito_reingreso", lambda db: True)   # Apps Script viejo encendido
     with TestClient(app) as c:
         _login(c)
         v = c.get("/devoluciones/api/buscar?q=2000000035925").json()["modelos"][0]["variantes"]
@@ -364,20 +369,24 @@ def test_distinto_en_lugar_de(monkeypatch):
         assert filas[0][deposito_drive.ENC_DEV.index("Llegó")] == "Artículo distinto"
 
 
-def test_guardar_en_drive_actualiza_excel_del_dia(monkeypatch):
-    """"Guardar en Drive sin devolver" desde el resumen: el Excel del día se sube enseguida (no espera los 15 min)."""
+def test_confirmar_actualiza_archivos_sin_carpeta_devoluciones(monkeypatch):
+    """Al confirmar se actualizan 1- RECEPCIONES / 3- HISTORIAL (en segundo plano) y NO se usa la carpeta de
+    devoluciones: ni el Excel del día ni el Apps Script viejo de Crédito y Reingreso (apagado por defecto)."""
     from app.services import ruta_devolucion
-    llamadas = []
-    monkeypatch.setattr(svc, "enviar", lambda dev: {"ok": True, "id": "D-13"})
-    monkeypatch.setattr(ruta_devolucion, "actualizar_excel_dia", lambda f: llamadas.append(f))
+    llamadas, enviados = [], []
+    monkeypatch.setattr(svc, "enviar", lambda dev: enviados.append(dev) or {"ok": True, "id": "D-13"})
+    monkeypatch.setattr(ruta_devolucion, "actualizar_archivos", lambda did: llamadas.append(did))
     with TestClient(app) as c:
         _login(c)
         v = c.get("/devoluciones/api/buscar?q=2000000035925").json()["modelos"][0]["variantes"]
         v = next(x for x in v if x["codigo_barras"] == "2000000035925")
         r = c.post("/devoluciones/api/confirmar", json={"items": [
             {"articulo_id": v["id"], "cantidad": 1, "estado": "OPTIMO", "plataforma": "TN", "venta": "1262", "llego": "MISMO"}]})
-        assert r.json()["devolucion"]["items"][0]["llego"] == "MISMO"
-    assert len(llamadas) == 1
+        d = r.json()["devolucion"]
+        assert d["items"][0]["llego"] == "MISMO" and d["dev"].startswith("DEV-")
+    assert llamadas == [d["id"]] and enviados == []
+    from app.services import deposito_drive
+    assert "devoluciones" not in deposito_drive.SECCIONES and "devoluciones" not in deposito_drive.ARMADORES
 
 
 def test_sku_ml_equivale_a_odoo(monkeypatch):
