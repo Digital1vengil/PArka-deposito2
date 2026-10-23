@@ -233,10 +233,13 @@ def armar(db: Session, d: Devolucion, yo: tuple[float, float] | None = None) -> 
         candidatos.append((i, cods))
     paradas: dict[str, list] = {}
     sin: list = []
+    motivos: dict[int, str] = {}
     # primero las que tienen un solo lugar posible: fijan paradas
     for i, cods in sorted(candidatos, key=lambda x: len(x[1]) != 1):
         if not cods:
             sin.append(i)
+            motivos[i.id] = ("Falla: no hay rack de fallas configurado (Mapeo → Croquis)" if i.estado == "FALLA"
+                             else "No tiene ubicación en Odoo ni en Mapeo")
             continue
         ya = [c for c in cods if c in paradas]
         elegido = ya[0] if ya else min(cods, key=lambda c: (_cerca(c, desde), cods.index(c)))
@@ -255,4 +258,4 @@ def armar(db: Session, d: Devolucion, yo: tuple[float, float] | None = None) -> 
             "inicio": ({"clave": "yo", "nombre": "donde estás", "punto": list(plano.punto_origen(desde))} if yo else
                        {"clave": persiana, "nombre": plano.PUERTAS[persiana][0], "punto": list(plano.inicio(persiana))}),
             "rack_fallas": fallas.codigo if fallas else "", "paradas": salida,
-            "sin_ubicacion": [item_json(i) for i in sin], "metros_aprox": r["metros_aprox"]}
+            "sin_ubicacion": [dict(item_json(i), sin_ubicacion=True, motivo=motivos[i.id]) for i in sin], "metros_aprox": r["metros_aprox"]}
