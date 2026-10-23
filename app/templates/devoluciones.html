@@ -128,6 +128,7 @@
       <h2 class="text-lg font-bold flex-1" id="ruta-titulo">Ruta de devolución</h2>
       <button class="btn btn-gris btn-chico" onclick="cerrarRuta()" title="La ruta queda en Últimas devoluciones para seguirla después">✕ Seguir después</button>
     </div>
+    <div id="ruta-aviso" class="hidden rounded-xl border-2 p-3 mb-3" style="background:#fef3c7;border-color:#d97706;color:#78350f"></div>
     <div class="m3d mb-3">
       <div class="flex flex-wrap gap-2 items-center mb-2">
         <div class="m3d-seg" role="group" aria-label="Vista">
@@ -883,7 +884,7 @@ function abrirRuta(data) {
   pararCam();
   const paradas = data.paradas.slice();
   if (data.sin_ubicacion.length) paradas.push({ n: paradas.length + 1, codigo: '', libre: true, punto: [], tramo: [],
-    descripcion: 'Sin ubicación conocida: dejalas en el rack que tenga lugar y la app lo aprende para la próxima', items: data.sin_ubicacion });
+    descripcion: '⚠ Estas prendas no tienen ubicación: dejalas en un rack que tenga lugar, escaneá ese rack y después cada prenda. La app lo aprende para la próxima.', items: data.sin_ubicacion });
   // lo ya confirmado viene del servidor (queda guardado al instante, sirve desde cualquier equipo)
   const puestos = {};
   paradas.forEach(p => p.items.forEach(it => { if (it.guardados && Object.keys(it.guardados).length) puestos[it.item_id] = { ...it.guardados }; }));
@@ -898,6 +899,8 @@ function abrirRuta(data) {
   document.body.style.overflow = 'hidden';
   _estadoRuta(null, paradas.length ? 'Andá a la parada 1 y escaneá el código del rack' : 'No hay prendas para guardar en racks');
   pintarRuta();
+  const nSin = data.sin_ubicacion.reduce((a, it) => a + it.cantidad, 0);
+  if (nSin) toast(`⚠ ${nSin} prenda${nSin > 1 ? 's' : ''} sin ubicación: ${nSin > 1 ? 'van' : 'va'} en la última parada de la ruta`, 'warn', 7000);
 }
 function cerrarRuta() { if (camScanner && camModo === 'ruta') pararCam(); rutaAct = null; document.getElementById('modal-ruta').classList.add('hidden'); document.body.style.overflow = ''; historial(); }
 async function seguirRuta(id, b) {
@@ -936,25 +939,35 @@ function pintarRuta() {
   document.getElementById('ruta-titulo').innerHTML = `🗺 Ruta de devolución PD-${r.did} <span class="text-sm font-normal text-zinc-500">· sale de ${esc(r.data.inicio.nombre)} · ${r.data.paradas.length} racks · ~${r.data.metros_aprox} m · guardadas ${puestas} de ${tot}</span>`;
   const hechas = new Set(ps.filter(_hecha).map(x => x.n));
   pintarVisor(hechas);
+  // aviso fijo arriba mientras queden prendas sin ubicación por guardar
+  const libre = ps.find(x => x.libre), av = document.getElementById('ruta-aviso');
+  const pend = libre ? libre.items.filter(_faltan) : [];
+  av.classList.toggle('hidden', !pend.length);
+  if (pend.length) {
+    const u = pend.reduce((a, it) => a + _faltan(it), 0);
+    av.innerHTML = `<div class="font-bold">⚠ ${u} prenda${u > 1 ? 's' : ''} sin ubicación en esta ruta</div>
+      <div class="text-sm">Van en la <b>parada ${libre.n}</b> (última): dejalas en un rack que tenga lugar y escaneá ese rack. Cargales la ubicación en Odoo o en Mapeo para la próxima.</div>
+      <ul class="text-sm mt-1 list-disc pl-5">${pend.map(it => `<li><b>${esc(it.articulo)}</b> · ${esc(it.color)} · ${esc(it.talle)} x${_faltan(it)}${it.sku ? ` <span class="opacity-75">(${esc(it.sku)})</span>` : ''} — ${esc(it.motivo || 'sin ubicación')}</li>`).join('')}</ul>`;
+  }
   const el = document.getElementById('ruta-parada');
   if (!p) { el.innerHTML = '<p class="text-zinc-500">No hay paradas.</p>'; }
   else {
     const rack = p.libre ? (r.rackOk ? `Rack elegido: <b>${esc(r.rackOk)}</b>` : 'Escaneá el rack donde las vas a dejar') : `<span class="text-3xl font-black tracking-wide">${esc(p.codigo)}</span>${nivelChips(p.codigo)}`;
-    el.style.borderColor = r.rackOk ? '#15803d' : '#ea580c';
-    el.innerHTML = `<div class="flex flex-wrap items-center gap-2 mb-1"><span class="chip ${p.libre ? 'chip-pendiente' : 'chip-en_curso'}">PARADA ${p.n} DE ${ps.length}</span>${p.es_fallas ? '<span class="chip" style="background:#fee2e2;color:#b91c1c">RACK DE FALLAS</span>' : ''}${(p.items || []).some(x => x.odoo && x.odoo === p.codigo) ? '<span class="chip" style="background:#ede9fe;color:#5b21b6">UBICACIÓN DE ODOO</span>' : ''}${r.rackOk ? '<span class="chip chip-hecha">RACK OK</span>' : ''}</div>
+    el.style.borderColor = r.rackOk ? '#15803d' : p.libre ? '#d97706' : '#ea580c';
+    el.innerHTML = `<div class="flex flex-wrap items-center gap-2 mb-1"><span class="chip ${p.libre ? 'chip-pendiente' : 'chip-en_curso'}">PARADA ${p.n} DE ${ps.length}</span>${p.libre ? '<span class="chip" style="background:#fef3c7;color:#92400e">⚠ SIN UBICACIÓN</span>' : ''}${p.es_fallas ? '<span class="chip" style="background:#fee2e2;color:#b91c1c">RACK DE FALLAS</span>' : ''}${(p.items || []).some(x => x.odoo && x.odoo === p.codigo) ? '<span class="chip" style="background:#ede9fe;color:#5b21b6">UBICACIÓN DE ODOO</span>' : ''}${r.rackOk ? '<span class="chip chip-hecha">RACK OK</span>' : ''}</div>
       <div class="mb-1">${rack}</div><div class="text-sm text-zinc-500 mb-3">${esc(p.descripcion || '')}</div>
       <div class="text-xs font-bold uppercase tracking-wider text-zinc-500 mb-1">${r.rackOk ? 'Ahora escaneá cada prenda que dejás acá' : 'Primero escaneá el código de barras del rack'}</div>
       ${p.items.map(it => { const f = _faltan(it); return `<div class="flex items-center gap-2 py-1.5 border-b border-zinc-200 last:border-0 ${f ? '' : 'opacity-50'}">
-        <span class="flex-1 min-w-0"><b>${esc(it.articulo)}</b> · ${esc(it.color)} · ${esc(it.talle)} ${it.estado === 'FALLA' ? '<span class="chip" style="background:#fee2e2;color:#b91c1c">FALLA</span>' : ''}
-        <span class="block text-xs text-zinc-500 truncate">${esc(it.sku)}${it.alternativas && it.alternativas.length ? ' · también en ' + it.alternativas.map(esc).join(', ') : ''}</span></span>
+        <span class="flex-1 min-w-0"><b>${esc(it.articulo)}</b> · ${esc(it.color)} · ${esc(it.talle)} ${it.estado === 'FALLA' ? '<span class="chip" style="background:#fee2e2;color:#b91c1c">FALLA</span>' : ''}${it.sin_ubicacion ? '<span class="chip" style="background:#fef3c7;color:#92400e">⚠ SIN UBICACIÓN</span>' : ''}
+        <span class="block text-xs text-zinc-500 truncate">${esc(it.sku)}${it.motivo ? ' · ' + esc(it.motivo) : ''}${it.alternativas && it.alternativas.length ? ' · también en ' + it.alternativas.map(esc).join(', ') : ''}</span></span>
         <b class="text-lg whitespace-nowrap">${f ? `${_puestas(it)} / ${it.cantidad}` : '✔'}</b></div>`; }).join('')}
       <div class="flex gap-2 mt-3"><button class="btn btn-gris btn-chico" onclick="saltarParada()">⏭ Saltar esta parada (no hay lugar)</button></div>`;
   }
   document.getElementById('ruta-lista').innerHTML = ps.map((x, i) => {
     const h = _hecha(x), sal = !h && r.saltadas.includes(_k(x)), u = x.items.reduce((a, it) => a + it.cantidad, 0);
     return `<button class="flex items-center gap-2 py-1.5 px-2 rounded-lg text-left ${i === r.actual ? 'bg-zinc-100 font-bold' : ''}" onclick="irParada(${i})">
-      <span class="w-6 h-6 rounded-full flex items-center justify-center text-xs text-white" style="background:${h ? '#16a34a' : i === r.actual ? '#ea580c' : sal ? '#a1a1aa' : '#18181b'}">${h ? '✓' : x.n}</span>
-      <span class="flex-1">${x.libre ? 'Sin ubicación' : esc(x.codigo)}${sal ? ' <span class="text-xs text-zinc-500">(saltada)</span>' : ''}</span><span class="text-zinc-500">${u} u.</span></button>`;
+      <span class="w-6 h-6 rounded-full flex items-center justify-center text-xs text-white" style="background:${h ? '#16a34a' : i === r.actual ? '#ea580c' : sal ? '#a1a1aa' : x.libre ? '#d97706' : '#18181b'}">${h ? '✓' : x.libre ? '!' : x.n}</span>
+      <span class="flex-1">${x.libre ? '<span style="color:#b45309">⚠ Sin ubicación</span>' : esc(x.codigo)}${sal ? ' <span class="text-xs text-zinc-500">(saltada)</span>' : ''}</span><span class="text-zinc-500">${u} u.</span></button>`;
   }).join('');
   const todo = ps.every(_hecha);
   const b = document.getElementById('btn-devuelto');
