@@ -4,20 +4,19 @@
   ninguna, la asignada en Mapeo (variante > color > modelo).
   Al guardar se verifica que el rack escaneado coincida con la ubicación de Odoo. Si el modelo está en varios racks se
   elige el que ya es parada de la ruta o, si no, el más cerca de la persiana de salida.
-- Falla → el rack de fallas (Mapeo → Ajustes). Sin rack de fallas configurado, queda "sin ubicación".
+- Falla → NO se ubica (desde 23/10): no entra a la ruta ni al IN; queda registrada en 1- RECEPCIONES.
 - Sin ubicación conocida → parada final: se escanea el rack donde se deja y la app lo aprende para la próxima.
 """
 from __future__ import annotations
 
 import json
 import logging
-import threading
 import time
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..db import SessionLocal, ahora
+from ..db import ahora
 from ..models import Articulo, Devolucion, Ubicacion, UbicacionArticulo
 from . import ajustes, odoo, plano
 from .mapeo import normalizar_codigo, ubicaciones_de
@@ -148,9 +147,8 @@ def aprender(db: Session, d: Devolucion, i, codigo: str, usuario_id: int | None)
     """La prenda (Óptimo) quedó en un rack que Mapeo no tenía para ese artículo: se agrega para la próxima."""
     if i.estado != "OPTIMO" or not i.articulo_id:
         return 0
-    fallas = ajustes.leer("mapa_rack_fallas", db)
     a, x = db.get(Articulo, i.articulo_id), ubicacion(db, codigo)
-    if not a or not x or (fallas and normalizar_codigo(fallas) == x.codigo):
+    if not a or not x:
         return 0
     if x.codigo in {u.codigo for u in ubicaciones_de(db, a)}:
         return 0
@@ -162,6 +160,8 @@ def aprender(db: Session, d: Devolucion, i, codigo: str, usuario_id: int | None)
 
 def guardar_prenda(db: Session, d: Devolucion, i, codigo: str, cantidad: int, usuario_id: int | None) -> int:
     """Suma unidades confirmadas en un rack. Devuelve cuántas ubicaciones nuevas aprendió Mapeo."""
+    if i.estado != "OPTIMO":
+        raise ValueError("Las prendas con falla (y lo que no es nuestro) no se ubican en los racks")
     g = guardados(i)
     falta = i.cantidad - sum(g.values())
     if falta <= 0:
@@ -172,40 +172,22 @@ def guardar_prenda(db: Session, d: Devolucion, i, codigo: str, cantidad: int, us
     return aprender(db, d, i, codigo, usuario_id)
 
 
+def a_ubicar(d: Devolucion) -> list:
+    """Lo único que va a los racks: las prendas Óptimo (las Falla y lo ajeno no se ubican)."""
+    return [i for i in d.items if i.estado == "OPTIMO" and i.articulo_id]
+
+
 def completa(d: Devolucion) -> bool:
-    propias = [i for i in d.items if i.estado != "AJENO"]
+    propias = a_ubicar(d)
     return bool(propias) and all((i.devuelto_cant or 0) >= i.cantidad for i in propias)
 
 
-# ─────────────── Excel del día en Drive: se actualiza apenas se confirma una prenda ───────────────
-_lock = threading.Lock()
-_estado = {"corriendo": False, "pendiente": set()}
-
-
-def actualizar_excel_dia(fecha) -> None:
-    """Sube el Excel de Devoluciones del día a Drive en segundo plano (si hay otra subida en curso, se encola)."""
-    with _lock:
-        _estado["pendiente"].add(fecha)
-        if _estado["corriendo"]:
-            return
-        _estado["corriendo"] = True
-    threading.Thread(target=_subir_pendientes, daemon=True).start()
-
-
-def _subir_pendientes() -> None:
-    from . import deposito_drive
-    while True:
-        with _lock:
-            if not _estado["pendiente"]:
-                _estado["corriendo"] = False
-                return
-            fecha = _estado["pendiente"].pop()
-        try:
-            with SessionLocal() as db:
-                if deposito_drive.configurado(db) and deposito_drive.automatico(db):
-                    deposito_drive.sincronizar(db, fecha, secciones=("devoluciones",))
-        except Exception:  # noqa: BLE001 — lo vuelve a intentar el automático de cada 15 min
-            log.exception("No se pudo actualizar el Excel de devoluciones del %s", fecha)
+# ─────────────── Archivos en Drive: cada cambio de estado se refleja solo ───────────────
+def actualizar_archivos(devolucion_id: int) -> None:
+    """Actualiza en segundo plano 1- RECEPCIONES, In-Devol-ubicadas y 3- HISTORIAL RECEPCIONES.
+    (Reemplaza al Excel del día de la carpeta "Devoluciones", que ya no se usa.)"""
+    from . import dev_archivos
+    dev_archivos.programar(devolucion_id)
 
 
 def armar(db: Session, d: Devolucion, yo: tuple[float, float] | None = None) -> dict:
@@ -214,22 +196,16 @@ def armar(db: Session, d: Devolucion, yo: tuple[float, float] | None = None) -> 
     if persiana not in plano.PUERTAS:
         persiana = "P1"
     desde = plano.desde_punto(*yo) if yo else persiana
-    fallas = ubicacion(db, ajustes.leer("mapa_rack_fallas", db))
     candidatos: list[tuple[object, list[str]]] = []
-    for i in d.items:
-        if i.estado == "AJENO" or not i.articulo_id:
-            continue
-        if i.estado == "FALLA":
-            cods = [fallas.codigo] if fallas else []
+    for i in a_ubicar(d):   # las Falla y lo que no es nuestro NO se ubican
+        a = db.get(Articulo, i.articulo_id)
+        if not i.ubic_odoo:
+            i.ubic_odoo = ubicacion_de_producto(db, a)
+        if i.ubic_odoo:   # Odoo manda: es el único rack válido para esta prenda
+            asegurar_ubicacion(db, i.ubic_odoo)
+            cods = [i.ubic_odoo]
         else:
-            a = db.get(Articulo, i.articulo_id)
-            if not i.ubic_odoo:
-                i.ubic_odoo = ubicacion_de_producto(db, a)
-            if i.ubic_odoo:   # Odoo manda: es el único rack válido para esta prenda
-                asegurar_ubicacion(db, i.ubic_odoo)
-                cods = [i.ubic_odoo]
-            else:
-                cods = [u.codigo for u in ubicaciones_de(db, a)] if a else []
+            cods = [u.codigo for u in ubicaciones_de(db, a)] if a else []
         candidatos.append((i, cods))
     paradas: dict[str, list] = {}
     sin: list = []
@@ -238,8 +214,7 @@ def armar(db: Session, d: Devolucion, yo: tuple[float, float] | None = None) -> 
     for i, cods in sorted(candidatos, key=lambda x: len(x[1]) != 1):
         if not cods:
             sin.append(i)
-            motivos[i.id] = ("Falla: no hay rack de fallas configurado (Mapeo → Croquis)" if i.estado == "FALLA"
-                             else "No tiene ubicación en Odoo ni en Mapeo")
+            motivos[i.id] = "No tiene ubicación en Odoo ni en Mapeo"
             continue
         ya = [c for c in cods if c in paradas]
         elegido = ya[0] if ya else min(cods, key=lambda c: (_cerca(c, desde), cods.index(c)))
@@ -250,12 +225,14 @@ def armar(db: Session, d: Devolucion, yo: tuple[float, float] | None = None) -> 
     for n, (cod, tramo) in enumerate(zip(r["orden"], r["tramos"]), start=1):
         u = ubicacion(db, cod)
         salida.append({"n": n, "codigo": cod, "descripcion": plano.describir(cod) or (u.descripcion if u else ""),
-                       "es_fallas": bool(fallas and cod == fallas.codigo), "tramo": tramo,
+                       "es_fallas": False, "tramo": tramo,
                        "punto": list(plano.acceso(cod) or []),
                        "items": [dict(item_json(i), alternativas=[c for c in cods if c != cod])
                                  for i, cods in paradas[cod]]})
     return {"devolucion_id": d.id, "estado": d.ruta_estado or "", "plano": plano.plano(),
             "inicio": ({"clave": "yo", "nombre": "donde estás", "punto": list(plano.punto_origen(desde))} if yo else
                        {"clave": persiana, "nombre": plano.PUERTAS[persiana][0], "punto": list(plano.inicio(persiana))}),
-            "rack_fallas": fallas.codigo if fallas else "", "paradas": salida,
+            "rack_fallas": "", "paradas": salida,
+            "no_se_ubican": [dict(item_json(i), motivo="Falla: no se ubica" if i.estado == "FALLA" else "No es nuestro artículo")
+                             for i in d.items if i.estado in ("FALLA", "AJENO")],
             "sin_ubicacion": [dict(item_json(i), sin_ubicacion=True, motivo=motivos[i.id]) for i in sin], "metros_aprox": r["metros_aprox"]}

@@ -1,7 +1,8 @@
 """DEPOSITO PARKA en Google Drive: un Excel por día en cada carpeta.
 
   DEPOSITO PARKA/Despachos/     <fecha> - Despachos.xlsx     Flex + Colecta + Tienda Nube (y cambios / SmartPost)
-  DEPOSITO PARKA/Devoluciones/  <fecha> - Devoluciones.xlsx  lo que se devolvió
+  (La carpeta "Devoluciones" YA NO SE USA desde 23/10: las devoluciones van a Plantilla credito odoo/1- … 4 -,
+   ver services/dev_archivos.py. El Cierre sigue mostrando la hoja "Devoluciones" con el resumen del día.)
   DEPOSITO PARKA/Conteos/       <fecha> - Conteos.xlsx       lo que se contó
   DEPOSITO PARKA/Cierre/        <fecha> - Cierre.xlsx        todo lo realizado y despachado en el día
 
@@ -35,7 +36,7 @@ from .cierre import datos_cierre
 
 log = logging.getLogger("parka.deposito_drive")
 
-SECCIONES = ("despachos", "devoluciones", "conteos", "cierre")
+SECCIONES = ("despachos", "conteos", "cierre")   # sin "devoluciones": esa carpeta no se usa más
 TIPOS_DESPACHO = {"flex": "Flex Mercado Libre", "flex_tn": "Flex Tienda Nube", "colecta": "Colecta",
                   "tiendanube": "Tienda Nube", "cambios": "Cambios"}
 
@@ -347,13 +348,13 @@ def _huella(db: Session, fecha: date, seccion: str) -> str:
     else:  # el cierre incluye todo lo anterior + tareas y actividad
         d = datos_cierre(db, fecha)
         propias = sum(1 for a in d["actividad"] if a.accion.startswith("drive_deposito"))  # no re-subir por subir
-        datos = [[_huella(db, fecha, s) for s in SECCIONES[:3]], len(d["pendientes"]), len(d["actividad"]) - propias,
+        datos = [[_huella(db, fecha, s) for s in ("despachos", "devoluciones", "conteos")], len(d["pendientes"]),
+                 len(d["actividad"]) - propias,
                  [(t.id, t.estado) for t in d["tareas"]]]
     return hashlib.sha1(json.dumps(datos, default=str).encode("utf-8")).hexdigest()
 
 
-ARMADORES = {"despachos": excel_despachos, "devoluciones": excel_devoluciones,
-             "conteos": excel_conteos, "cierre": excel_cierre_dia}
+ARMADORES = {"despachos": excel_despachos, "conteos": excel_conteos, "cierre": excel_cierre_dia}
 
 
 def sincronizar(db: Session, fecha: date, usuario: Usuario | None = None, forzar: bool = False,

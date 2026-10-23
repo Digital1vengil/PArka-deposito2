@@ -1,32 +1,34 @@
-"""Los 4 archivos de control de una devolución ecommerce (ML + TN), uno por carpeta de Drive.
+"""Archivos de devoluciones ecommerce (ML + TN) en Drive — estructura de carpetas 1 a 4 (desde 23/10/2026).
 
-Se arman al cerrar la devolución en los racks (paso 2: última prenda guardada o "Marcar como devuelto") y también
-con "Guardar en Drive sin devolver" (ahí solo sale el historial, todo Pendiente). Van a
-DEPOSITO PARKA/Plantilla credito odoo/:
+Reemplaza a 01_Cantidades_Netas … 04_Carga_Odoo y a la carpeta "Devoluciones" (Excel del día): la app ya NO genera
+ni guarda nada en la carpeta de devoluciones. Todo vive en DEPOSITO PARKA/Plantilla credito odoo/:
 
-  01_Cantidades_Netas/    CANT_DEV_AAAA-MM-DD_PD-<id>.xlsx   SKU · Descripcion_Articulo · Cantidad_Total_Devuelta
-  02_Detalle_Por_Venta/   DET_DEV_AAAA-MM-DD_PD-<id>.xlsx    Fecha_Devolucion · Plataforma · Numero_Venta_Orden · SKU · Descripcion · Cantidad
-  03_Historial_Recepciones/ HIST_DEV_AAAA-MM-DD_PD-<id>.xlsx Fecha · Devolucion · Plataforma · Numero_Venta_Orden · SKU · Estado
-  04_Carga_Odoo/          IN_DEV_AAAA-MM-DD_PD-<id>.xlsx     plantilla del IN de Odoo (services/in_odoo.py)
+  1- RECEPCIONES/                    DEV-xx.xlsx  todo lo que llegó en la devolución (Óptimo, Falla y "no es nuestro")
+  2- in odoo/                        DEV-xx.xlsx  plantilla del IN para "LA CARGA ODOO" (solo Óptimo ubicado)
+  2- in odoo/In-Devol-ubicadas/      DEV-xx.xlsx  prendas ya ubicadas en su rack: de acá sale el IN de "2- in odoo"
+  3- HISTORIAL RECEPCIONES/          AAAA-MM-DD - Historial Recepciones.xlsx   log diario de todo lo que llega
+  4 - historial de in cargados a odoo/  Historial IN cargados a Odoo.xlsx       un renglón por ORIGEN (DEV-xx)
 
-Reglas (las mismas del IN, así los 4 cuadran entre sí):
-- Solo OPTIMO. FALLA va a scrap (otro circuito) y AJENO no es nuestro: no figuran en ninguno.
-- "Devuelto" = unidad escaneada en su rack en el paso 2 que cruza con una fila OPTIMO del paso 1 (PD + SKU) y tiene
-  plataforma ML/TN. Es lo que entra al IN, al detalle y a las cantidades netas:
-  suma(01) = suma(02) = filas(04) = filas "Devuelto" de 03.
-- "Pendiente" = unidad OPTIMO del paso 1 que todavía no se guardó en un rack, o que se guardó pero no se puede
-  exportar (sin SKU / sin plataforma): queda para revisar y no entra a Odoo.
-- Valores fijos, encabezados exactos, sin filas vacías ni totales. Fechas y códigos como texto.
+Flujo y estados
+- Disparador: "Confirmar y armar la ruta". Ahí la devolución toma su N° DEV-xx y se generan 1 y 3 con todo en
+  "Pendiente" (las Falla y lo que no es nuestro quedan como "no se ubica": NO entran a la ruta).
+- Cada prenda Óptimo escaneada en su rack pasa a "Devuelto" en 1 y 3, y entra a In-Devol-ubicadas con estado
+  "In-Devol-ubicadas". Se actualiza solo, en segundo plano, en cada escaneo.
+- Al cerrar (última prenda o "Marcar como devuelto"): con lo de In-Devol-ubicadas se arma el IN en "2- in odoo"
+  (origin = DEV-xx), esas filas pasan a "Pasado a 2- in odoo" y la devolución entra a 4 como "Pendiente de carga".
+- 4 se verifica contra Odoo por el campo ORIGEN (stock.picking.origin = DEV-xx): aunque el IN tenga su propio
+  número en Odoo, la referencia cruzada es siempre el origen. Si Odoo tiene la recepción → "Cargado".
 """
 from __future__ import annotations
 
 import io
 import logging
-from collections import OrderedDict
+import threading
 from datetime import date
 
 from openpyxl import Workbook
 from openpyxl.styles import Font
+from sqlalchemy import select
 
 from ..models import Devolucion
 from . import in_odoo
@@ -34,199 +36,377 @@ from . import in_odoo
 log = logging.getLogger("parka.dev_archivos")
 
 PLATAFORMA_NOMBRE = {"ML": "Mercado Libre", "TN": "Tienda Nube"}
+LLEGO = {"MISMO": "Mismo artículo", "DISTINTO": "Artículo distinto", "AJENO": "No es nuestro artículo"}
 
-# clave del Apps Script (CARPETAS_DEV en deposito-drive.gs 2026.10.22-1) → prefijo del archivo, hoja, encabezados
-ARCHIVOS = OrderedDict([
-    ("dev_01_cantidades", ("CANT_DEV", "CANTIDADES NETAS",
-                           ["SKU", "Descripcion_Articulo", "Cantidad_Total_Devuelta"], [34, 40, 22])),
-    ("dev_02_detalle", ("DET_DEV", "DETALLE POR VENTA",
-                        ["Fecha_Devolucion", "Plataforma", "Numero_Venta_Orden", "SKU", "Descripcion", "Cantidad"],
-                        [16, 14, 22, 34, 40, 10])),
-    ("dev_03_historial", ("HIST_DEV", "HISTORIAL RECEPCIONES",
-                          ["Fecha", "Devolucion", "Plataforma", "Numero_Venta_Orden", "SKU", "Estado"],
-                          [12, 12, 14, 22, 34, 11])),
-    ("dev_04_odoo", ("IN_DEV", None, None, None)),   # lo arma in_odoo.excel
-])
-CARPETA_RESPALDO = in_odoo.CARPETA   # si el Apps Script todavía no tiene las subcarpetas: todo a "Plantilla credito odoo"
+# clave que entiende el Apps Script (CARPETAS_DEV en deposito-drive.gs 2026.10.23-1) → nombre literal de la carpeta
+CARPETAS = {
+    "rec_1_recepciones": "1- RECEPCIONES",
+    "rec_2_in_odoo": "2- in odoo",
+    "rec_2_ubicadas": "In-Devol-ubicadas",              # subcarpeta de "2- in odoo"
+    "rec_3_historial": "3- HISTORIAL RECEPCIONES",
+    "rec_4_in_cargados": "4 - historial de in cargados a odoo",
+}
+ARCHIVO_4 = "Historial IN cargados a Odoo.xlsx"
 
+# Estados (texto literal que se ve en los Excel)
+PENDIENTE = "Pendiente"
+DEVUELTO = "Devuelto"
+UBICADA = "In-Devol-ubicadas"
+PASADO_IN = "Pasado a 2- in odoo"
+FALLA_NO_UBICA = "Falla - no se ubica"
+AJENO_NO_UBICA = "No es nuestro - no se ubica"
+SIN_DEVOLVER = "Sin devolver"
+NO_DEVUELTO = "No devuelto"
+IN_PENDIENTE = "PENDIENTE_CARGA"
+IN_CARGADO = "CARGADO"
+IN_TEXTO = {IN_PENDIENTE: "Pendiente de carga", IN_CARGADO: "Cargado"}
 
-def _fecha_dev(d: Devolucion) -> date:
-    """Fecha de la devolución (paso 1); si no está cargada, la del paso 2."""
-    return d.fecha or in_odoo.fecha_paso2(d)
-
-
-def _desc(articulo: str, color: str, talle: str) -> str:
-    return " ".join(x for x in (articulo, color, talle) if x)
-
-
-def nombre(d: Devolucion, clave: str, fecha: date | None = None) -> str:
-    """Los 4 archivos se llaman igual (DEV-01.xlsx), cada uno en su carpeta 01–04."""
-    if clave == "dev_04_odoo" or in_odoo.codigo_dev(d):
-        return in_odoo.nombre_archivo(d, fecha)
-    return f"{ARCHIVOS[clave][0]}_{(fecha or in_odoo.fecha_paso2(d)).isoformat()}_PD-{d.id}.xlsx"
-
-
-def analizar(d: Devolucion) -> tuple[list[dict], list[dict], list[str]]:
-    """(devueltos, pendientes, avisos). Una entrada por unidad."""
-    devueltos, avisos = in_odoo.filas(d)
-    pd = f"PD-{d.id}"
-    exportadas: dict[int, int] = {}
-    for e in devueltos:
-        exportadas[id(e["_item"])] = exportadas.get(id(e["_item"]), 0) + 1
-    pendientes = []
-    for i in d.items:
-        if i.estado != "OPTIMO":
-            continue
-        faltan = max(int(i.cantidad or 0) - exportadas.get(id(i), 0), 0)
-        plat = (i.plataforma or d.plataforma or "").strip().upper()
-        for _ in range(faltan):
-            pendientes.append({"fecha": _fecha_dev(d), "devolucion": pd, "plataforma": plat if plat in in_odoo.PLATAFORMAS else "",
-                               "venta": (i.venta or "").strip(), "sku": (i.sku or "").strip()})
-    return devueltos, pendientes, avisos
+ENC_1 = ["Fecha", "Hora", "Usuario", "N° devolución", "Archivo", "Plataforma", "N° venta / orden", "Código de barras",
+         "SKU", "Artículo", "Color", "Talle", "Cantidad", "Estado de la prenda", "Validación", "Artículo de la venta",
+         "Estado", "Devueltas", "Ubicación", "Hora devuelto"]
+ANCHO_1 = [11, 7, 14, 12, 9, 14, 20, 17, 32, 26, 14, 7, 9, 12, 22, 34, 26, 10, 18, 12]
+ENC_2U = ["Fecha", "Hora", "N° devolución", "Origen", "Plataforma", "N° venta / orden", "Código de barras", "SKU",
+          "Artículo", "Color", "Talle", "Rack", "Cantidad", "Estado"]
+ANCHO_2U = [11, 7, 12, 9, 14, 20, 17, 32, 26, 14, 7, 16, 9, 22]
+ENC_3 = ["Fecha", "Hora", "Artículo", "SKU", "Cantidad", "Origen", "N° devolución", "Estado"]
+ANCHO_3 = [11, 7, 40, 32, 9, 14, 12, 24]
+ENC_4 = ["Origen", "N° devolución", "Plataforma", "Prendas en el IN", "Generado", "Estado", "IN en Odoo",
+         "Cargado (verificado)"]
+ANCHO_4 = [10, 12, 26, 14, 17, 18, 30, 19]
 
 
-def _libro(hoja: str, encabezados: list[str], anchos: list[int], filas: list[list], texto: tuple[str, ...]) -> bytes:
+# ─────────────────────────────── utilidades ───────────────────────────────
+def _plat(i, d: Devolucion) -> str:
+    return (i.plataforma or d.plataforma or "").strip().upper()
+
+
+def _plat_nombre(p: str) -> str:
+    return PLATAFORMA_NOMBRE.get(p, p)
+
+
+def _desc(i) -> str:
+    return " ".join(x for x in (i.articulo, i.color, i.talle) if x)
+
+
+def _hhmm(dt) -> str:
+    return dt.strftime("%H:%M") if dt else ""
+
+
+def _libro(hoja: str, enc: list[str], anchos: list[int], filas: list[list], texto: tuple[str, ...] = ()) -> bytes:
     wb = Workbook()
     ws = wb.active
-    ws.title = hoja
-    ws.append(encabezados)
+    ws.title = hoja[:31]
+    ws.append(enc)
     for c in ws[1]:
         c.font = Font(bold=True)
     for f in filas:
         ws.append(f)
-        for col in texto:   # fechas, n° de venta y códigos como texto (sin perder ceros ni volverse fecha/número)
+        for col in texto:   # fechas, n° de venta y códigos como texto (no pierden ceros ni se vuelven número/fecha)
             c = ws[f"{col}{ws.max_row}"]
             c.number_format = "@"
             if c.value is not None:
                 c.value, c.data_type = str(c.value), "s"
-    for idx, w in enumerate(anchos):
-        ws.column_dimensions[chr(65 + idx)].width = w
+    for n, w in enumerate(anchos):
+        ws.column_dimensions[chr(65 + n)].width = w
     ws.freeze_panes = "A2"
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
 
 
-def _orden_plat(p: str) -> int:
-    return in_odoo.PLATAFORMAS.index(p) if p in in_odoo.PLATAFORMAS else len(in_odoo.PLATAFORMAS)
+# ─────────────────────────────── estados ───────────────────────────────
+def estado_item(d: Devolucion, i) -> str:
+    """Estado de una prenda en los archivos. Cambia solo a medida que se escanea en los racks."""
+    if i.estado == "AJENO":
+        return AJENO_NO_UBICA
+    if i.estado == "FALLA":
+        return FALLA_NO_UBICA
+    n, total = int(i.devuelto_cant or 0), int(i.cantidad or 0)
+    if total and n >= total:
+        return DEVUELTO
+    if d.ruta_estado == "SIN_DEVOLVER":
+        return SIN_DEVOLVER if not n else f"Devuelto parcial ({n} de {total}) · resto sin devolver"
+    if d.ruta_estado == "DEVUELTO":
+        return NO_DEVUELTO if not n else f"Devuelto parcial ({n} de {total}) · resto no devuelto"
+    return PENDIENTE if not n else f"Devuelto parcial ({n} de {total})"
 
 
-def archivos(d: Devolucion, fecha: date | None = None) -> tuple[list[dict], list[str]]:
-    """[{clave, nombre, contenido, filas}] (solo los que tienen filas) y avisos."""
-    devueltos, pendientes, avisos = analizar(d)
-    fdev = _fecha_dev(d)
+def validacion(i) -> str:
+    """¿Llegó el mismo artículo que se vendió o uno distinto?"""
+    if i.estado == "AJENO" or i.llego == "AJENO":
+        return LLEGO["AJENO"]
+    if i.llego == "DISTINTO":
+        return LLEGO["DISTINTO"]
+    return LLEGO["MISMO"]   # "MISMO" o sin marcar (carga manual del mismo artículo)
+
+
+# ─────────────────────────────── 1- RECEPCIONES ───────────────────────────────
+def filas_recepciones(d: Devolucion) -> list[list]:
+    pd, dev = f"PD-{d.id}", in_odoo.codigo_dev(d)
+    fecha = (d.creado_at.date() if d.creado_at else d.fecha) or date.today()
+    usuario = d.usuario.nombre if d.usuario else ""
     out = []
-
-    # 01 — cantidades netas por SKU (sin venta ni cliente)
-    netas: dict[str, list] = {}
-    for e in devueltos:
-        n = netas.setdefault(e["sku"], [e["sku"], _desc(e["articulo"], e["color"], e["talle"]), 0])
-        n[2] += 1
-    f01 = [netas[k] for k in sorted(netas)]
-
-    # 02 — detalle por venta: ML primero, después TN; una fila por venta + SKU
-    det: dict[tuple, list] = {}
-    for e in devueltos:
-        k = (e["plataforma"], e["venta"], e["sku"])
-        r = det.setdefault(k, [fdev.isoformat(), PLATAFORMA_NOMBRE[e["plataforma"]], e["venta"], e["sku"],
-                               _desc(e["articulo"], e["color"], e["talle"]), 0])
-        r[5] += 1
-    f02 = [det[k] for k in sorted(det, key=lambda k: (_orden_plat(k[0]), k[1], k[2]))]
-
-    # 03 — historial: una fila por unidad, cronológico (Devuelto con la fecha del rack, Pendiente con la del paso 1)
-    hist = [((e["fecha"] or fdev), 0, _orden_plat(e["plataforma"]),
-             [(e["fecha"] or fdev).isoformat(), e["devolucion"], PLATAFORMA_NOMBRE[e["plataforma"]], e["venta"],
-              e["sku"], "Devuelto"]) for e in devueltos]
-    hist += [(p["fecha"], 1, _orden_plat(p["plataforma"]),
-              [p["fecha"].isoformat(), p["devolucion"], PLATAFORMA_NOMBRE.get(p["plataforma"], ""), p["venta"],
-               p["sku"], "Pendiente"]) for p in pendientes]
-    f03 = [h[3] for h in sorted(hist, key=lambda h: h[:3])]
-
-    for clave, filas_, texto in (("dev_01_cantidades", f01, ()), ("dev_02_detalle", f02, ("A", "C")),
-                                 ("dev_03_historial", f03, ("A", "D"))):
-        if filas_:
-            _p, hoja, enc, anchos = ARCHIVOS[clave]
-            out.append({"clave": clave, "nombre": nombre(d, clave, fecha), "filas": len(filas_),
-                        "contenido": _libro(hoja, enc, anchos, filas_, texto)})
-
-    # 04 — IN de Odoo
-    contenido, n, _av = in_odoo.excel(d, fecha)
-    if contenido is not None:
-        out.append({"clave": "dev_04_odoo", "nombre": in_odoo.nombre_archivo(d, fecha), "filas": n, "contenido": contenido})
-    return out, avisos
+    for i in d.items:
+        out.append([fecha.isoformat(), _hhmm(d.creado_at), usuario, pd, dev, _plat_nombre(_plat(i, d)), i.venta or "",
+                    i.codigo_barras or "", i.sku or "", i.articulo or "", i.color or "", i.talle or "",
+                    int(i.cantidad or 0), "NO ES NUESTRO" if i.estado == "AJENO" else i.estado, validacion(i),
+                    i.reemplaza or ("" if i.llego != "DISTINTO" else "—"), estado_item(d, i),
+                    int(i.devuelto_cant or 0) if i.estado == "OPTIMO" else "", i.ubicacion or "",
+                    _hhmm(i.devuelto_at) if i.estado == "OPTIMO" else ""])
+    return out
 
 
-def _subir(db, clave: str, nombre_: str, contenido: bytes) -> tuple[dict, bool]:
-    """Sube a la subcarpeta; si el Apps Script publicado todavía no la conoce, a "Plantilla credito odoo"."""
-    from . import re_drive
+def excel_recepciones(d: Devolucion) -> bytes:
+    return _libro("RECEPCIONES", ENC_1, ANCHO_1, filas_recepciones(d), texto=("A", "G", "H"))
+
+
+# ─────────────────────────────── 2- in odoo / In-Devol-ubicadas ───────────────────────────────
+def filas_ubicadas(d: Devolucion) -> list[list]:
+    """Una fila por prenda y rack donde quedó ubicada (Óptimo). Es la fuente del IN de "2- in odoo"."""
+    pd, dev = f"PD-{d.id}", in_odoo.codigo_dev(d)
+    from .ruta_devolucion import guardados
+    estado = PASADO_IN if d.in_estado else UBICADA
+    out = []
+    for i in d.items:
+        if i.estado != "OPTIMO":
+            continue
+        for rack, n in guardados(i).items():
+            f = i.devuelto_at
+            out.append([f.date().isoformat() if f else "", _hhmm(f), pd, dev, _plat_nombre(_plat(i, d)), i.venta or "",
+                        i.codigo_barras or "", i.sku or "", i.articulo or "", i.color or "", i.talle or "", rack, int(n),
+                        estado])
+    return out
+
+
+def excel_ubicadas(d: Devolucion) -> bytes | None:
+    filas = filas_ubicadas(d)
+    return _libro("IN-DEVOL-UBICADAS", ENC_2U, ANCHO_2U, filas, texto=("A", "F", "G")) if filas else None
+
+
+# ─────────────────────────────── 3- HISTORIAL RECEPCIONES (diario) ───────────────────────────────
+def nombre_historial(fecha: date) -> str:
+    return f"{fecha.isoformat()} - Historial Recepciones.xlsx"
+
+
+def devoluciones_del_dia(db, fecha: date) -> list[Devolucion]:
+    return list(db.scalars(select(Devolucion).where(Devolucion.fecha == fecha).order_by(Devolucion.creado_at)).all())
+
+
+def filas_historial(devs: list[Devolucion]) -> list[list]:
+    out = []
+    for d in devs:
+        for i in d.items:
+            out.append([(d.creado_at.date() if d.creado_at else d.fecha).isoformat(), _hhmm(d.creado_at),
+                        _desc(i) or "(sin descripción)", i.sku or "", int(i.cantidad or 0), _plat_nombre(_plat(i, d)),
+                        f"PD-{d.id}", estado_item(d, i)])
+    return out
+
+
+def excel_historial(db, fecha: date) -> bytes:
+    return _libro("HISTORIAL RECEPCIONES", ENC_3, ANCHO_3, filas_historial(devoluciones_del_dia(db, fecha)),
+                  texto=("A",))
+
+
+# ─────────────────────────────── 4 - historial de in cargados a odoo ───────────────────────────────
+def filas_in_cargados(db) -> list[list]:
+    devs = db.scalars(select(Devolucion).where(Devolucion.in_estado != "").order_by(Devolucion.numero_dev)).all()
+    out = []
+    for d in devs:
+        escaneos, _ = in_odoo.filas(d)
+        plats = sorted({e["plataforma"] for e in escaneos}, key=lambda p: in_odoo.PLATAFORMAS.index(p))
+        out.append([in_odoo.codigo_dev(d), f"PD-{d.id}", " + ".join(_plat_nombre(p) for p in plats), len(escaneos),
+                    d.in_generado_at.strftime("%Y-%m-%d %H:%M") if d.in_generado_at else "",
+                    IN_TEXTO.get(d.in_estado, d.in_estado), d.in_odoo_ref or "",
+                    d.in_cargado_at.strftime("%Y-%m-%d %H:%M") if d.in_cargado_at else ""])
+    return out
+
+
+def excel_in_cargados(db) -> bytes:
+    return _libro("HISTORIAL IN ODOO", ENC_4, ANCHO_4, filas_in_cargados(db), texto=("E", "H"))
+
+
+def verificar_in_odoo(db) -> dict:
+    """Busca en Odoo cada IN "Pendiente de carga" por su ORIGEN (DEV-xx). Hay un IN por plataforma (bloque ML y
+    bloque TN), así que queda "Cargado" cuando Odoo tiene tantas recepciones con ese origen como bloques tiene.
+    Devuelve {revisados, cargados: [DEV-xx], error?}."""
+    from ..db import ahora
+    from . import odoo
+    pend = db.scalars(select(Devolucion).where(Devolucion.in_estado == IN_PENDIENTE)).all()
+    r = {"revisados": len(pend), "cargados": []}
+    if not pend or not odoo.configurado(db):
+        return r
+    por_origen = {in_odoo.codigo_dev(d): d for d in pend if in_odoo.codigo_dev(d)}
     try:
-        return re_drive.guardar_deposito_archivo(db, clave, nombre_, contenido), False
-    except re_drive.REDriveError as e:
-        if "inválida" not in str(e) and "invalida" not in str(e):
-            raise
-        log.warning("Apps Script sin la carpeta %s: %s va a %s", clave, nombre_, CARPETA_RESPALDO)
-        # todos juntos en una carpeta: con prefijo para que no se pisen (DEV-01.xlsx en las 4)
-        return re_drive.guardar_deposito_archivo(db, CARPETA_RESPALDO, f"{clave[4:6]}_{nombre_}", contenido), True
+        recs = odoo.cliente(db, timeout=30).call(
+            "stock.picking", "search_read", [["origin", "in", list(por_origen)], ["state", "!=", "cancel"]],
+            fields=["name", "origin", "state"])
+    except Exception as e:  # noqa: BLE001 — se reintenta en la próxima vuelta
+        log.warning("No se pudo verificar los IN en Odoo: %s", e)
+        r["error"] = str(e)[:300]
+        return r
+    encontrados: dict[str, list[str]] = {}
+    for x in recs:
+        encontrados.setdefault((x.get("origin") or "").strip(), []).append(x.get("name") or "")
+    for origen, d in por_origen.items():
+        nombres = encontrados.get(origen, [])
+        if not nombres:
+            continue
+        bloques = len({e["plataforma"] for e in in_odoo.filas(d)[0]}) or 1
+        d.in_odoo_ref = ", ".join(sorted(nombres))[:160]
+        if len(nombres) >= bloques:
+            d.in_estado, d.in_cargado_at = IN_CARGADO, ahora()
+            r["cargados"].append(origen)
+    db.commit()
+    return r
+
+
+# ─────────────────────────────── subida a Drive ───────────────────────────────
+def _subir(db, clave: str, nombre: str, contenido: bytes) -> dict:
+    from . import re_drive
+    return re_drive.guardar_deposito_archivo(db, clave, nombre, contenido)
+
+
+def sincronizar_estado(db, d: Devolucion) -> dict:
+    """Sube lo que cambia en cada paso: 1- RECEPCIONES, In-Devol-ubicadas y el 3- HISTORIAL del día.
+    Nunca toca la carpeta de devoluciones."""
+    in_odoo.asegurar_numero(db, d)
+    nombre = in_odoo.nombre_archivo(d)
+    out = {"ok": True, "archivos": [], "errores": []}
+    tareas = [("rec_1_recepciones", nombre, excel_recepciones(d))]
+    ub = excel_ubicadas(d)
+    if ub is not None:
+        tareas.append(("rec_2_ubicadas", nombre, ub))
+    fecha = d.fecha or (d.creado_at.date() if d.creado_at else date.today())
+    tareas.append(("rec_3_historial", nombre_historial(fecha), excel_historial(db, fecha)))
+    for clave, nom, contenido in tareas:
+        try:
+            res = _subir(db, clave, nom, contenido)
+            out["archivos"].append({"clave": clave, "carpeta": CARPETAS[clave], "nombre": nom, "url": res.get("url", "")})
+        except Exception as e:  # noqa: BLE001 — se reintenta en el próximo cambio o con "☁ Archivos a Drive"
+            log.warning("PD-%s: no se pudo subir %s/%s: %s", d.id, CARPETAS[clave], nom, e)
+            out["errores"].append(f"{CARPETAS[clave]}/{nom}: {e}")
+    out["ok"] = not out["errores"]
+    return out
+
+
+def subir_historial_in(db) -> dict:
+    return _subir(db, "rec_4_in_cargados", ARCHIVO_4, excel_in_cargados(db))
 
 
 def generar_y_subir(db, d: Devolucion, usuario=None) -> dict:
-    """Arma los 4 archivos y los sube cada uno a su carpeta. Nunca corta el cierre de la devolución.
-    Devuelve {ok, nombre (el IN), filas (prendas del IN), avisos, url (del IN), archivos: [{clave, nombre, filas, url}]
-    | error | motivo}. Las claves nombre/filas/url/motivo se mantienen como antes para la pantalla."""
+    """Cierre de la devolución (o "☁ Archivos a Drive"): IN en "2- in odoo" a partir de In-Devol-ubicadas, alta en
+    "4 - historial…" como Pendiente de carga y actualización de 1, In-Devol-ubicadas y 3.
+    Devuelve {ok, nombre (el IN), filas, avisos, url, archivos: [...] | error | motivo} — mismas claves que antes."""
     from ..actividad import registrar
+    from ..db import ahora
+    r = {"ok": True, "nombre": "", "filas": 0, "avisos": [], "url": "", "archivos": []}
     try:
         in_odoo.asegurar_numero(db, d)
-        lista, avisos = archivos(d)
+        contenido, n, avisos = (None, 0, [])
+        if d.ruta_estado == "DEVUELTO":
+            contenido, n, avisos = in_odoo.excel(d)
+        r["avisos"] = list(avisos)
     except Exception as e:  # noqa: BLE001
-        log.exception("No se pudieron armar los archivos de PD-%s", d.id)
-        return {"ok": False, "nombre": "", "filas": 0, "avisos": [], "archivos": [],
-                "error": f"No se pudieron armar los archivos de la devolución: {e}"[:300]}
-    r = {"ok": True, "nombre": "", "filas": 0, "avisos": list(avisos), "url": "", "archivos": []}
-    if not lista:
-        r["motivo"] = "No hay prendas OPTIMO en la devolución: no se generan archivos"
-        return r
-    in_ = next((a for a in lista if a["clave"] == "dev_04_odoo"), None)
-    if in_:
-        r.update(nombre=in_["nombre"], filas=in_["filas"])
-    else:
-        r["motivo"] = "No hay prendas OPTIMO guardadas en rack: no se genera IN (sí el historial con lo pendiente)"
-    errores, respaldo = [], False
-    for a in lista:
+        log.exception("No se pudo armar el IN de PD-%s", d.id)
+        return dict(r, ok=False, error=f"No se pudo armar el IN de la devolución: {e}"[:300])
+    errores = []
+    if contenido is not None:
+        nombre = in_odoo.nombre_archivo(d)
+        if not d.in_estado:   # entra a 4 la primera vez que se genera; si ya estaba cargado no se pisa
+            d.in_estado, d.in_generado_at = IN_PENDIENTE, ahora()
+            db.commit()
         try:
-            res, fb = _subir(db, a["clave"], a["nombre"], a["contenido"])
-            respaldo |= fb
-            r["archivos"].append({"clave": a["clave"], "nombre": a["nombre"], "filas": a["filas"], "url": res.get("url", "")})
-            if a["clave"] == "dev_04_odoo":
-                r["url"] = res.get("url", "")
-        except Exception as e:  # noqa: BLE001 — se pueden bajar desde la app y reintentar
-            log.warning("PD-%s: no se pudo subir %s: %s", d.id, a["nombre"], e)
-            errores.append(f"{a['nombre']}: {e}")
-    if respaldo:
-        r["avisos"].append("El Apps Script de Drive todavía no tiene las carpetas 01–04: los archivos quedaron en "
-                           "\"Plantilla credito odoo\". Publicá la versión 2026.10.22-1 del script.")
+            res = _subir(db, "rec_2_in_odoo", nombre, contenido)
+            r.update(nombre=nombre, filas=n, url=res.get("url", ""))
+            r["archivos"].append({"clave": "rec_2_in_odoo", "carpeta": CARPETAS["rec_2_in_odoo"], "nombre": nombre,
+                                  "filas": n, "url": r["url"]})
+        except Exception as e:  # noqa: BLE001
+            errores.append(f"{CARPETAS['rec_2_in_odoo']}/{nombre}: {e}")
+            r.update(nombre=nombre, filas=n)
+    elif d.ruta_estado == "DEVUELTO":
+        r["motivo"] = "No hay prendas OPTIMO ubicadas en rack: no se genera IN (sí 1- RECEPCIONES y el historial)"
+    else:
+        r["motivo"] = "Devolución sin ubicar: no se genera IN (sí 1- RECEPCIONES y el historial)"
+    est = sincronizar_estado(db, d)
+    r["archivos"] += est["archivos"]
+    errores += est["errores"]
+    if d.in_estado:
+        try:
+            res = subir_historial_in(db)
+            r["archivos"].append({"clave": "rec_4_in_cargados", "carpeta": CARPETAS["rec_4_in_cargados"],
+                                  "nombre": ARCHIVO_4, "url": res.get("url", "")})
+        except Exception as e:  # noqa: BLE001
+            errores.append(f"{CARPETAS['rec_4_in_cargados']}/{ARCHIVO_4}: {e}")
     if errores:
         r.update(ok=False, error=("No se pudo subir a Drive: " + " · ".join(errores))[:300])
     if r["archivos"]:
         try:
-            registrar(db, usuario, "drive_deposito",
-                      f"PD-{d.id}: {len(r['archivos'])} archivos de devolución ecommerce"
+            registrar(db, usuario, "drive_deposito", f"PD-{d.id} ({in_odoo.codigo_dev(d)}): {len(r['archivos'])} archivos"
                       + (f" · IN {r['filas']} prendas" if r["filas"] else ""), "devoluciones")
         except Exception:  # noqa: BLE001
             log.warning("No se pudo registrar la actividad de PD-%s", d.id)
     return r
 
 
-def zip_(d: Devolucion) -> tuple[bytes | None, str]:
-    """Los archivos de la devolución en un .zip con sus 4 carpetas (para bajarlos desde la app)."""
+def verificar_y_subir(db) -> dict:
+    """Job periódico: verifica los IN contra Odoo por ORIGEN y, si alguno pasó a Cargado, re-sube el archivo 4."""
+    r = verificar_in_odoo(db)
+    if r["cargados"]:
+        try:
+            subir_historial_in(db)
+        except Exception as e:  # noqa: BLE001
+            r["error"] = f"No se pudo subir {ARCHIVO_4}: {e}"[:300]
+    return r
+
+
+# ─────────────── en segundo plano: cada cambio de estado se refleja solo en los archivos ───────────────
+_lock = threading.Lock()
+_cola = {"corriendo": False, "ids": set()}
+
+
+def programar(devolucion_id: int) -> None:
+    """Encola la actualización de 1 / In-Devol-ubicadas / 3 de una devolución (no frena el escaneo)."""
+    with _lock:
+        _cola["ids"].add(devolucion_id)
+        if _cola["corriendo"]:
+            return
+        _cola["corriendo"] = True
+    threading.Thread(target=_procesar, daemon=True).start()
+
+
+def _procesar() -> None:
+    from ..db import SessionLocal
+    from . import re_drive
+    while True:
+        with _lock:
+            if not _cola["ids"]:
+                _cola["corriendo"] = False
+                return
+            did = _cola["ids"].pop()
+        try:
+            with SessionLocal() as db:
+                d = db.get(Devolucion, did)
+                if d and re_drive.configurado(db):
+                    sincronizar_estado(db, d)
+        except Exception:  # noqa: BLE001
+            log.exception("No se pudieron actualizar los archivos de PD-%s", did)
+
+
+def zip_(d: Devolucion, db=None) -> tuple[bytes | None, str]:
+    """Los archivos de la devolución en un .zip con la misma estructura de carpetas (para bajarlos desde la app)."""
     import zipfile
-    lista, _ = archivos(d)
-    if not lista:
-        return None, ""
-    carpetas = {"dev_01_cantidades": "01_Cantidades_Netas", "dev_02_detalle": "02_Detalle_Por_Venta",
-                "dev_03_historial": "03_Historial_Recepciones", "dev_04_odoo": "04_Carga_Odoo"}
+    nombre = in_odoo.nombre_archivo(d)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        for a in lista:
-            z.writestr(f"{carpetas[a['clave']]}/{a['nombre']}", a["contenido"])
+        z.writestr(f"{CARPETAS['rec_1_recepciones']}/{nombre}", excel_recepciones(d))
+        ub = excel_ubicadas(d)
+        if ub is not None:
+            z.writestr(f"{CARPETAS['rec_2_in_odoo']}/{CARPETAS['rec_2_ubicadas']}/{nombre}", ub)
+        if d.ruta_estado == "DEVUELTO":
+            contenido, _n, _a = in_odoo.excel(d)
+            if contenido is not None:
+                z.writestr(f"{CARPETAS['rec_2_in_odoo']}/{nombre}", contenido)
+        if db is not None and d.fecha:
+            z.writestr(f"{CARPETAS['rec_3_historial']}/{nombre_historial(d.fecha)}", excel_historial(db, d.fecha))
     cod = in_odoo.codigo_dev(d)
-    return buf.getvalue(), (f"{cod}.zip" if cod else f"DEV_{in_odoo.fecha_paso2(d).isoformat()}_PD-{d.id}.zip")
+    return buf.getvalue(), (f"{cod}.zip" if cod else f"DEV_PD-{d.id}.zip")

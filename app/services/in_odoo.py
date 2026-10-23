@@ -1,7 +1,7 @@
 """Excel para el IN de devoluciones en Odoo (paso 2: prendas guardadas en su rack).
 
-Se arma al confirmar la devolución en los racks (última prenda guardada o "Marcar como devuelto") y se sube a
-DEPOSITO PARKA/Plantilla credito odoo/IN_DEV_AAAA-MM-DD_PD-<id>.xlsx. Después se importa en Odoo
+Se arma al confirmar la devolución en los racks (última prenda guardada o "Marcar como devuelto") con lo que quedó
+en "In-Devol-ubicadas" y se sube a DEPOSITO PARKA/Plantilla credito odoo/2- in odoo/DEV-xx.xlsx (dev_archivos.py). Después se importa en Odoo
 (Inventario > Recepciones > Importar registros) y se crea un IN por plataforma.
 
 Reglas (plantilla "Plantilla_IN_Devoluciones_ML_TN_ODOO"):
@@ -40,7 +40,7 @@ CONTACTO = "Devoluciones Ecommerce"  # mismo contacto para ML y TN (no "Devoluci
 ORIGEN = "Partners/Customers"
 DESTINO = "WH/Existencias"
 PLATAFORMAS = ("ML", "TN")   # orden de los bloques
-CARPETA = "credito_odoo"     # DEPOSITO PARKA/Plantilla credito odoo (Apps Script 2026.10.21-2)
+CARPETA = "rec_2_in_odoo"    # Plantilla credito odoo/2- in odoo (Apps Script 2026.10.23-1)
 
 
 def _guardados(i) -> dict[str, int]:

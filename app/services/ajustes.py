@@ -11,7 +11,10 @@ from ..models import Ajuste
 CLAVES = {
     # Croquis del depósito / ruta de devolución
     "mapa_inicio": ("MAPA_INICIO", "P1", False),          # P1 = Persiana 1 · P2 = Persiana 2
-    "mapa_rack_fallas": ("MAPA_RACK_FALLAS", "", False),  # código de la ubicación donde van las Falla
+    "mapa_rack_fallas": ("MAPA_RACK_FALLAS", "", False),  # (ya no se usa en la ruta: las Falla NO se ubican)
+    # Apps Script viejo "Devoluciones ML" (Crédito y Reingreso). 0 = apagado: las devoluciones ya no van a la
+    # carpeta de devoluciones; todo queda en 1- RECEPCIONES … 4 - historial de in cargados a odoo.
+    "devol_credito_reingreso": ("DEVOL_CREDITO_REINGRESO", "0", False),
     "parkahub_url": ("PARKAHUB_URL", "https://parkahub.pages.dev", False),
     "parkahub_client_id": ("PARKAHUB_CLIENT_ID", "", True),
     "parkahub_client_secret": ("PARKAHUB_CLIENT_SECRET", "", True),
