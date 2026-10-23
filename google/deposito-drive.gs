@@ -1,19 +1,22 @@
 /**
- * PARKA Depósito — Backend Drive (Apps Script)  ·  versión 2026.10.22-1
+ * PARKA Depósito — Backend Drive (Apps Script)  ·  versión 2026.10.23-1
  * (antes "Recolección Ecommerce — Backend Drive": este archivo lo reemplaza completo)
  *
  * Solo se ocupa de Drive. Toda la lógica y los datos están en PARKA Depósito (Python), que arma los Excel.
  *
  *   DEPOSITO PARKA/
  *     Despachos/      2026-10-16 - Despachos.xlsx     (Flex + Colecta + Tienda Nube del día)
- *     Devoluciones/   2026-10-16 - Devoluciones.xlsx  (lo que se devolvió en el día)
  *     Conteos/        2026-10-16 - Conteos.xlsx       (lo que se contó en el día)
  *     Cierre/         2026-10-16 - Cierre.xlsx        (todo lo realizado y despachado en el día)
- *     Plantilla credito odoo/   archivos de cada devolución ecommerce (ML + TN), uno por carpeta:
- *       01_Cantidades_Netas/      CANT_DEV_2026-10-22_PD-15.xlsx
- *       02_Detalle_Por_Venta/     DET_DEV_2026-10-22_PD-15.xlsx
- *       03_Historial_Recepciones/ HIST_DEV_2026-10-22_PD-15.xlsx
- *       04_Carga_Odoo/            IN_DEV_2026-10-22_PD-15.xlsx   (IN para importar en Odoo)
+ *     Plantilla credito odoo/   devoluciones ecommerce (ML + TN):
+ *       1- RECEPCIONES/                       DEV-01.xlsx  todo lo que llegó (Óptimo y Falla), usuario, venta, validación
+ *       2- in odoo/                           DEV-01.xlsx  IN para "LA CARGA ODOO" (N° devolución + plataforma)
+ *         In-Devol-ubicadas/                  DEV-01.xlsx  prendas ya ubicadas en rack (de acá sale el IN)
+ *       3- HISTORIAL RECEPCIONES/             2026-10-23 - Historial Recepciones.xlsx  (log diario)
+ *       4 - historial de in cargados a odoo/  Historial IN cargados a Odoo.xlsx  (por ORIGEN: pendiente de carga / cargado)
+ *
+ * La carpeta "Devoluciones" YA NO SE USA (desde 2026.10.23-1): el script no crea ni guarda nada ahí. Si existe en
+ * Drive queda como está (con lo viejo); se puede archivar a mano.
  *     Recolección Ecommerce/ 2026-10-16/ …            (archivos de ventas que sube el equipo; ver ordenarCarpetas)
  *
  * Cada vez que la app vuelve a mandar un día, el archivo de esa fecha se REEMPLAZA (nunca quedan duplicados).
@@ -24,7 +27,7 @@
  * Después: Implementar → Administrar implementaciones → editar → Versión nueva (la URL /exec no cambia).
  */
 
-var VERSION = '2026.10.22-1';
+var VERSION = '2026.10.23-1';
 
 var CONFIG = {
   NOMBRE_DEPOSITO: 'DEPOSITO PARKA',
@@ -37,7 +40,6 @@ var CONFIG = {
 /** Subcarpetas de DEPOSITO PARKA: clave que manda la app → nombre de la carpeta y del archivo. */
 var SECCIONES = {
   despachos:    'Despachos',
-  devoluciones: 'Devoluciones',
   conteos:      'Conteos',
   cierre:       'Cierre'
 };
@@ -47,12 +49,16 @@ var CARPETAS_EXTRA = {
   credito_odoo: 'Plantilla credito odoo'   // devoluciones ecommerce (y respaldo si falta una subcarpeta)
 };
 
-/** Subcarpetas de "Plantilla credito odoo": los 4 archivos de cada devolución ecommerce. */
+/**
+ * Carpetas de devoluciones ecommerce: clave que manda la app → [nombre literal, carpeta padre].
+ * El orden importa: cada padre aparece antes que sus hijas.
+ */
 var CARPETAS_DEV = {
-  dev_01_cantidades: '01_Cantidades_Netas',
-  dev_02_detalle:    '02_Detalle_Por_Venta',
-  dev_03_historial:  '03_Historial_Recepciones',
-  dev_04_odoo:       '04_Carga_Odoo'
+  rec_1_recepciones: ['1- RECEPCIONES', 'credito_odoo'],
+  rec_2_in_odoo:     ['2- in odoo', 'credito_odoo'],
+  rec_2_ubicadas:    ['In-Devol-ubicadas', 'rec_2_in_odoo'],
+  rec_3_historial:   ['3- HISTORIAL RECEPCIONES', 'credito_odoo'],
+  rec_4_in_cargados: ['4 - historial de in cargados a odoo', 'credito_odoo']
 };
 
 var MIME_SHEET = 'application/vnd.google-apps.spreadsheet';
@@ -129,7 +135,7 @@ function carpetaDeposito_() {
   return carpetaGuardada_('DEPOSITO_ID', CONFIG.NOMBRE_DEPOSITO, DriveApp.getRootFolder());
 }
 
-/** Subcarpeta de DEPOSITO PARKA (despachos | devoluciones | conteos | cierre). */
+/** Subcarpeta de DEPOSITO PARKA (despachos | conteos | cierre). "devoluciones" ya no existe. */
 function carpetaSeccion_(seccion) {
   var nombre = SECCIONES[seccion];
   if (!nombre) throw new Error('Sección inválida: ' + seccion + ' (usar ' + Object.keys(SECCIONES).join(', ') + ')');
@@ -139,7 +145,8 @@ function carpetaSeccion_(seccion) {
 /** Carpeta extra (CARPETAS_EXTRA) o subcarpeta de sección de DEPOSITO PARKA. */
 function carpetaExtraOSeccion_(clave) {
   if (CARPETAS_DEV[clave]) {
-    return carpetaGuardada_('CARPETA_' + clave.toUpperCase() + '_ID', CARPETAS_DEV[clave], carpetaExtraOSeccion_('credito_odoo'));
+    var def = CARPETAS_DEV[clave];
+    return carpetaGuardada_('CARPETA_' + clave.toUpperCase() + '_ID', def[0], carpetaExtraOSeccion_(def[1]));
   }
   if (CARPETAS_EXTRA[clave]) {
     return carpetaGuardada_('CARPETA_' + clave.toUpperCase() + '_ID', CARPETAS_EXTRA[clave], carpetaDeposito_());
@@ -288,7 +295,7 @@ function nombreDelDia_(seccion, fecha) {
 /**
  * DEPOSITO PARKA: guarda los archivos del día.
  *   body.fecha    = 'yyyy-MM-dd'
- *   body.archivos = [{seccion: 'despachos'|'devoluciones'|'conteos'|'cierre', base64, mime?}, …]
+ *   body.archivos = [{seccion: 'despachos'|'conteos'|'cierre', base64, mime?}, …]
  * Devuelve {fecha, archivos: [{seccion, id, nombre, url}], carpeta}.
  */
 function guardarDeposito_(body) {
@@ -308,8 +315,8 @@ function guardarDeposito_(body) {
 
 /**
  * DEPOSITO PARKA: guarda UN archivo con nombre propio en la carpeta de una sección (reemplaza el del mismo nombre).
- * body.seccion = 'devoluciones' | …, body.nombre = 'IN_DEV_2026-10-21_PD-14.xlsx', body.base64, body.mime?
- * Lo usa el IN de devoluciones para Odoo (se arma al confirmar la devolución en los racks).
+ * body.seccion = 'rec_1_recepciones' | 'rec_2_in_odoo' | 'rec_2_ubicadas' | 'rec_3_historial' | 'rec_4_in_cargados' | …,
+ * body.nombre = 'DEV-01.xlsx', body.base64, body.mime?
  * Devuelve {seccion, id, nombre, url}.
  */
 function guardarDepositoArchivo_(body) {
