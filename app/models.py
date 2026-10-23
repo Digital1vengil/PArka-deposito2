@@ -210,6 +210,13 @@ class Devolucion(Base):
     ruta_estado: Mapped[str] = mapped_column(String(14), default="")
     # N° correlativo de los archivos de devolución ecommerce: DEV-01, DEV-02… (0 = todavía sin archivos)
     numero_dev: Mapped[int] = mapped_column(Integer, default=0)
+    # Carpeta "4 - historial de in cargados a odoo": el IN se identifica SIEMPRE por su origen (DEV-xx), no por el
+    # número que le pone Odoo. "" = todavía sin IN · PENDIENTE_CARGA = IN generado en "2- in odoo" · CARGADO = Odoo
+    # ya tiene una recepción con ese origen.
+    in_estado: Mapped[str] = mapped_column(String(16), default="")
+    in_odoo_ref: Mapped[str] = mapped_column(String(160), default="")   # nombre(s) del IN en Odoo (solo informativo)
+    in_generado_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    in_cargado_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     usuario: Mapped[Optional[Usuario]] = relationship()
     items: Mapped[list["DevolucionItem"]] = relationship(back_populates="devolucion", cascade="all, delete-orphan")

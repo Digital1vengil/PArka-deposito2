@@ -71,7 +71,7 @@ def _iniciar_scheduler():
         sch.add_job(job_google, "interval", minutes=2, id="google")
 
     # 2b) DEPOSITO PARKA en Drive: cada 15 min se reemplazan los Excel del día que cambiaron
-    #     (Despachos / Devoluciones / Conteos / Cierre). Pasada la medianoche se cierra también el día anterior.
+    #     (Despachos / Conteos / Cierre; la carpeta Devoluciones ya no se usa). Pasada la medianoche se cierra también el día anterior.
     def job_deposito_drive():
         from .services import deposito_drive
         db = SessionLocal()
@@ -89,6 +89,22 @@ def _iniciar_scheduler():
         finally:
             db.close()
     sch.add_job(job_deposito_drive, "interval", minutes=15, id="deposito_drive")
+
+    # 2b') "4 - historial de in cargados a odoo": cada 15 min busca en Odoo los IN "Pendiente de carga" por su
+    #      ORIGEN (DEV-xx) y, si aparecieron, los pasa a "Cargado" y re-sube el archivo.
+    def job_in_cargados():
+        from .services import dev_archivos, re_drive
+        db = SessionLocal()
+        try:
+            if re_drive.configurado(db):
+                r = dev_archivos.verificar_y_subir(db)
+                if r["cargados"]:
+                    log.info("IN cargados en Odoo: %s", r["cargados"])
+        except Exception as e:  # noqa: BLE001
+            log.warning("No se pudo verificar los IN en Odoo: %s", e)
+        finally:
+            db.close()
+    sch.add_job(job_in_cargados, "interval", minutes=15, id="in_cargados")
 
     # 2c) Mail del cierre a gerencia (por defecto lunes a viernes 17:00) con el Excel del Cierre adjunto.
     #     Días y hora se leen al arrancar (Conexiones → cierre_mail_dias / cierre_mail_hora).
